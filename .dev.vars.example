@@ -1,0 +1,5 @@
+# Copy this file to .dev.vars for local Cloudflare development.
+# Never commit the real AppSecret.
+WECHAT_APP_ID=
+WECHAT_APP_SECRET=
+WECHAT_REDIRECT_URI=https://your-approved-domain.example/api/auth/wechat/callback
