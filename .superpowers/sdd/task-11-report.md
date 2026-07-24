@@ -15,9 +15,8 @@
 - Updated the README for the Supabase-only local workflow, open registration,
   one-time recovery codes, local drafts/offline behavior, and excluded
   invite/admin/legacy-import scope.
-- Excluded the retained `examples/d1` starter example from repository typecheck.
-  It is outside formal runtime paths and was not in the authorized removal list;
-  it imports the deleted local `db/` module.
+- Removed the obsolete tracked `examples/d1` starter example and restored
+  repository typechecking across all tracked TypeScript sources.
 
 ## TDD
 
@@ -43,7 +42,23 @@
 - Restored the generated tracked `tsconfig.tsbuildinfo`; ignored generated
   folders were left untouched.
 
+## Review Follow-Up
+
+- Strengthened the repository guard to parse the exact Sites identity, reject
+  every tracked obsolete backend path and the Drizzle packaging branch, and
+  preserve positive vinext, Sites, Cloudflare, integration-binding, asset, and
+  image-optimization contracts.
+- RED 1: the rendered guard reported both tracked `examples/d1` files.
+- RED 2: after deleting those files and restoring full TypeScript coverage, the
+  rendered guard reported the remaining Drizzle branch in the Sites helper.
+- GREEN: `npm run test:rendered` passed all 5 tests after the helper cleanup.
+- `npm run typecheck` and `npm run build` passed with all tracked TypeScript
+  sources covered.
+- The built `dist/.openai/hosting.json` exactly matched the configured Sites
+  project identity, and no `dist/.openai/drizzle` payload was produced.
+
 ## Concerns
 
+- The prior retained-example/typecheck-exclusion concern is resolved.
 - `npm uninstall` reported 14 dependency audit advisories (2 low, 12 high).
   They were not changed because they are outside this removal task.

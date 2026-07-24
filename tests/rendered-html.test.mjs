@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("guards the cloud journal page and installs one query provider", async () => {
@@ -18,19 +18,53 @@ test("guards the cloud journal page and installs one query provider", async () =
   assert.match(providers, /staleTime:\s*30_000/);
 });
 
-test("uses Supabase instead of local profiles, WeChat, D1, or R2", async () => {
-  const [packageJson, viteConfig, worker, home] = await Promise.all([
+test("uses only Supabase formal runtime paths while preserving Sites and image bindings", async () => {
+  const obsoletePaths = [
+    "app/api/auth/wechat",
+    "app/attention-app.tsx",
+    "app/wechat-auth.ts",
+    "db",
+    "drizzle",
+    "drizzle.config.ts",
+    "examples/d1",
+  ];
+  const [packageJsonText, hostingText, viteConfig, worker, sitesPlugin] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
     readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/(app)/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../build/sites-vite-plugin.ts", import.meta.url), "utf8"),
   ]);
+  const packageJson = JSON.parse(packageJsonText);
+  const hosting = JSON.parse(hostingText);
 
-  assert.match(packageJson, /@supabase\/ssr/);
-  assert.doesNotMatch(packageJson, /drizzle/);
+  assert.deepEqual(hosting, {
+    project_id: "appgprj_6a61eeacc7e481919834e1f4c6bf758d",
+  });
+  assert.ok(packageJson.dependencies["@supabase/ssr"]);
+  assert.equal(packageJson.dependencies["drizzle-orm"], undefined);
+  assert.equal(packageJson.devDependencies["drizzle-kit"], undefined);
+  for (const path of obsoletePaths) {
+    await assert.rejects(access(new URL(`../${path}`, import.meta.url)), {
+      code: "ENOENT",
+    });
+  }
+
   assert.doesNotMatch(viteConfig, /d1_databases|r2_buckets/);
   assert.doesNotMatch(worker, /D1Database|R2Bucket/);
-  assert.match(home, /CheckInWorkspace/);
+  assert.doesNotMatch(sitesPlugin, /drizzle|migrations?/i);
+
+  assert.match(viteConfig, /vinext\(\)/);
+  assert.match(viteConfig, /sites\(\)/);
+  assert.match(viteConfig, /cloudflare\(\{/);
+  assert.match(viteConfig, /integrationBindings\(\)/);
+  assert.match(viteConfig, /INTEGRATION_TEST_BINDINGS/);
+  assert.match(viteConfig, /vars:\s*bindings/);
+  assert.match(sitesPlugin, /resolve\(root,\s*"dist",\s*"\.openai"\)/);
+  assert.match(sitesPlugin, /cp\(hostingConfig/);
+  assert.match(worker, /handleImageOptimization/);
+  assert.match(worker, /env\.ASSETS/);
+  assert.match(worker, /env\.IMAGES/);
 });
 
 test("uses typed envelope parsing for check-ins, uploads, and profile updates", async () => {
