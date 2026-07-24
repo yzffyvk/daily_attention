@@ -14,16 +14,28 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+function metadataOrigin(requestHeaders: Headers) {
+  const requestedHost = (
+    requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? ""
+  ).split(",")[0]?.trim();
+  const forwardedProtocol = requestHeaders.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
+  const protocol = forwardedProtocol === "http" || forwardedProtocol === "https"
+    ? forwardedProtocol
+    : requestedHost?.startsWith("localhost") || requestedHost?.startsWith("127.0.0.1")
+      ? "http"
+      : "https";
+
+  try {
+    return new URL(`${protocol}://${requestedHost}`);
+  } catch {
+    return new URL("http://localhost:3200");
+  }
+}
+
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
-  const host =
-    requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");
-  const protocol =
-    requestHeaders.get("x-forwarded-proto") ??
-    (host?.startsWith("localhost") ? "http" : "https");
-  const metadataBase = new URL(
-    host ? `${protocol}://${host}` : "http://localhost:3000",
-  );
+  const metadataBase = metadataOrigin(requestHeaders);
+  const ogImage = new URL("/og.png", metadataBase).toString();
   const description = "Attention is all you need~";
 
   return {
@@ -37,7 +49,7 @@ export async function generateMetadata(): Promise<Metadata> {
     openGraph: {
       title: "今天你attention了吗？",
       description,
-      images: [{ url: "/og-attention.png", width: 1730, height: 909 }],
+      images: [{ url: ogImage, width: 1731, height: 909 }],
       type: "website",
       locale: "zh_CN",
     },
@@ -45,7 +57,7 @@ export async function generateMetadata(): Promise<Metadata> {
       card: "summary_large_image",
       title: "今天你attention了吗？",
       description,
-      images: ["/og-attention.png"],
+      images: [ogImage],
     },
   };
 }

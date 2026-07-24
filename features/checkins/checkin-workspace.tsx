@@ -415,6 +415,8 @@ export function CheckInWorkspace({
       await cleanupPendingImage(uploadedImagePath, false, operation);
     }
     if (!isCurrentImageOperation(operation)) return false;
+    await deleteAfterCloudSave();
+    if (!isCurrentImageOperation(operation)) return false;
     const activeDate = selectedDateRef.current;
     const latestRecord = queryClient.getQueryData<CheckInRecord | null>(
       checkInKeys.date(activeDate),

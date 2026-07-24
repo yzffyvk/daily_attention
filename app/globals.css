@@ -75,6 +75,13 @@ p {
   padding: 1.25rem;
 }
 
+.client-workspace-loading {
+  width: min(100%, 74rem);
+  margin: 0 auto;
+  padding: 2rem;
+  color: var(--ink-soft);
+}
+
 .page-shell {
   width: min(100%, 74rem);
   margin: 0 auto;

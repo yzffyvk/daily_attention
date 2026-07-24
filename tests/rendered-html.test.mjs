@@ -3,19 +3,35 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("guards the cloud journal page and installs one query provider", async () => {
-  const [page, layout, providers] = await Promise.all([
+  const [page, layout, providers, workspaceClient] = await Promise.all([
     readFile(new URL("../app/(app)/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/providers.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../features/checkins/checkin-workspace-client.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /supabase\.auth\.getClaims\(\)/);
   assert.match(page, /redirect\("\/login"\)/);
-  assert.match(page, /<CheckInWorkspace/);
+  assert.match(page, /<CheckInWorkspaceClient/);
   assert.match(page, /initialProfile/);
   assert.match(layout, /<Providers>\{children\}<\/Providers>/);
   assert.match(providers, /new QueryClient/);
   assert.match(providers, /staleTime:\s*30_000/);
+  assert.match(workspaceClient, /const \[mounted, setMounted\] = useState\(false\)/);
+  assert.match(workspaceClient, /requestAnimationFrame\(\(\) => setMounted\(true\)\)/);
+  assert.match(workspaceClient, /role="status"/);
+  assert.match(workspaceClient, /<CheckInWorkspace \{\.\.\.props\} \/>/);
+});
+
+test("derives social image metadata from the forwarded request origin", async () => {
+  const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
+
+  assert.match(layout, /x-forwarded-host/);
+  assert.match(layout, /x-forwarded-proto/);
+  assert.match(layout, /new URL\(\s*"\/og\.png",\s*metadataBase\s*\)/);
+  assert.match(layout, /images:\s*\[\{\s*url:\s*ogImage/);
+  assert.match(layout, /images:\s*\[ogImage\]/);
+  assert.doesNotMatch(layout, /og-attention\.png/);
 });
 
 test("uses only Supabase formal runtime paths while preserving Sites and image bindings", async () => {

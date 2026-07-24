@@ -58,7 +58,7 @@ export function MonthCalendar({
   const isCurrentMonth = month === monthKeyForDate(today);
 
   return (
-    <section className="calendar-section" aria-labelledby="calendar-title">
+    <section className="calendar-section" aria-labelledby="calendar-title" data-testid="month-calendar">
       <div className="calendar-heading">
         <div>
           <p className="eyebrow">ATTENTION MAP</p>

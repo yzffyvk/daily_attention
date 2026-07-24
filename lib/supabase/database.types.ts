@@ -130,6 +130,18 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      consume_auth_rate_limit: {
+        Args: {
+          target_action: string
+          target_bucket: string
+          target_max_attempts: number
+          target_window_seconds: number
+        }
+        Returns: {
+          allowed: boolean
+          retry_after_seconds: number
+        }[]
+      }
       read_recovery_digest: {
         Args: { target_user_id: string }
         Returns: string

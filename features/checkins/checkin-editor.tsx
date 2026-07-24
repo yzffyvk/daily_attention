@@ -204,7 +204,7 @@ export function CheckInEditor({
           </div>
         </div>
 
-        <div className="form-actions">
+        <div className="form-actions" data-testid="checkin-actions">
           <div className="action-buttons">
             <button className="primary-button" disabled={isDisabled || isOffline || !canSave} type="submit">
               {isSaving ? "正在保存…" : record ? "保存修改" : <><span aria-hidden="true">叮</span>一下，完成打卡</>}

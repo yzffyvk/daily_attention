@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { CheckInWorkspace } from "@/features/checkins/checkin-workspace";
+import { CheckInWorkspaceClient } from "@/features/checkins/checkin-workspace-client";
 import { getTodayKey } from "@/features/checkins/dates";
 import { createServerSupabase } from "@/lib/supabase/server";
 
@@ -18,7 +18,7 @@ export default async function AppPage() {
     .maybeSingle();
 
   return (
-    <CheckInWorkspace
+    <CheckInWorkspaceClient
       initialDate={serverToday}
       initialToday={serverToday}
       userId={data.claims.sub}
