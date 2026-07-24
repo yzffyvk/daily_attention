@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MonthCalendar } from "@/features/calendar/month-calendar";
+import { useCheckInDraft } from "@/features/drafts/use-checkin-draft";
 import { AppHeader } from "@/features/profile/app-header";
 import type { AccountProfile } from "@/server/auth/ports";
 import {
@@ -38,6 +39,7 @@ type CheckInWorkspaceProps = {
   initialDate: string;
   initialToday?: string;
   initialProfile?: AccountProfile | null;
+  userId?: string | null;
 };
 
 type ConflictState = {
@@ -156,6 +158,7 @@ export function CheckInWorkspace({
   initialDate,
   initialToday = initialDate,
   initialProfile = null,
+  userId = null,
 }: CheckInWorkspaceProps) {
   const queryClient = useQueryClient();
   const [today, setToday] = useState(initialToday);
@@ -193,14 +196,38 @@ export function CheckInWorkspace({
   const monthQuery = useMonthCheckIns(month);
   const checkInQuery = useCheckIn(selectedDate);
   const saveMutation = useSaveCheckIn();
-  const isAwaitingSelectedRecord = hydratedDate !== selectedDate || checkInQuery.isFetching;
   const hasSelectedRecordError = checkInQuery.isError;
   const isDialogActionBusy = isSaving || saveMutation.isPending || isCleaningUpImage || isPreparingImage;
-  const isEditorLocked = isDialogActionBusy || isAwaitingSelectedRecord || hasSelectedRecordError;
-  const isHeaderBusy = isDialogActionBusy || Boolean(conflict);
   const selectedRecord = checkInQuery.data ?? null;
   const isDirty = isDraftDirty(draft, draftBaseRecord);
   const canSave = Boolean(draft.attention.trim());
+  const {
+    deleteAfterCloudSave,
+    isOffline,
+  } = useCheckInDraft({
+    userId,
+    date: selectedDate,
+    cloudRecord: checkInQuery.isSuccess ? selectedRecord : hasSelectedRecordError ? null : undefined,
+    draft,
+    isDirty,
+    baseVersion,
+    onRestore: (restoredDraft, restoredBaseVersion) => {
+      if (selectedDateRef.current !== selectedDate) return;
+      const cloudSnapshot = recordSnapshot(checkInQuery.data ?? null);
+      draftRef.current = restoredDraft;
+      draftBaseRecordRef.current = cloudSnapshot;
+      setDraft(restoredDraft);
+      setDraftBaseRecord(cloudSnapshot);
+      setBaseVersion(restoredBaseVersion);
+      setBaseRecordExists(cloudSnapshot !== null);
+      setHydratedDate(selectedDate);
+      setStatus("已恢复本地草稿", "success");
+    },
+  });
+  const isCloudReadFailure = hasSelectedRecordError && !isOffline;
+  const isAwaitingSelectedRecord = !isOffline && (hydratedDate !== selectedDate || checkInQuery.isFetching);
+  const isEditorLocked = isDialogActionBusy || isAwaitingSelectedRecord || isCloudReadFailure;
+  const isHeaderBusy = isDialogActionBusy || Boolean(conflict);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -236,6 +263,16 @@ export function CheckInWorkspace({
     setBaseRecordExists(snapshot !== null);
     setHydratedDate(date);
   }, []);
+
+  useEffect(() => {
+    if (isOffline && hasSelectedRecordError && hydratedDate !== selectedDate) {
+      if (isDraftDirty(draftRef.current, draftBaseRecordRef.current)) {
+        setHydratedDate(selectedDate);
+      } else {
+        hydrateDraft(null, selectedDate);
+      }
+    }
+  }, [hasSelectedRecordError, hydratedDate, hydrateDraft, isOffline, selectedDate]);
 
   useEffect(() => {
     if (!checkInQuery.isSuccess) return;
@@ -410,6 +447,10 @@ export function CheckInWorkspace({
   }
 
   async function handleImageChange(selection: ImageSelection, identity: string) {
+    if (isOffline) {
+      setStatus("离线，内容已保存在此浏览器", "neutral");
+      return;
+    }
     const operation = imageOperationRef.current + 1;
     imageOperationRef.current = operation;
     const isCurrentOperation = () => (
@@ -439,6 +480,10 @@ export function CheckInWorkspace({
   }
 
   async function saveCurrentRecord() {
+    if (isOffline) {
+      setStatus("离线，内容已保存在此浏览器", "neutral");
+      return false;
+    }
     if (saveInFlightRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current || editorLockedRef.current) return false;
     const activeDraft = draft;
     const activeRecord = draftBaseRecord;
@@ -487,6 +532,7 @@ export function CheckInWorkspace({
         ambiguousCandidatePathsRef.current.delete(pendingImagePath);
       }
       hydrateDraft(record, activeDate);
+      await deleteAfterCloudSave();
       setStatus(
         activeRecordExists
           ? `${formatDate(activeDate)}的修改已保存`
@@ -655,12 +701,13 @@ export function CheckInWorkspace({
           date={selectedDate}
           draft={draft}
           isDirty={isDirty}
-          isLoading={isAwaitingSelectedRecord || hasSelectedRecordError}
+          isLoading={isAwaitingSelectedRecord || isCloudReadFailure}
           isSaving={isSaving || saveMutation.isPending}
           isCleaningUpImage={isCleaningUpImage}
           isPreparingImage={isPreparingImage}
           isRetryingRecord={checkInQuery.isFetching}
-          loadError={hasSelectedRecordError ? messageForError(checkInQuery.error) : ""}
+          isOffline={isOffline}
+          loadError={isCloudReadFailure ? messageForError(checkInQuery.error) : ""}
           message={message}
           messageTone={messageTone}
           onDraftChange={(change) => {

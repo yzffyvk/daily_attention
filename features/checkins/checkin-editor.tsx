@@ -51,6 +51,7 @@ type CheckInEditorProps = {
   isCleaningUpImage: boolean;
   isPreparingImage: boolean;
   isRetryingRecord: boolean;
+  isOffline: boolean;
   loadError: string;
   message: string;
   messageTone: MessageTone;
@@ -73,6 +74,7 @@ export function CheckInEditor({
   isCleaningUpImage,
   isPreparingImage,
   isRetryingRecord,
+  isOffline,
   loadError,
   message,
   messageTone,
@@ -87,7 +89,7 @@ export function CheckInEditor({
   const canSave = Boolean(draft.attention.trim());
   const state = isPreparingImage ? "正在整理图片" : isDirty ? "未保存" : record ? "已保存" : isLoading ? "正在读取" : "待填写";
   const isDisabled = isLoading || isSaving || isCleaningUpImage || isPreparingImage;
-  const isUploaderDisabled = isLoading || isSaving || isCleaningUpImage;
+  const isUploaderDisabled = isLoading || isSaving || isCleaningUpImage || isOffline;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -204,7 +206,7 @@ export function CheckInEditor({
 
         <div className="form-actions">
           <div className="action-buttons">
-            <button className="primary-button" disabled={isDisabled || !canSave} type="submit">
+            <button className="primary-button" disabled={isDisabled || isOffline || !canSave} type="submit">
               {isSaving ? "正在保存…" : record ? "保存修改" : <><span aria-hidden="true">叮</span>一下，完成打卡</>}
             </button>
             <button
@@ -220,7 +222,7 @@ export function CheckInEditor({
           </div>
           <div className="save-status">
             <span aria-live="polite" className={`save-message ${messageTone}`} role="status">
-              {isPreparingImage ? "正在整理图片，请稍候" : message || (isDirty ? "有修改尚未保存" : "已同步到云端")}
+              {isOffline ? "离线，内容已保存在此浏览器" : isPreparingImage ? "正在整理图片，请稍候" : message || (isDirty ? "有修改尚未保存" : "已同步到云端")}
             </span>
             <small>云端记录</small>
           </div>

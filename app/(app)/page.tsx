@@ -21,6 +21,7 @@ export default async function AppPage() {
     <CheckInWorkspace
       initialDate={serverToday}
       initialToday={serverToday}
+      userId={data.claims.sub}
       initialProfile={
         error || !profile
           ? null

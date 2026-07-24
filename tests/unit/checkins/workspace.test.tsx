@@ -5,6 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CheckInWorkspace } from "@/features/checkins/checkin-workspace";
 import { deleteCheckInImage, uploadCheckInImage } from "@/features/checkins/api";
 import {
+  deleteAttentionDraftDatabase,
+  loadDraft,
+  saveDraft,
+} from "@/lib/indexed-db/drafts";
+import {
   formatCalendarDate,
   formatMonth,
   formatDate,
@@ -216,13 +221,193 @@ beforeEach(() => {
   imagePreparation.reset();
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   vi.useRealTimers();
+  await deleteAttentionDraftDatabase();
   vi.unstubAllGlobals();
+  Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+  window.dispatchEvent(new Event("online"));
 });
 
 describe("CheckInWorkspace", () => {
+  it("restores a newer local draft using the authenticated id even when the profile is unavailable", async () => {
+    const date = getTodayKey();
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    await saveDraft({
+      userId: "authenticated-subject",
+      date,
+      attention: "本地草稿",
+      sourceUrl: "",
+      summary: "",
+      inspiration: "",
+      imageBlob: null,
+      imageName: "",
+      removeImage: false,
+      baseVersion: 1,
+      updatedAt: `${date}T11:00:00.000Z`,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        if (path.includes("/api/checkins/stats?")) {
+          return Promise.resolve(response({ ok: true, data: { totalCount: 0, currentStreak: 0, hasTodayRecord: false }, requestId: "stats-request" }));
+        }
+        if (path.includes("/api/checkins/")) {
+          return Promise.resolve(response({ ok: true, data: record(date, "云端内容"), requestId: "date-request" }));
+        }
+        return Promise.resolve(response({ ok: true, data: { profile: { id: "profile", displayName: "学习者", avatarKey: 1 } }, requestId: "profile-request" }));
+      }),
+    );
+
+    render(
+      <TestQueryProvider>
+        <CheckInWorkspace
+          initialDate={date}
+          initialProfile={null}
+          initialToday={date}
+          userId="authenticated-subject"
+        />
+      </TestQueryProvider>,
+    );
+
+    await waitFor(() => expect(field<HTMLInputElement>("attention")).toHaveValue("本地草稿"));
+    expect(screen.getByText("已恢复本地草稿")).toBeVisible();
+  });
+
+  it("keeps the form editable after an offline cloud-read failure without enabling upload or cloud save", async () => {
+    const date = getTodayKey();
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("offline"))));
+
+    render(
+      <TestQueryProvider>
+        <CheckInWorkspace initialDate={date} initialToday={date} userId="authenticated-subject" />
+      </TestQueryProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText("离线，内容已保存在此浏览器")).toBeVisible());
+    await waitFor(() => expect(screen.getByLabelText("attention")).toBeEnabled());
+    const attention = screen.getByLabelText("attention");
+    await userEvent.setup().type(attention, "离线内容");
+    expect(screen.getByRole("button", { name: /完成打卡/ })).toBeDisabled();
+    expect(screen.getByLabelText("添加图片笔记")).toBeDisabled();
+
+    await waitFor(
+      async () => expect(await loadDraft("authenticated-subject", date)).toMatchObject({ attention: "离线内容" }),
+      { timeout: 1_000 },
+    );
+
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    act(() => window.dispatchEvent(new Event("online")));
+    expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0);
+  });
+
+  it.each([
+    ["401", () => response({ ok: false, error: { code: "SESSION_EXPIRED", message: "session" }, requestId: "save" }, 401)],
+    ["409", () => response({ ok: false, error: { code: "VERSION_CONFLICT", message: "conflict" }, requestId: "save" }, 409)],
+    ["429", () => response({ ok: false, error: { code: "RATE_LIMITED", message: "slow down" }, requestId: "save" }, 429)],
+    ["5xx", () => response({ ok: false, error: { code: "SERVICE_UNAVAILABLE", message: "later" }, requestId: "save" }, 503)],
+    ["network failure", () => Promise.reject(new TypeError("network failed"))],
+  ])("retains the local draft when a cloud save has a %s failure", async (_label, failedSave) => {
+    const date = getTodayKey();
+    await saveDraft({
+      userId: "authenticated-subject",
+      date,
+      attention: "local fallback",
+      sourceUrl: "",
+      summary: "",
+      inspiration: "",
+      imageBlob: null,
+      imageName: "",
+      removeImage: false,
+      baseVersion: 1,
+      updatedAt: `${date}T00:00:00.000Z`,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (init?.method === "PUT") return failedSave();
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month" }));
+        }
+        if (path.includes("/api/checkins/stats?")) {
+          return Promise.resolve(response({ ok: true, data: { totalCount: 0, currentStreak: 0, hasTodayRecord: false }, requestId: "stats" }));
+        }
+        if (path.includes("/api/checkins/")) {
+          return Promise.resolve(response({ ok: true, data: record(date, "cloud"), requestId: "date" }));
+        }
+        return Promise.resolve(response({ ok: true, data: { profile: { id: "profile", displayName: "学习者", avatarKey: 1 } }, requestId: "profile" }));
+      }),
+    );
+
+    render(
+      <TestQueryProvider>
+        <CheckInWorkspace initialDate={date} initialToday={date} userId="authenticated-subject" />
+      </TestQueryProvider>,
+    );
+
+    await waitFor(() => expect(field<HTMLInputElement>("attention")).toHaveValue("cloud"));
+    await userEvent.setup().type(field<HTMLInputElement>("attention"), " updated");
+    await userEvent.setup().click(screen.getByRole("button", { name: "保存修改" }));
+
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "PUT")).toBe(true));
+    expect(await loadDraft("authenticated-subject", date)).toMatchObject({ attention: "local fallback" });
+  });
+
+  it("deletes the local draft only after a confirmed cloud save", async () => {
+    const date = getTodayKey();
+    await saveDraft({
+      userId: "authenticated-subject",
+      date,
+      attention: "local fallback",
+      sourceUrl: "",
+      summary: "",
+      inspiration: "",
+      imageBlob: null,
+      imageName: "",
+      removeImage: false,
+      baseVersion: 1,
+      updatedAt: `${date}T00:00:00.000Z`,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (init?.method === "PUT") {
+          return Promise.resolve(response({ ok: true, data: record(date, "cloud updated", 2), requestId: "save" }));
+        }
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month" }));
+        }
+        if (path.includes("/api/checkins/stats?")) {
+          return Promise.resolve(response({ ok: true, data: { totalCount: 0, currentStreak: 0, hasTodayRecord: false }, requestId: "stats" }));
+        }
+        if (path.includes("/api/checkins/")) {
+          return Promise.resolve(response({ ok: true, data: record(date, "cloud"), requestId: "date" }));
+        }
+        return Promise.resolve(response({ ok: true, data: { profile: { id: "profile", displayName: "学习者", avatarKey: 1 } }, requestId: "profile" }));
+      }),
+    );
+
+    render(
+      <TestQueryProvider>
+        <CheckInWorkspace initialDate={date} initialToday={date} userId="authenticated-subject" />
+      </TestQueryProvider>,
+    );
+
+    await waitFor(() => expect(field<HTMLInputElement>("attention")).toHaveValue("cloud"));
+    await userEvent.setup().type(field<HTMLInputElement>("attention"), " updated");
+    await userEvent.setup().click(screen.getByRole("button", { name: "保存修改" }));
+
+    await waitFor(async () => expect(await loadDraft("authenticated-subject", date)).toBeUndefined());
+  });
+
   it("locks date, editor, save, and image actions until the selected record hydrates", async () => {
     const date = "2026-07-23";
     const selected = deferred<Response>();
