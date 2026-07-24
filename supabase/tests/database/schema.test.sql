@@ -1,5 +1,5 @@
 begin;
-select plan(24);
+select plan(30);
 
 select has_schema('private', 'private schema exists');
 select has_table('public', 'profiles', 'profiles exists');
@@ -51,8 +51,8 @@ select is(
       and c.conname = 'check_ins_image_path_check'
       and c.contype = 'c'
   ),
-  'CHECK (image_path IS NULL OR image_path ~ ''[^[:space:]]''::text AND length(image_path) <= 1024)',
-  'image paths allow NULL or a path with a non-POSIX-space character up to 1024 characters'
+  'CHECK (image_path IS NULL OR length(image_path) <= 1024 AND split_part(image_path, ''/''::text, 1) = user_id::text AND image_path ~ ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9]{4}-[0-9]{2}-[0-9]{2}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[.](jpg|png|webp)$''::text)',
+  'image paths require the owner UUID, date, generated UUID filename, supported extension, and 1024-character maximum'
 );
 
 insert into auth.users (id)
@@ -121,6 +121,49 @@ select throws_ok(
   'new row for relation "check_ins" violates check constraint "check_ins_image_path_check"',
   'check-ins reject newline-only image paths'
 );
+select throws_ok(
+  $$insert into public.check_ins (user_id, checkin_date, attention, image_path)
+    values ('00000000-0000-0000-0000-000000000201', '2026-08-02', 'Valid attention', U&'\FEFF')$$,
+  '23514',
+  'new row for relation "check_ins" violates check constraint "check_ins_image_path_check"',
+  'check-ins reject FEFF-only image paths'
+);
+select throws_ok(
+  $$insert into public.check_ins (user_id, checkin_date, attention, image_path)
+    values (
+      '00000000-0000-0000-0000-000000000201',
+      '2026-08-03',
+      'Valid attention',
+      '00000000-0000-0000-0000-000000000202/2026-08-03/00000000-0000-0000-0000-000000000203.jpg'
+    )$$,
+  '23514',
+  'new row for relation "check_ins" violates check constraint "check_ins_image_path_check"',
+  'check-ins reject foreign-owner image paths'
+);
+select throws_ok(
+  $$insert into public.check_ins (user_id, checkin_date, attention, image_path)
+    values (
+      '00000000-0000-0000-0000-000000000201',
+      '2026-08-04',
+      'Valid attention',
+      '00000000-0000-0000-0000-000000000201/2026-8-4/00000000-0000-0000-0000-000000000203.jpg'
+    )$$,
+  '23514',
+  'new row for relation "check_ins" violates check constraint "check_ins_image_path_check"',
+  'check-ins reject malformed dates and paths'
+);
+select throws_ok(
+  $$insert into public.check_ins (user_id, checkin_date, attention, image_path)
+    values (
+      '00000000-0000-0000-0000-000000000201',
+      '2026-08-05',
+      'Valid attention',
+      '00000000-0000-0000-0000-000000000201/2026-08-05/00000000-0000-0000-0000-000000000203.gif'
+    )$$,
+  '23514',
+  'new row for relation "check_ins" violates check constraint "check_ins_image_path_check"',
+  'check-ins reject unsupported image extensions'
+);
 select lives_ok(
   $$insert into public.check_ins (user_id, checkin_date, attention, image_path)
     values ('00000000-0000-0000-0000-000000000201', '2026-07-29', 'Valid attention', null)$$,
@@ -132,9 +175,29 @@ select lives_ok(
       '00000000-0000-0000-0000-000000000201',
       '2026-07-30',
       'Valid attention',
-      '00000000-0000-0000-0000-000000000201/2026-07-30/image.webp'
+      '00000000-0000-0000-0000-000000000201/2026-07-30/00000000-0000-0000-0000-000000000203.jpg'
     )$$,
-  'check-ins allow valid owner-style image paths'
+  'check-ins allow generated-style JPEG owner paths'
+);
+select lives_ok(
+  $$insert into public.check_ins (user_id, checkin_date, attention, image_path)
+    values (
+      '00000000-0000-0000-0000-000000000201',
+      '2026-07-31',
+      'Valid attention',
+      '00000000-0000-0000-0000-000000000201/2026-07-31/00000000-0000-0000-0000-000000000204.png'
+    )$$,
+  'check-ins allow generated-style PNG owner paths'
+);
+select lives_ok(
+  $$insert into public.check_ins (user_id, checkin_date, attention, image_path)
+    values (
+      '00000000-0000-0000-0000-000000000201',
+      '2026-08-01',
+      'Valid attention',
+      '00000000-0000-0000-0000-000000000201/2026-08-01/00000000-0000-0000-0000-000000000205.webp'
+    )$$,
+  'check-ins allow generated-style WebP owner paths'
 );
 
 select * from finish();

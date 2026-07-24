@@ -165,3 +165,31 @@ COMPLETE
 ### Concerns
 
 None identified for this focused fix. Repository-wide typechecking was not part of this verification pass; the prior report records its unrelated legacy Cloudflare ambient-type failures.
+
+## Focused Task 7 Final Database Path-Integrity Fix
+
+### Status
+
+COMPLETE
+
+### Changes
+
+- Added forward-only migration `supabase/migrations/202607240003_checkin_image_path_shape.sql`; migrations `202607240001` and `202607240002` were not rewritten.
+- Replaced `check_ins_image_path_check` so `NULL` remains valid, non-null values are at most 1024 characters, their first segment equals `user_id::text`, and the complete value matches the generated `user UUID/YYYY-MM-DD/UUID.(jpg|png|webp)` shape.
+- The anchored regex permits only lowercase hexadecimal UUID segments, numeric date components, path separators, a dot, and the three supported extensions, so whitespace and FEFF cannot occur anywhere in an accepted value.
+- Extended pgTAP catalog and behavior coverage for generated-style JPEG/PNG/WebP owner paths and `NULL`, plus foreign-owner, FEFF-only, malformed date/path, unsupported extension, and overlong rejection cases.
+- The progress ledger was not modified.
+
+### TDD And Verification
+
+1. RED: before the new migration, the four new rejection cases (FEFF-only, foreign owner, malformed date/path, unsupported extension) passed through the applied whitespace-only constraint; existing database assertions remained green.
+2. `NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase migration up --local`: PASS; applied `202607240003_checkin_image_path_shape.sql` without reset.
+3. `NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase test db`: PASS; 4 files, 105 assertions.
+4. `NPM_CONFIG_UPDATE_NOTIFIER=false npm run test:unit -- tests/unit/domain/checkin.test.ts tests/unit/checkins/date-route.test.ts tests/unit/storage/service.test.ts`: PASS; 15 files, 56 tests.
+5. `NPM_CONFIG_UPDATE_NOTIFIER=false npm run test:integration`: PASS; 3 files, 9 tests. Existing generated upload/check-in/read/delete integration paths continue to work.
+6. `NPM_CONFIG_UPDATE_NOTIFIER=false npm run lint`: PASS.
+7. `git diff --check`: PASS.
+
+### Concerns
+
+None identified for this focused fix. Repository-wide typechecking remains subject to the unrelated legacy Cloudflare ambient-type gaps recorded earlier in this report.
