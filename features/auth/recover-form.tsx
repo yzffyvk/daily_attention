@@ -1,0 +1,37 @@
+"use client";
+
+import Link from "next/link";
+import { FormEvent, useState } from "react";
+import { postAuth } from "./auth-card";
+
+export function RecoverForm({ onRecovered }: { onRecovered: (result: { name: string; recoveryCode: string }) => void }) {
+  const [name, setName] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (newPassword !== confirmation) return setError("两次输入的密码不一致");
+    setError("");
+    setIsSubmitting(true);
+    const result = await postAuth<{ recoveryCode: string }>("/api/auth/recover", { name, recoveryCode, newPassword });
+    setIsSubmitting(false);
+    if (!result.ok) return setError(result.error.message);
+    onRecovered({ name, recoveryCode: result.data.recoveryCode });
+  }
+
+  return (
+    <form className="auth-form" onSubmit={submit} noValidate>
+      <label className="auth-field"><span>名称</span><input autoFocus autoComplete="username" maxLength={20} onChange={(event) => setName(event.target.value)} value={name} /></label>
+      <label className="auth-field"><span>恢复码</span><input autoComplete="one-time-code" onChange={(event) => setRecoveryCode(event.target.value)} placeholder="01234-56789-ABCDE-FGHJK-MNPQRS" value={recoveryCode} /></label>
+      <label className="auth-field"><span>新密码</span><input autoComplete="new-password" onChange={(event) => setNewPassword(event.target.value)} type="password" value={newPassword} /></label>
+      <label className="auth-field"><span>确认新密码</span><input autoComplete="new-password" onChange={(event) => setConfirmation(event.target.value)} type="password" value={confirmation} /></label>
+      {error ? <p className="login-error" role="alert">{error}</p> : null}
+      <div className="auth-actions"><button className="primary-button" disabled={isSubmitting} type="submit">{isSubmitting ? "正在恢复…" : "重设密码"}</button></div>
+      <p className="auth-switch">想起密码了？ <Link href="/login">返回登录</Link></p>
+    </form>
+  );
+}

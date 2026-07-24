@@ -49,9 +49,11 @@ describe("auth service", () => {
     const adapter = ports();
     vi.mocked(adapter.readRecoveryDigest).mockResolvedValue(await recoveryDigest());
     const result = await recoverAccount(recoveryInput(), adapter);
+    const replaceRecoveryDigest = vi.mocked(adapter.replaceRecoveryDigest);
+    const updatePassword = vi.mocked(adapter.updatePassword);
 
-    expect(adapter.replaceRecoveryDigest.mock.invocationCallOrder[0]).toBeLessThan(
-      adapter.updatePassword.mock.invocationCallOrder[0],
+    expect(replaceRecoveryDigest.mock.invocationCallOrder[0]).toBeLessThan(
+      updatePassword.mock.invocationCallOrder[0],
     );
     expect(adapter.updatePassword).toHaveBeenCalledWith("user-1", "newpassword123");
     expect(adapter.replaceRecoveryDigest).toHaveBeenCalledOnce();
@@ -80,8 +82,9 @@ describe("auth service", () => {
     await expect(recoverAccount(recoveryInput(), adapter)).rejects.toThrow(passwordFailure);
 
     expect(adapter.replaceRecoveryDigest).toHaveBeenCalledTimes(2);
-    const [, claimedDigest] = vi.mocked(adapter.replaceRecoveryDigest).mock.calls[0].slice(1);
-    expect(vi.mocked(adapter.replaceRecoveryDigest).mock.calls[1]).toEqual([
+    const replaceRecoveryDigest = vi.mocked(adapter.replaceRecoveryDigest);
+    const [, claimedDigest] = replaceRecoveryDigest.mock.calls[0].slice(1);
+    expect(replaceRecoveryDigest.mock.calls[1]).toEqual([
       "user-1",
       claimedDigest,
       expected,

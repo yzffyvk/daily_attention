@@ -12,9 +12,11 @@ type RateLimitRpcResult = { allowed: boolean; retry_after_seconds: number };
 function isRateLimitRpcResult(value: unknown): value is RateLimitRpcResult {
   if (!value || typeof value !== "object") return false;
   const result = value as Record<string, unknown>;
-  if (typeof result.allowed !== "boolean") return false;
-  if (!Number.isSafeInteger(result.retry_after_seconds) || result.retry_after_seconds < 0) return false;
-  return result.allowed ? result.retry_after_seconds === 0 : result.retry_after_seconds > 0;
+  const allowed = result.allowed;
+  const retryAfterSeconds = result.retry_after_seconds;
+  if (typeof allowed !== "boolean") return false;
+  if (typeof retryAfterSeconds !== "number" || !Number.isSafeInteger(retryAfterSeconds) || retryAfterSeconds < 0) return false;
+  return allowed ? retryAfterSeconds === 0 : retryAfterSeconds > 0;
 }
 
 function isSupabaseRpcError(value: unknown): value is { message: string } {
