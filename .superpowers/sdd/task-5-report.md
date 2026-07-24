@@ -86,3 +86,49 @@
 
 - The integration runner temporarily replaces ignored `.dev.vars` to align with the active local Supabase stack, restoring it and resetting the database via an exit trap. A forced `SIGKILL` during that window can bypass the trap; the original local file should then be restored from the process backup or regenerated from `supabase status`.
 - `npm run typecheck` remains blocked only by the pre-existing legacy Cloudflare type declarations noted above; this review-fix pass does not touch those files.
+
+## Final Review-Fix (Task 5)
+
+This section supersedes the earlier runner/reset evidence above.
+
+### Mechanism
+
+- `test:integration` now runs `scripts/run-integration-tests.mjs`. It reads active local bindings from `supabase status -o env`, creates an OS-temporary directory containing an integration-only `wrangler.json` and `.dev.vars`, and starts Vinext with `CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH` pointing there. It never reads, moves, writes, or restores the developer's workspace `.dev.vars`; the temporary directory is removed in normal `finally` cleanup without an `EXIT` trap.
+- `vite.config.ts` supplies integration-only Worker vars and an absolute Worker entry when `INTEGRATION_TEST_BINDINGS=true`, so the temporary Wrangler config can resolve the source Worker while preserving normal local development behavior.
+- Integration fixtures use unique `CF-Connecting-IP` values, record every created Auth UUID and every raw rate-limit bucket before requests, delete created users through Supabase Admin (cascading their aliases, profiles, and any check-ins), and delete only the corresponding HMAC digest/action rows through `supabase db query --local`. No database reset occurs.
+
+### RED/GREEN
+
+- **RED:** focused tests reported **4 failures of 33 tests**: the shared `23505 -> NAME_TAKEN` mapper omitted `details.field`, the real mapper payload therefore could not mark RegisterForm's name control invalid, an availability error was falsely rewritten as `INVALID_CREDENTIALS`, and `test:integration` still referenced the destructive shell script. A second RED run added malformed successful sign-in coverage and failed **1 of 34 tests** because `{ user: null, session: null }` was accepted.
+- **GREEN:** the focused suite passed **12 files, 34 tests**. It covers the actual response mapper payload in RegisterForm, duplicate-name route payload/no-store behavior, strict Supabase invalid-credentials classification, outage sanitization/no-store, malformed sign-in handling, and the explicit runner contract.
+- **Runner correction:** the first safe-runner attempt revealed Vinext still preferred workspace `.dev.vars`, leaving eight test-created rate rows due to a pepper mismatch. Those eight exact digest/action rows were removed through a targeted local DB query. The corrected runner logs its OS-temporary `.dev.vars`; a subsequent run left **0** recent fixture rate rows.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase test db` | PASS without a reset before or after: **4 files, 92 tests**. |
+| `npm run test:unit` | PASS: **12 files, 34 tests**. |
+| `npm run test:integration` | PASS: **1 file, 4 tests** against local Supabase, no reset. |
+| `npm run lint` | PASS. |
+| `npm run build` | PASS. |
+| client scan for `SUPABASE_SECRET_KEY`, `AUTH_RATE_LIMIT_PEPPER`, `service_role`, and `sb_secret_` | PASS: no client matches. |
+| `git diff --check` | PASS before commit. |
+
+### Isolation Proof
+
+- A pre-existing private `auth_rate_limits` sentinel (`task5_sentinel`, attempt count `1`) was inserted before a safe integration run and queried afterward. It remained unchanged at attempt count `1`; the sentinel was then individually deleted.
+- The test suite's targeted cleanup query confirmed **0** remaining fixture rate rows after the corrected run. The runner leaves developer bindings and unrelated local rows in place on normal integration test failures because Vitest `afterAll` performs the targeted cleanup and the runner does not reset the stack.
+
+### Files Changed
+
+- `server/auth/{response,supabase-adapter}.ts`, `features` test coverage, `tests/unit/auth/{forms,login-route,response,supabase-adapter}.test.*`
+- `tests/integration/auth-routes.test.ts`, `tests/helpers/{api-session,integration-fixtures}.ts`
+- `scripts/run-integration-tests.mjs`, `package.json`, `vite.config.ts`, and this report.
+
+### Self-Review And Concerns
+
+- `NAME_TAKEN` now comes from the actual shared mapper with `details.field = "name"`; the component test consumes that real `Response`, not a hand-authored API object. Known Supabase `invalid_credentials` alone becomes public `INVALID_CREDENTIALS`; network, configuration, malformed response, availability, and other auth errors reach the opaque 500 mapper with `private, no-store`.
+- Existing XFF ignoring, CF/local buckets, profile update, recovery compensation, dialog behavior, field errors, and no-secret/no-sensitive-field guarantees remain covered by the full unit and real integration suites.
+- Direct-origin Cloudflare-header spoof prevention remains a Task 12 deployment/origin configuration concern. This application change does not claim to verify it.
+- `npm run typecheck` is still expected to report only the known legacy Cloudflare type paths and was intentionally not broadened in this Task 5 review-fix.

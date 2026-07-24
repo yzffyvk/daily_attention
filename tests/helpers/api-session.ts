@@ -1,7 +1,10 @@
 export class ApiSession {
   private cookie = "";
 
-  constructor(private readonly baseUrl = process.env.TEST_BASE_URL ?? "http://127.0.0.1:3100") {}
+  constructor(
+    private readonly baseUrl = process.env.TEST_BASE_URL ?? "http://127.0.0.1:3100",
+    private readonly defaultHeaders: HeadersInit = {},
+  ) {}
 
   async request(path: string, init: RequestInit = {}) {
     const response = await fetch(`${this.baseUrl}${path}`, {
@@ -9,6 +12,7 @@ export class ApiSession {
       headers: {
         "Content-Type": "application/json",
         ...(this.cookie ? { Cookie: this.cookie } : {}),
+        ...this.defaultHeaders,
         ...init.headers,
       },
     });

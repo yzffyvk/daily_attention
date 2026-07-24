@@ -7,6 +7,10 @@ import type { AccountProfile, AuthPorts } from "./ports";
 
 type SupabaseError = { code?: string; message?: string };
 
+function isInvalidCredentialsError(error: SupabaseError) {
+  return error.code === "invalid_credentials";
+}
+
 function bytea(value: Uint8Array) {
   return `\\x${Buffer.from(value).toString("hex")}`;
 }
@@ -102,8 +106,12 @@ export async function createSupabaseAuthAdapter() {
       throwIfError(error);
     },
     async signIn(email, password) {
-      const { error } = await server.auth.signInWithPassword({ email, password });
-      if (error) throw new Error("INVALID_CREDENTIALS");
+      const { data, error } = await server.auth.signInWithPassword({ email, password });
+      if (error) {
+        if (isInvalidCredentialsError(error)) throw new Error("INVALID_CREDENTIALS");
+        throw error;
+      }
+      if (!data.user || !data.session) throw new Error("Malformed sign-in response");
     },
   };
 

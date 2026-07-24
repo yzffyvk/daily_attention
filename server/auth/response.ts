@@ -6,6 +6,7 @@ type MappedError = {
   code: string;
   message: string;
   status: number;
+  field?: string;
   retryAfterSeconds?: number;
 };
 
@@ -30,6 +31,7 @@ export function authFailure(error: unknown, requestId: string) {
   const mapped = mapError(error);
   return noStoreJson(
     apiFailure(mapped.code, mapped.message, requestId, {
+      field: mapped.field,
       retryAfterSeconds: mapped.retryAfterSeconds,
     }),
     mapped.status,
@@ -44,7 +46,7 @@ function mapError(error: unknown): MappedError {
       ? (error as { retryAfterSeconds: number }).retryAfterSeconds
       : undefined;
 
-  if (code === "23505") return { code: "NAME_TAKEN", message: "这个名称已经被使用", status: 409 };
+  if (code === "23505") return { code: "NAME_TAKEN", message: "这个名称已经被使用", status: 409, field: "name" };
   if (code === "RATE_LIMITED" || message === "RATE_LIMITED") {
     return { code: "RATE_LIMITED", message: "请稍后再试", status: 429, retryAfterSeconds };
   }

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RegisterForm } from "@/features/auth/register-form";
 import { RecoveryCodeDialog } from "@/features/auth/recovery-code-dialog";
+import { authFailure } from "@/server/auth/response";
 
 function DialogHarness() {
   const [open, setOpen] = useState(false);
@@ -77,10 +78,8 @@ describe("registration UI", () => {
 
   it("uses server field details for accessible field errors while retaining values", async () => {
     const user = userEvent.setup();
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: false,
-      json: async () => ({ error: { message: "名称已经存在", details: { field: "name" } } }),
-    }));
+    const duplicateNameResponse = authFailure({ code: "23505" }, "request-id");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(duplicateNameResponse));
     render(<RegisterForm onRegistered={vi.fn()} />);
     const name = screen.getByPlaceholderText("输入一个好记的名称");
     await user.type(name, "学习者");
@@ -89,7 +88,7 @@ describe("registration UI", () => {
     await user.type(screen.getByLabelText("确认密码"), "password123");
     await user.click(screen.getByRole("button", { name: "注册并进入" }));
 
-    const error = await screen.findByText("名称已经存在");
+    const error = await screen.findByText("这个名称已经被使用");
     expect(name).toHaveValue("学习者");
     expect(name).toHaveAttribute("aria-invalid", "true");
     expect(name).toHaveAttribute("aria-describedby", error.id);
