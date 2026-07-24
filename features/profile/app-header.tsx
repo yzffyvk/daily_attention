@@ -20,6 +20,7 @@ type AppHeaderProps = {
   hasTodayRecord: boolean;
   streak: number;
   totalRecords: number;
+  isBusy?: boolean;
   isDateSelectionDisabled?: boolean;
   onSelectToday: () => void;
   onToggleMuted: () => void;
@@ -203,6 +204,7 @@ export function AppHeader({
   hasTodayRecord,
   streak,
   totalRecords,
+  isBusy = false,
   isDateSelectionDisabled = false,
   onSelectToday,
   onToggleMuted,
@@ -210,6 +212,7 @@ export function AppHeader({
 }: AppHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [previousBusy, setPreviousBusy] = useState(isBusy);
   const profileQuery = useQuery({
     queryKey: profileKey,
     queryFn: getCurrentProfile,
@@ -217,7 +220,16 @@ export function AppHeader({
   });
   const profile = profileQuery.data ?? initialProfile;
 
+  if (previousBusy !== isBusy) {
+    setPreviousBusy(isBusy);
+    if (isBusy) {
+      setMenuOpen(false);
+      setProfileOpen(false);
+    }
+  }
+
   function requestLogout() {
+    if (isBusy) return;
     setMenuOpen(false);
     onRequestLogout();
   }
@@ -235,6 +247,7 @@ export function AppHeader({
                   aria-haspopup="menu"
                   aria-label="打开账户菜单"
                   className="current-account"
+                  disabled={isBusy}
                   onClick={() => setMenuOpen((open) => !open)}
                   type="button"
                 >
@@ -245,6 +258,7 @@ export function AppHeader({
                 {menuOpen ? (
                   <div aria-label="账户菜单" className="account-menu" role="menu">
                     <button
+                      disabled={isBusy}
                       onClick={() => {
                         setMenuOpen(false);
                         setProfileOpen(true);
@@ -254,14 +268,14 @@ export function AppHeader({
                     >
                       <Pencil aria-hidden="true" size={15} />编辑资料
                     </button>
-                    <button onClick={requestLogout} role="menuitem" type="button">
+                    <button disabled={isBusy} onClick={requestLogout} role="menuitem" type="button">
                       <LogOut aria-hidden="true" size={15} />退出登录
                     </button>
                   </div>
                 ) : null}
               </div>
             ) : (
-              <button aria-label="退出当前用户" className="account-logout" onClick={onRequestLogout} title="退出当前用户" type="button">
+              <button aria-label="退出当前用户" className="account-logout" disabled={isBusy} onClick={requestLogout} title="退出当前用户" type="button">
                 <LogOut aria-hidden="true" size={16} />
               </button>
             )}
@@ -301,13 +315,13 @@ export function AppHeader({
               <strong>{totalRecords}<small>篇</small></strong>
             </div>
           </div>
-          <button className="today-button" disabled={isDateSelectionDisabled} onClick={onSelectToday} type="button">
+          <button className="today-button" disabled={isBusy || isDateSelectionDisabled} onClick={onSelectToday} type="button">
             <CalendarDays aria-hidden="true" size={18} />
             {hasTodayRecord ? "回看今日记录" : "开始今日打卡"}
           </button>
         </div>
       </header>
-      {profileOpen && profile ? <ProfileDialog onClose={() => setProfileOpen(false)} profile={profile} /> : null}
+      {profileOpen && profile && !isBusy ? <ProfileDialog onClose={() => setProfileOpen(false)} profile={profile} /> : null}
     </>
   );
 }

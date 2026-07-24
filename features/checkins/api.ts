@@ -58,9 +58,40 @@ function isEnvelope(value: unknown): value is ApiEnvelope<unknown> {
   return value.error.details === undefined || isObject(value.error.details);
 }
 
-function currentRecord(value: unknown) {
+function isDateKey(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value;
+}
+
+function isTimestamp(value: unknown): value is string {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function currentRecord(value: unknown): CheckInRecord | null | undefined {
   if (value === null) return null;
-  if (typeof value !== "object" || value === null) return undefined;
+  if (!isObject(value)) return undefined;
+  if (
+    typeof value.id !== "string" ||
+    !isDateKey(value.date) ||
+    typeof value.attention !== "string" ||
+    typeof value.sourceUrl !== "string" ||
+    typeof value.summary !== "string" ||
+    typeof value.inspiration !== "string" ||
+    !isNullableString(value.imagePath) ||
+    typeof value.imageName !== "string" ||
+    !isNullableString(value.imageUrl) ||
+    !Number.isInteger(value.version) ||
+    value.version <= 0 ||
+    !isTimestamp(value.createdAt) ||
+    !isTimestamp(value.updatedAt)
+  ) {
+    return undefined;
+  }
   return value as CheckInRecord;
 }
 
@@ -107,14 +138,19 @@ export async function requestApi<T>(
   if (payload.ok) return payload.data as T;
 
   const details = payload.error.details;
+  const current = response.status === 409 ? currentRecord(details?.current) : undefined;
+  if (response.status === 409 && current === undefined) {
+    throw new ApiError("服务返回内容不正确，请稍后再试", {
+      status: response.status,
+      code: "MALFORMED_RESPONSE",
+      requestId: payload.requestId,
+    });
+  }
   throw new ApiError(payload.error.message, {
     status: response.status,
     code: payload.error.code,
     requestId: payload.requestId,
-    current:
-      response.status === 409
-        ? currentRecord(details?.current)
-        : undefined,
+    current,
     field: details?.field,
   });
 }

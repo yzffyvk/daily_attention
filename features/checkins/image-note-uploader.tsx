@@ -188,6 +188,15 @@ function ImageNoteUploaderSession({
     }
   }
 
+  function handleRemoveImage() {
+    lifecycleRef.current.generation += 1;
+    revokeFilePreview();
+    setFilePreview(null);
+    setIsDragging(false);
+    setIsPreparing(false);
+    void onChange({ file: null, removeImage: true });
+  }
+
   function handleInput(event: ChangeEvent<HTMLInputElement>) {
     if (!disabled) void processImage(event.target.files?.[0]);
     event.target.value = "";
@@ -236,7 +245,7 @@ function ImageNoteUploaderSession({
                 aria-label="移除图片"
                 className="small-icon-button danger"
                 disabled={disabled}
-                onClick={() => void onChange({ file: null, removeImage: true })}
+                onClick={handleRemoveImage}
                 title="移除图片"
                 type="button"
               >

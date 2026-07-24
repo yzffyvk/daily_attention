@@ -88,4 +88,51 @@ describe("ImageNoteUploader", () => {
     await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:unmounted-preview"));
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it("invalidates pending compression when the image is removed", async () => {
+    const compressed = deferred<File>();
+    const compressor = vi.fn(() => compressed.promise);
+    const createObjectURL = vi.fn(() => "blob:removed-preview");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+
+    const onChange = vi.fn();
+    const view = render(
+      <ImageNoteUploader
+        compressImage={compressor}
+        existingImage={{ imageName: "existing.png", imageUrl: "https://example.com/existing.png" }}
+        file={null}
+        identity="2026-07-23"
+        onChange={onChange}
+        onError={vi.fn()}
+        removeImage={false}
+      />,
+    );
+    const source = new File(["image"], "source.png", { type: "image/png" });
+    const output = new File(["compressed"], "compressed.jpg", { type: "image/jpeg" });
+
+    fireEvent.change(screen.getByLabelText("替换图片"), {
+      target: { files: [source] },
+    });
+    await waitFor(() => expect(compressor).toHaveBeenCalledWith(source));
+    fireEvent.click(screen.getByRole("button", { name: "移除图片" }));
+    expect(onChange).toHaveBeenCalledExactlyOnceWith({ file: null, removeImage: true });
+
+    view.rerender(
+      <ImageNoteUploader
+        compressImage={compressor}
+        existingImage={null}
+        file={null}
+        identity="2026-07-23"
+        onChange={onChange}
+        onError={vi.fn()}
+        removeImage
+      />,
+    );
+    compressed.resolve(output);
+
+    await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:removed-preview"));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(screen.queryByAltText("compressed.jpg")).not.toBeInTheDocument();
+  });
 });

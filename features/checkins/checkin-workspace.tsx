@@ -452,6 +452,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
         <AppHeader
           hasTodayRecord={hasTodayRecord}
           initialProfile={initialProfile}
+          isBusy={isEditorLocked || Boolean(conflict)}
           isDateSelectionDisabled={isEditorLocked}
           isCelebrating={isCelebrating}
           isMuted={isMuted}

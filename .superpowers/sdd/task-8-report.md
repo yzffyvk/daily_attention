@@ -98,3 +98,45 @@ DONE_WITH_CONCERN
 ## Concerns
 
 - The pre-existing Cloudflare typecheck gap remains: `cloudflare:workers`, `Fetcher`, `D1Database`, and `R2Bucket` are unavailable to the repository-wide TypeScript configuration. This change does not alter those Task 11-owned paths.
+
+---
+
+# Task 8 Final Interaction Fixes Report
+
+## Status
+
+COMPLETE
+
+## Commit Range
+
+- Base: `f4b67b9`
+- Final interaction-fix commit: `HEAD` after this report is committed
+
+## Implementation
+
+- Removing an image now advances the uploader lifecycle generation immediately, clears any local preview state, and revokes stale compression URLs without restoring the image or calling `onChange` again.
+- The workspace supplies an explicit busy contract to `AppHeader`. A pending save or conflict closes account/profile UI, disables account, logout, and today controls, and keeps the profile dialog unmounted while a conflict dialog is present.
+- The API client now accepts a 409 cloud record only when it is a full `CheckInRecord`: string fields, a real date key, parseable timestamps, positive integer version, and nullable image fields are all checked. Invalid or missing `details.current` produces a typed `MALFORMED_RESPONSE` error.
+- The dirty-switch dialog now has behavioral coverage for forward and reverse Tab traversal through every action.
+
+## TDD And Verification
+
+1. RED: `npm run test:unit -- tests/unit/checkins/image-note-uploader.test.tsx tests/unit/checkins/api.test.ts tests/unit/checkins/workspace.test.tsx`
+   - Failed as expected: pending compression survived remove, malformed 409 records remained conflicts, and profile/conflict dialogs overlapped.
+2. GREEN: the focused unit suite passed with 19 files and 74 tests.
+3. Full unit: `npm run test:unit`
+   - PASS: 19 files, 74 tests.
+4. Rendered: `npm run test:rendered`
+   - PASS: 4 tests.
+5. Integration: `npm run test:integration`
+   - PASS: 3 files, 9 tests, including profile behavior.
+6. Build: `npm run build`
+   - PASS.
+7. Lint: `npm run lint`
+   - PASS.
+8. Diff check: `git diff --check`
+   - PASS.
+
+## Concerns
+
+- None for these interaction fixes. The existing Task 11-owned Cloudflare typecheck gap remains outside this scope.

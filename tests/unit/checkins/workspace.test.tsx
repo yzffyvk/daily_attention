@@ -305,6 +305,106 @@ describe("CheckInWorkspace", () => {
     expect(dialog).not.toBeInTheDocument();
   });
 
+  it("cycles Tab and Shift+Tab through every unsaved dialog action", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    renderWorkspace("2026-07-23");
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("attention"), "待保存内容");
+    await user.click(screen.getByRole("button", { name: /7月24日/ }));
+
+    const save = screen.getByRole("button", { name: "保存并切换" });
+    const discard = screen.getByRole("button", { name: "放弃修改" });
+    const cancel = screen.getByRole("button", { name: "取消" });
+    const close = screen.getByRole("button", { name: "关闭" });
+    await waitFor(() => expect(save).toHaveFocus());
+
+    await user.tab();
+    expect(discard).toHaveFocus();
+    await user.tab();
+    expect(cancel).toHaveFocus();
+    await user.tab();
+    expect(close).toHaveFocus();
+    await user.tab();
+    expect(save).toHaveFocus();
+
+    await user.tab({ shift: true });
+    expect(close).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(cancel).toHaveFocus();
+  });
+
+  it("closes the profile dialog and keeps only the conflict dialog during a save conflict", async () => {
+    const date = "2026-07-23";
+    const initial = record(date, "云端初版");
+    const cloud = record(date, "云端新版本", 2);
+    const save = deferred<Response>();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        if (init?.method === "PUT") {
+          return save.promise;
+        }
+        if (path.endsWith(`/${date}`)) {
+          return Promise.resolve(response({ ok: true, data: initial, requestId: "date-request" }));
+        }
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    render(
+      <TestQueryProvider>
+        <CheckInWorkspace
+          initialDate={date}
+          initialProfile={{ id: "profile-1", avatarKey: 1, displayName: "学习者" }}
+        />
+      </TestQueryProvider>,
+    );
+    const user = userEvent.setup();
+    const attention = screen.getByLabelText("attention");
+    await waitFor(() => expect(attention).toHaveValue("云端初版"));
+    await user.type(attention, "，本地补充");
+    await user.click(screen.getByRole("button", { name: "打开账户菜单" }));
+    await user.click(screen.getByRole("menuitem", { name: "编辑资料" }));
+    expect(screen.getByRole("dialog", { name: "编辑资料" })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "编辑资料" })).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "打开账户菜单" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /今日/ })).toBeDisabled();
+    save.resolve(
+      response({
+        ok: false,
+        error: {
+          code: "VERSION_CONFLICT",
+          message: "云端记录已更新，请确认后重试",
+          details: { current: cloud },
+        },
+        requestId: "conflict-request",
+      }, 409),
+    );
+
+    const conflict = await screen.findByRole("dialog", { name: "云端记录已更新" });
+    expect(screen.queryByRole("dialog", { name: "编辑资料" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("dialog")).toEqual([conflict]);
+    expect(screen.getByRole("button", { name: "打开账户菜单" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /今日/ })).toBeDisabled();
+  });
+
   it("suspends the dirty dialog for a version conflict and retries with the cloud version", async () => {
     const date = "2026-07-23";
     const cloud = record(date, "云端的新版本", 2);
