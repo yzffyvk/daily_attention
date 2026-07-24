@@ -30,7 +30,7 @@
 
 RED: The pre-existing, verbatim schema test was run before production migration SQL. It failed because the private schema and four application tables were absent. The same run also revealed that the requested three calls to `has_check(schema, table, constraint_name, description)` are not valid in the installed test harness.
 
-GREEN: After `npx supabase db reset`, the exact test reached and passed assertions 1-9 (all migration-backed table/schema/key/index assertions). It cannot reach assertions 10-12 because the test's four-argument `has_check` invocation is unavailable. Independent catalog checks prove the required named constraints exist:
+Historical GREEN evidence: After `npx supabase db reset`, the exact test reached and passed assertions 1-9 (all migration-backed table/schema/key/index assertions). It could not reach assertions 10-12 because the test's four-argument `has_check` invocation was unavailable. Independent catalog checks proved the required named constraints existed:
 
 - `profiles_avatar_key_check`
 - `check_ins_attention_check`
@@ -58,5 +58,84 @@ The official pgTAP documentation lists `has_check` only as a two/three-argument 
 
 ## Concerns
 
-1. The exact, preserved schema test cannot pass under the local Supabase CLI 2.109.1 pgTAP harness because its three four-argument `has_check` calls do not exist. Changing them to a supported assertion would violate the instruction to preserve the exact RED test, so no such change was made.
+1. There is no remaining pgTAP blocker for Task 2: the catalog-backed assertions pass under the local harness. The original failed-attempt evidence is retained below for history.
 2. Repository-wide `npm run typecheck` is already blocked by missing Cloudflare worker type declarations in files outside Task 2. This task does not add or modify those references.
+
+## Historical Focused Fix Attempt: Human-Approved pgTAP API Replacement
+
+**Decision:** The human explicitly approved replacing the three four-argument `has_check(schema, table, constraint_name, description)` calls with the supported `has_constraint(schema, table, constraint_name, description)` calls, preserving named-constraint verification. No other assertion or application/migration code was changed.
+
+**Result:** `BLOCKED`. The local pgTAP harness also lacks the four-argument `has_constraint` overload.
+
+**Files changed:**
+
+- `supabase/tests/database/schema.test.sql` — replaced exactly three assertion function names.
+- `.superpowers/sdd/task-2-report.md` — appended this fix record.
+
+**Command:**
+
+```text
+npx supabase test db
+```
+
+**Exact output:**
+
+```text
+Connecting to local database...
+psql:/Users/yanzifeng/Documents/今天你Ai了吗？/.worktrees/supabase-web-v1/supabase/tests/database/schema.test.sql:13: ERROR:  function has_constraint(unknown, unknown, unknown, unknown) does not exist
+LINE 1: select has_constraint('public', 'profiles', 'profiles_avatar...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+/Users/yanzifeng/Documents/今天你Ai了吗？/.worktrees/supabase-web-v1/supabase/tests/database/schema.test.sql ..
+Dubious, test returned 3 (wstat 768, 0x300)
+Failed 3/12 subtests
+
+Test Summary Report
+-------------------
+/Users/yanzifeng/Documents/今天你Ai了吗？/.worktrees/supabase-web-v1/supabase/tests/database/schema.test.sql (Wstat: 768 (exited 3) Tests: 9 Failed: 0)
+  Non-zero exit status: 3
+  Parse errors: Bad plan.  You planned 12 tests but ran 9.
+Files=1, Tests=9,  0 wallclock secs ( 0.01 usr  0.00 sys =  0.01 CPU)
+Result: FAIL
+error running container: exit 1
+```
+
+**GREEN evidence:** Assertions 1-9 passed before the unsupported function error (`Tests: 9 Failed: 0`), but the covering 12-assertion test is not GREEN. No commit was created because the required covering test did not pass.
+
+**Self-review:** The working diff contains only the three approved SQL function-name substitutions and this report section. No other assertion, application code, or migration code was changed.
+
+## Focused Fix Follow-Up: Catalog-Backed Constraint Assertions
+
+**Decision:** The human explicitly approved replacing only the final three unsupported named-check assertions with PostgreSQL catalog-backed `ok(exists(...), description)` assertions. Each assertion joins `pg_constraint` to `pg_class` and `pg_namespace` and verifies the exact schema, table, constraint name, and `contype = 'c'`. The original descriptions and total plan of 12 were preserved.
+
+**Result:** `GREEN`. The covering database test passed after the three approved assertion replacements.
+
+**Command:**
+
+```text
+npx supabase test db
+```
+
+**Exact result:**
+
+```text
+Connecting to local database...
+/Users/yanzifeng/Documents/今天你Ai了吗？/.worktrees/supabase-web-v1/supabase/tests/database/schema.test.sql .. ok
+All tests successful.
+Files=1, Tests=12,  0 wallclock secs ( 0.01 usr + 0.00 sys = 0.01 CPU)
+Result: PASS
+npm notice
+npm notice New major version of npm available! 10.9.8 -> 12.0.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.1
+npm notice To update run: npm install -g npm@12.0.1
+npm notice
+```
+
+**GREEN evidence:** All 12 planned assertions passed, including the three catalog-backed checks for `profiles_avatar_key_check`, `check_ins_attention_check`, and `check_ins_source_url_check`.
+
+**Final files changed:**
+
+- `supabase/tests/database/schema.test.sql` — replaced only the final three unsupported assertions.
+- `.superpowers/sdd/task-2-report.md` — documented the historical failed attempt and successful follow-up.
+
+**Self-review:** No migration, application code, or first-nine assertion was changed. `git diff --check` passed after removing incidental report trailing spaces.
