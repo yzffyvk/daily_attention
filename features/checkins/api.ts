@@ -85,6 +85,7 @@ function currentRecord(value: unknown): CheckInRecord | null | undefined {
     !isNullableString(value.imagePath) ||
     typeof value.imageName !== "string" ||
     !isNullableString(value.imageUrl) ||
+    typeof value.version !== "number" ||
     !Number.isInteger(value.version) ||
     value.version <= 0 ||
     !isTimestamp(value.createdAt) ||

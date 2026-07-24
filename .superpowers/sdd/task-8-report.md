@@ -152,7 +152,7 @@ COMPLETE_WITH_TYPECHECK_CONCERN
 ## Commit Range
 
 - Base: `79f3fda`
-- Follow-up commit: `7ec1415`
+- Follow-up commit: `e9744f3`
 
 ## Implementation
 
@@ -172,3 +172,16 @@ COMPLETE_WITH_TYPECHECK_CONCERN
 ## Concerns
 
 - `npm run typecheck` still reports the known Cloudflare globals/modules plus an existing `features/checkins/api.ts` narrowing diagnostic. This follow-up does not modify those paths.
+
+---
+
+# Task 8 Type Guard Fix
+
+- Added an explicit numeric narrowing check before validating the cloud
+  record's positive integer `version`.
+- `npm run typecheck -- --incremental false` now reports only the six legacy
+  Cloudflare diagnostics owned by Task 11; no Task 8 file is reported.
+- `npm run test:unit -- tests/unit/checkins/api.test.ts`: PASS, 19 files and
+  78 tests.
+- `npm run lint`: PASS.
+- `git diff --check`: PASS.
