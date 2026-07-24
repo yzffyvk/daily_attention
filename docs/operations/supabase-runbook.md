@@ -51,9 +51,10 @@ NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<Supabase publishable key>
 SUPABASE_SECRET_KEY=<Supabase secret key>
 AUTH_RATE_LIMIT_PEPPER=<at least 32 random bytes>
+APP_ORIGIN=https://<your-public-hostname>
 ```
 
-The first two are intentionally public browser configuration. `SUPABASE_SECRET_KEY` and `AUTH_RATE_LIMIT_PEPPER` are server-only secrets: mark them secret, scope them to the target environment, and do not place them in `NEXT_PUBLIC_*` variables, source files, build arguments, browser logs, or screenshots. After setting values, the release owner must build, save, and deploy the exact source commit through the managed Sites workflow.
+The first two are intentionally public browser configuration. `SUPABASE_SECRET_KEY` and `AUTH_RATE_LIMIT_PEPPER` are server-only secrets: mark them secret, scope them to the target environment, and do not place them in `NEXT_PUBLIC_*` variables, source files, build arguments, browser logs, or screenshots. `APP_ORIGIN` is the exact trusted HTTPS origin used for canonical social-image metadata; it must not contain a path. After setting values, the release owner must build, save, and deploy the exact source commit through the managed Sites workflow.
 
 ## Post-Deploy RLS Verification
 

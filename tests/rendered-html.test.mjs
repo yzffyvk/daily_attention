@@ -23,14 +23,15 @@ test("guards the cloud journal page and installs one query provider", async () =
   assert.match(workspaceClient, /<CheckInWorkspace \{\.\.\.props\} \/>/);
 });
 
-test("derives social image metadata from the forwarded request origin", async () => {
+test("derives social image metadata from a trusted configured origin", async () => {
   const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
 
-  assert.match(layout, /x-forwarded-host/);
-  assert.match(layout, /x-forwarded-proto/);
+  assert.match(layout, /process\.env\.APP_ORIGIN/);
+  assert.match(layout, /APP_ORIGIN must use HTTPS outside local development/);
   assert.match(layout, /new URL\(\s*"\/og\.png",\s*metadataBase\s*\)/);
   assert.match(layout, /images:\s*\[\{\s*url:\s*ogImage/);
   assert.match(layout, /images:\s*\[ogImage\]/);
+  assert.doesNotMatch(layout, /x-forwarded-(host|proto)/);
   assert.doesNotMatch(layout, /og-attention\.png/);
 });
 

@@ -27,6 +27,7 @@ export function localSupabaseBindings() {
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: values.PUBLISHABLE_KEY,
     SUPABASE_SECRET_KEY: values.SECRET_KEY,
     AUTH_RATE_LIMIT_PEPPER: "e2e-local-rate-limit-pepper",
+    APP_ORIGIN: "http://127.0.0.1:3200",
   };
   if (Object.values(bindings).some((value) => typeof value !== "string" || value.length === 0)) {
     throw new Error("Local Supabase did not report the bindings required by E2E tests.");

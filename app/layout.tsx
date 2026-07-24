@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { headers } from "next/headers";
 import "./globals.css";
 import { Providers } from "./providers";
 
@@ -14,27 +13,22 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-function metadataOrigin(requestHeaders: Headers) {
-  const requestedHost = (
-    requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? ""
-  ).split(",")[0]?.trim();
-  const forwardedProtocol = requestHeaders.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
-  const protocol = forwardedProtocol === "http" || forwardedProtocol === "https"
-    ? forwardedProtocol
-    : requestedHost?.startsWith("localhost") || requestedHost?.startsWith("127.0.0.1")
-      ? "http"
-      : "https";
-
+function metadataOrigin() {
+  const configuredOrigin = process.env.APP_ORIGIN ?? "http://127.0.0.1:3000";
   try {
-    return new URL(`${protocol}://${requestedHost}`);
+    const origin = new URL(configuredOrigin);
+    if (origin.origin !== configuredOrigin.replace(/\/+$/u, "")) throw new Error("APP_ORIGIN must not include a path");
+    if (origin.protocol !== "https:" && origin.hostname !== "localhost" && origin.hostname !== "127.0.0.1") {
+      throw new Error("APP_ORIGIN must use HTTPS outside local development");
+    }
+    return origin;
   } catch {
-    return new URL("http://localhost:3200");
+    throw new Error("APP_ORIGIN must be an absolute trusted origin");
   }
 }
 
 export async function generateMetadata(): Promise<Metadata> {
-  const requestHeaders = await headers();
-  const metadataBase = metadataOrigin(requestHeaders);
+  const metadataBase = metadataOrigin();
   const ogImage = new URL("/og.png", metadataBase).toString();
   const description = "Attention is all you need~";
 

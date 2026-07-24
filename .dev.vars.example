@@ -2,3 +2,4 @@ NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=replace-with-local-anon-key
 SUPABASE_SECRET_KEY=replace-with-local-service-role-key
 AUTH_RATE_LIMIT_PEPPER=replace-with-at-least-32-random-bytes
+APP_ORIGIN=http://127.0.0.1:3000

@@ -10,8 +10,9 @@ export default defineConfig({
   timeout: 60_000,
   use: {
     baseURL: "http://127.0.0.1:3200",
-    trace: "retain-on-failure",
-    screenshot: "only-on-failure",
+    trace: "off",
+    screenshot: "off",
+    video: "off",
   },
   webServer: {
     command: "node scripts/run-e2e-server.mjs",

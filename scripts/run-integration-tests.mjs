@@ -28,6 +28,7 @@ function statusEnvironment() {
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: values.PUBLISHABLE_KEY,
     SUPABASE_SECRET_KEY: values.SECRET_KEY,
     AUTH_RATE_LIMIT_PEPPER: "integration-test-rate-limit-pepper",
+    APP_ORIGIN: "http://127.0.0.1:3100",
   };
   if (Object.values(bindings).some((value) => typeof value !== "string" || value.length === 0)) {
     throw new Error("Local Supabase did not report the bindings required by integration tests.");
