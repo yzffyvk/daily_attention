@@ -69,6 +69,15 @@ describe("authentication routes", () => {
         })
     ).status,
     ).toBe(200);
+    const avatarOnlyAfterRename = await session.request("/api/me", {
+      method: "PATCH",
+      body: JSON.stringify({ avatarKey: 1 }),
+    });
+    expect(avatarOnlyAfterRename.status).toBe(200);
+    expect(avatarOnlyAfterRename.body.data.profile).toMatchObject({
+      displayName: renamed,
+      avatarKey: 1,
+    });
     await session.post("/api/auth/logout", {});
     trackNameBucket("login", ip, name);
     expect((await session.post("/api/auth/login", { name, password: "password123" })).status).toBe(401);

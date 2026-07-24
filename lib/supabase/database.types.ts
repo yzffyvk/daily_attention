@@ -149,6 +149,22 @@ export type Database = {
           user_id: string
         }[]
       }
+      update_profile_avatar: {
+        Args: { target_avatar_key: number; target_user_id: string }
+        Returns: {
+          avatar_key: number
+          created_at: string
+          display_name: string
+          id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       update_profile_identity: {
         Args: {
           target_avatar_key: number

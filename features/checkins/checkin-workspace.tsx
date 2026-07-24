@@ -164,6 +164,7 @@ export function CheckInWorkspace({
   const [draft, setDraft] = useState<CheckInDraft>(() => draftFromRecord(null));
   const [draftBaseRecord, setDraftBaseRecord] = useState<CheckInRecord | null>(null);
   const [baseVersion, setBaseVersion] = useState<number | null>(null);
+  const [baseRecordExists, setBaseRecordExists] = useState(false);
   const [hydratedDate, setHydratedDate] = useState<string | null>(null);
   const [pendingDate, setPendingDate] = useState<string | null>(null);
   const [logoutPending, setLogoutPending] = useState(false);
@@ -194,6 +195,7 @@ export function CheckInWorkspace({
   const isAwaitingSelectedRecord = hydratedDate !== selectedDate || checkInQuery.isFetching;
   const hasSelectedRecordError = checkInQuery.isError;
   const isEditorLocked = isSaving || saveMutation.isPending || isAwaitingSelectedRecord || hasSelectedRecordError || isCleaningUpImage || isPreparingImage;
+  const isHeaderBusy = isSaving || saveMutation.isPending || isCleaningUpImage || isPreparingImage || Boolean(conflict);
   const selectedRecord = checkInQuery.data ?? null;
   const isDirty = isDraftDirty(draft, draftBaseRecord);
   const canSave = Boolean(draft.attention.trim());
@@ -229,6 +231,7 @@ export function CheckInWorkspace({
     setDraft(nextDraft);
     setDraftBaseRecord(snapshot);
     setBaseVersion(snapshot?.version ?? null);
+    setBaseRecordExists(snapshot !== null);
     setHydratedDate(date);
   }, []);
 
@@ -433,6 +436,7 @@ export function CheckInWorkspace({
     if (saveInFlightRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current || editorLockedRef.current) return false;
     const activeDraft = draft;
     const activeRecord = draftBaseRecord;
+    const activeRecordExists = baseRecordExists;
     const activeDate = selectedDate;
     const attention = activeDraft.attention.trim();
     if (!attention) {
@@ -478,14 +482,14 @@ export function CheckInWorkspace({
       }
       hydrateDraft(record, activeDate);
       setStatus(
-        activeRecord
+        activeRecordExists
           ? `${formatDate(activeDate)}的修改已保存`
           : `${formatDate(activeDate)}打卡完成`,
         "success",
       );
       void queryClient.invalidateQueries({ queryKey: checkInKeys.date(activeDate) });
 
-      if (!activeRecord) {
+      if (!activeRecordExists) {
         if (!isMuted) playCheckInChime();
         const animated = launchCelebration();
         setIsCelebrating(true);
@@ -605,18 +609,18 @@ export function CheckInWorkspace({
       <section className="page-shell">
         <AppHeader
           initialProfile={initialProfile}
-          isBusy={isEditorLocked || Boolean(conflict)}
+          isBusy={isHeaderBusy}
           isDateSelectionDisabled={isEditorLocked}
           isCelebrating={isCelebrating}
           isMuted={isMuted}
           onRequestLogout={() => {
-            if (editorLockedRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current) return;
+            if (isHeaderBusy) return;
             if (isDirty) setLogoutPending(true);
             else void logout();
           }}
           onSelectToday={selectToday}
           onToggleMuted={() => {
-            if (editorLockedRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current) return;
+            if (isHeaderBusy) return;
             const nextMuted = !isMuted;
             setIsMuted(nextMuted);
             window.localStorage.setItem(muteStorageKey, String(nextMuted));
@@ -741,6 +745,7 @@ export function CheckInWorkspace({
           onClose={() => {
             if (!imageCleanupInFlightRef.current && !imagePreparationInFlightRef.current) {
               setBaseVersion(conflict.current?.version ?? null);
+              setBaseRecordExists(conflict.current !== null);
               setConflict(null);
             }
           }}

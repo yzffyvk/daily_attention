@@ -573,6 +573,102 @@ describe("CheckInWorkspace", () => {
     expect(screen.getByRole("button", { name: new RegExp(`${formatCalendarDate(date)}，已保存：缓存中的初版`) })).toBeVisible();
   });
 
+  it("celebrates when keeping local content retries an insert after the cloud record was deleted", async () => {
+    const date = "2026-07-23";
+    const initial = record(date, "原本的云端记录");
+    let saves = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        if (init?.method === "PUT") {
+          saves += 1;
+          if (saves === 1) {
+            return Promise.resolve(response({
+              ok: false,
+              error: {
+                code: "VERSION_CONFLICT",
+                message: "云端记录已被删除，请确认后重试",
+                details: { current: null },
+              },
+              requestId: "delete-conflict-request",
+            }, 409));
+          }
+          return Promise.resolve(response({
+            ok: true,
+            data: record(date, "保留本地后重新创建"),
+            requestId: "insert-request",
+          }));
+        }
+        if (path.endsWith(`/${date}`)) {
+          return Promise.resolve(response({ ok: true, data: initial, requestId: "date-request" }));
+        }
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    renderWorkspace(date);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByLabelText("attention")).toHaveValue("原本的云端记录"));
+    await user.clear(screen.getByLabelText("attention"));
+    await user.type(screen.getByLabelText("attention"), "保留本地后重新创建");
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+    await user.click(await screen.findByRole("button", { name: "保留本地内容" }));
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+
+    expect(await screen.findByText("这一天的 attention 已收下")).toBeVisible();
+    expect(screen.queryByText("修改已保存到云端")).not.toBeInTheDocument();
+  });
+
+  it("uses edit feedback when keeping local content retries against a record created in the cloud", async () => {
+    const date = "2026-07-23";
+    const cloudRecord = record(date, "云端后来创建的记录", 2);
+    let saves = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        if (init?.method === "PUT") {
+          saves += 1;
+          if (saves === 1) {
+            return Promise.resolve(response({
+              ok: false,
+              error: {
+                code: "VERSION_CONFLICT",
+                message: "云端记录已更新，请确认后重试",
+                details: { current: cloudRecord },
+              },
+              requestId: "create-conflict-request",
+            }, 409));
+          }
+          return Promise.resolve(response({
+            ok: true,
+            data: { ...cloudRecord, attention: "保留本地后覆盖云端" },
+            requestId: "update-request",
+          }));
+        }
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    renderWorkspace(date);
+    const user = userEvent.setup();
+    await waitForEditorReady();
+    await user.type(screen.getByLabelText("attention"), "保留本地后覆盖云端");
+    await user.click(screen.getByRole("button", { name: /完成打卡/ }));
+    await user.click(await screen.findByRole("button", { name: "保留本地内容" }));
+    await user.click(screen.getByRole("button", { name: /完成打卡/ }));
+
+    expect(await screen.findByText("修改已保存到云端")).toBeVisible();
+    expect(screen.queryByText("这一天的 attention 已收下")).not.toBeInTheDocument();
+  });
+
   it("locks every workspace decision while reset waits for candidate image cleanup", async () => {
     const date = "2026-07-23";
     const initial = record(date, "云端初版");
@@ -762,6 +858,56 @@ describe("CheckInWorkspace", () => {
     await waitFor(() => expect(screen.getByLabelText("attention")).toBeEnabled());
     expect(screen.getByLabelText("attention")).toHaveValue("重试后的云端内容");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("keeps account controls available while the selected record has a session error", async () => {
+    const date = "2026-07-23";
+    const profile = { id: "profile-1", avatarKey: 1, displayName: "学习者" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        if (path.startsWith("/api/checkins/stats?")) {
+          return Promise.resolve(response({
+            ok: true,
+            data: { totalCount: 0, currentStreak: 0, hasTodayRecord: false },
+            requestId: "stats-request",
+          }));
+        }
+        if (path === "/api/me") {
+          return Promise.resolve(response({ ok: true, data: { profile }, requestId: "profile-request" }));
+        }
+        if (path.endsWith(`/${date}`)) {
+          return Promise.resolve(response({
+            ok: false,
+            error: { code: "SESSION_EXPIRED", message: "登录已失效，请重新登录" },
+            requestId: "expired-request",
+          }, 401));
+        }
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    render(
+      <TestQueryProvider>
+        <CheckInWorkspace initialDate={date} initialProfile={profile} initialToday={getTodayKey()} />
+      </TestQueryProvider>,
+    );
+    const user = userEvent.setup();
+
+    await screen.findByRole("alert");
+    const accountTrigger = screen.getByRole("button", { name: "打开账户菜单" });
+    expect(accountTrigger).toBeEnabled();
+    await user.click(accountTrigger);
+    await user.click(screen.getByRole("menuitem", { name: "编辑资料" }));
+    await user.clear(screen.getByLabelText("名称"));
+    await user.type(screen.getByLabelText("名称"), "未保存的资料名");
+
+    expect(screen.getByLabelText("名称")).toHaveValue("未保存的资料名");
+    expect(screen.getByRole("button", { name: "关闭资料设置" })).toBeEnabled();
   });
 
   it("keeps the selected date and displayed month when a cross-month switch is cancelled", async () => {

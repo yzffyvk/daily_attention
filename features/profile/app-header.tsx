@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarDays, Check, ChevronDown, LogOut, Pencil, Volume2, VolumeX, X } from "lucide-react";
-import type { FormEvent } from "react";
+import type { FormEvent, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, getCurrentProfile, updateCurrentProfile } from "@/features/checkins/api";
 import { formatDate } from "@/features/checkins/dates";
@@ -36,9 +36,11 @@ function normalizeDisplayName(value: string) {
 function ProfileDialog({
   profile,
   onClose,
+  returnFocusRef,
 }: {
   profile: AccountProfile;
   onClose: () => void;
+  returnFocusRef: RefObject<HTMLButtonElement | null>;
 }) {
   const queryClient = useQueryClient();
   const [name, setName] = useState(profile.displayName);
@@ -47,7 +49,7 @@ function ProfileDialog({
   const [error, setError] = useState("");
   const dialogRef = useRef<HTMLElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
-  const priorFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
   const normalizedName = normalizeDisplayName(name);
   const nameChanged = normalizedName !== profile.displayName;
   const profileMutation = useMutation({
@@ -58,15 +60,17 @@ function ProfileDialog({
   });
 
   useEffect(() => {
-    priorFocusRef.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
+    onCloseRef.current = onClose;
+  });
+
+  useEffect(() => {
+    const returnFocusTarget = returnFocusRef.current;
     const focusTimer = window.setTimeout(() => nameInputRef.current?.focus(), 0);
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== "Tab" || !dialogRef.current) return;
@@ -91,9 +95,9 @@ function ProfileDialog({
     return () => {
       window.clearTimeout(focusTimer);
       document.removeEventListener("keydown", handleKeyDown);
-      priorFocusRef.current?.focus();
+      returnFocusTarget?.focus();
     };
-  }, [onClose]);
+  }, [returnFocusRef]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -207,6 +211,7 @@ export function AppHeader({
 }: AppHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const accountTriggerRef = useRef<HTMLButtonElement>(null);
   const [previousBusy, setPreviousBusy] = useState(isBusy);
   const profileQuery = useQuery({
     queryKey: profileKey,
@@ -250,6 +255,7 @@ export function AppHeader({
                   className="current-account"
                   disabled={isBusy}
                   onClick={() => setMenuOpen((open) => !open)}
+                  ref={accountTriggerRef}
                   type="button"
                 >
                   <img alt="" src={avatarPath(profile.avatarKey)} />
@@ -355,7 +361,7 @@ export function AppHeader({
           </button>
         </div>
       </header>
-      {profileOpen && profile && !isBusy ? <ProfileDialog onClose={() => setProfileOpen(false)} profile={profile} /> : null}
+      {profileOpen && profile && !isBusy ? <ProfileDialog onClose={() => setProfileOpen(false)} profile={profile} returnFocusRef={accountTriggerRef} /> : null}
     </>
   );
 }

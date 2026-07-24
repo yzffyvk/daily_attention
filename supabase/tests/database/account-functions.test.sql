@@ -1,5 +1,5 @@
 begin;
-select plan(35);
+select plan(40);
 
 select function_privs_are(
   'public',
@@ -32,6 +32,14 @@ select function_privs_are(
   'authenticated',
   array[]::text[],
   'authenticated cannot directly mutate private aliases'
+);
+select function_privs_are(
+  'public',
+  'update_profile_avatar',
+  array['uuid', 'smallint'],
+  'authenticated',
+  array[]::text[],
+  'authenticated cannot directly update profile avatars'
 );
 select function_privs_are(
   'public',
@@ -161,6 +169,12 @@ select throws_ok(
   'permission denied for function update_profile_identity',
   'anon cannot update profile identity'
 );
+select throws_ok(
+  $$select public.update_profile_avatar('00000000-0000-4000-8000-000000000003'::uuid, 5::smallint)$$,
+  '42501',
+  'permission denied for function update_profile_avatar',
+  'anon cannot update profile avatars'
+);
 
 set local role authenticated;
 select set_config(
@@ -197,6 +211,12 @@ select throws_ok(
   '42501',
   'permission denied for function update_profile_identity',
   'authenticated cannot update profile identity'
+);
+select throws_ok(
+  $$select public.update_profile_avatar('00000000-0000-4000-8000-000000000003'::uuid, 5::smallint)$$,
+  '42501',
+  'permission denied for function update_profile_avatar',
+  'authenticated cannot update profile avatars'
 );
 
 set local role service_role;
@@ -268,6 +288,20 @@ select results_eq(
 select is_empty(
   $$select * from public.resolve_login_name('Lifecycle')$$,
   'old login name no longer resolves after the identity update'
+);
+select results_eq(
+  $$select id, display_name, avatar_key
+    from public.update_profile_avatar(
+      '00000000-0000-4000-8000-000000000003'::uuid,
+      5::smallint
+    )$$,
+  $$values ('00000000-0000-4000-8000-000000000003'::uuid, 'Renamed'::varchar, 5::smallint)$$,
+  'avatar-only update preserves the password-authorized renamed identity'
+);
+select results_eq(
+  $$select * from public.resolve_login_name('Renamed')$$,
+  $$values ('00000000-0000-4000-8000-000000000003'::uuid, 'lifecycle@internal.invalid'::text)$$,
+  'avatar-only update keeps the renamed login alias'
 );
 
 select * from finish();

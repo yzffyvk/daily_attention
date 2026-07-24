@@ -326,3 +326,44 @@ COMPLETE_WITH_TYPECHECK_CONCERN
 ## Concerns
 
 - The existing Cloudflare ambient-type gap remains the sole failing verification check. This change neither modifies nor suppresses those diagnostics.
+
+---
+
+# Task 8 Final Review Fixes
+
+## Status
+
+COMPLETE_WITH_TYPECHECK_CONCERN
+
+## Commit Range
+
+- Base: `b8d433f`
+- Final review-fix commit: `HEAD` after this report is committed
+
+## Implementation
+
+- Avatar-only profile PATCH now calls a dedicated service-role database function that changes only `profiles.avatar_key`; it cannot overwrite a concurrent password-authorized rename or login alias. The route no longer reads a name for this path, and the generated Supabase RPC types include the new function.
+- Selected-record loading and errors still lock only date/editor actions. The account menu, profile editing, and logout controls use a separate header-operation busy state, so background revalidation and a session error cannot discard an open profile edit.
+- Keep-local conflict resolution now also adopts whether the cloud record exists. A retry after cloud deletion is treated as a new check-in and celebrates; a retry over a concurrently created cloud record is treated as an edit and receives the light save feedback.
+- The profile dialog captures the persistent account trigger before the menu unmounts and restores focus to that trigger after closing. Its Escape handler uses a current callback ref without re-running the focus effect.
+
+## TDD And Verification
+
+1. RED: dedicated route, workspace, and profile tests failed against the reviewed implementation: avatar PATCH returned 500 without the new port, selected-record errors disabled the account trigger, conflict feedback was inverted in both retry directions, and profile-close focus returned to the document body.
+2. Focused unit: `npm run test:unit -- tests/unit/auth/service.test.ts tests/unit/auth/me-route.test.ts tests/unit/profile/app-header.test.tsx tests/unit/checkins/workspace.test.tsx`
+   - PASS: 22 files, 118 tests.
+3. Full unit: `npm run test:unit`
+   - PASS: 22 files, 118 tests.
+4. Integration: `npm run test:integration`
+   - PASS: 3 files, 10 tests, including avatar-only update after a rename.
+5. Database: `npm run supabase:test`
+   - PASS: 4 files, 110 assertions. The account-function suite verifies role restrictions and that avatar-only update preserves the renamed identity and alias.
+6. Rendered: `npm run test:rendered`
+   - PASS: 4 tests.
+7. Build: `npm run build`
+   - PASS.
+8. Lint, typecheck, and diff checks are recorded with the final commit verification.
+
+## Concerns
+
+- `tsc --noEmit --incremental false` retains only the six existing Task 11-owned Cloudflare ambient-type diagnostics. No Task 8 code masks or changes them.

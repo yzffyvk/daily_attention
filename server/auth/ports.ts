@@ -19,6 +19,10 @@ export type AuthPorts = {
     loginName: string;
     avatarKey: number;
   }): Promise<AccountProfile>;
+  updateProfileAvatar(input: {
+    userId: string;
+    avatarKey: number;
+  }): Promise<AccountProfile>;
   updatePassword(userId: string, password: string): Promise<void>;
   signIn(email: string, password: string): Promise<void>;
 };

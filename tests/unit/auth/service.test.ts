@@ -12,6 +12,7 @@ function ports(): AuthPorts {
     readRecoveryDigest: vi.fn(),
     replaceRecoveryDigest: vi.fn().mockResolvedValue(true),
     updateProfileIdentity: vi.fn().mockResolvedValue({ id: "user-1", displayName: "学习者", avatarKey: 2 }),
+    updateProfileAvatar: vi.fn().mockResolvedValue({ id: "user-1", displayName: "学习者", avatarKey: 2 }),
     updatePassword: vi.fn().mockResolvedValue(undefined),
     signIn: vi.fn().mockResolvedValue(undefined),
   };

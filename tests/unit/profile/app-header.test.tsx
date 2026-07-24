@@ -182,4 +182,43 @@ describe("profile header", () => {
     expect(screen.getByLabelText("名称")).toHaveValue("已有名称");
     expect(screen.getByRole("dialog", { name: "编辑资料" })).toBeVisible();
   });
+
+  it("restores focus to the account trigger after closing the profile dialog", async () => {
+    const profile = { id: "profile-1", avatarKey: 1, displayName: "学习者" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        if (String(input).startsWith("/api/checkins/stats?")) {
+          return Promise.resolve(response({
+            ok: true,
+            data: { totalCount: 0, currentStreak: 0, hasTodayRecord: false },
+            requestId: "stats-request",
+          }));
+        }
+        return Promise.resolve(response({ ok: true, data: { profile }, requestId: "profile-request" }));
+      }),
+    );
+
+    render(
+      <TestQueryProvider>
+        <AppHeader
+          initialProfile={profile}
+          isCelebrating={false}
+          isMuted={false}
+          onRequestLogout={vi.fn()}
+          onSelectToday={vi.fn()}
+          onToggleMuted={vi.fn()}
+          today="2026-07-23"
+        />
+      </TestQueryProvider>,
+    );
+    const user = userEvent.setup();
+    const accountTrigger = screen.getByRole("button", { name: "打开账户菜单" });
+
+    await user.click(accountTrigger);
+    await user.click(screen.getByRole("menuitem", { name: "编辑资料" }));
+    await user.click(screen.getByRole("button", { name: "关闭资料设置" }));
+
+    expect(accountTrigger).toHaveFocus();
+  });
 });

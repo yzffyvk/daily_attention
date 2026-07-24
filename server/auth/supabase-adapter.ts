@@ -101,6 +101,15 @@ export async function createSupabaseAuthAdapter() {
       if (!data) throw new Error("Profile was not updated");
       return profile(data);
     },
+    async updateProfileAvatar(input) {
+      const { data, error } = await admin.rpc("update_profile_avatar", {
+        target_user_id: input.userId,
+        target_avatar_key: input.avatarKey,
+      });
+      throwIfError(error);
+      if (!data) throw new Error("Profile was not updated");
+      return profile(data);
+    },
     async updatePassword(userId, password) {
       const { error } = await admin.auth.admin.updateUserById(userId, { password });
       throwIfError(error);
