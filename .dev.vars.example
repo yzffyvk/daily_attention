@@ -1,5 +1,4 @@
-# Copy this file to .dev.vars for local Cloudflare development.
-# Never commit the real AppSecret.
-WECHAT_APP_ID=
-WECHAT_APP_SECRET=
-WECHAT_REDIRECT_URI=https://your-approved-domain.example/api/auth/wechat/callback
+NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=replace-with-local-anon-key
+SUPABASE_SECRET_KEY=replace-with-local-service-role-key
+AUTH_RATE_LIMIT_PEPPER=replace-with-at-least-32-random-bytes
