@@ -48,12 +48,16 @@ type CheckInEditorProps = {
   isDirty: boolean;
   isLoading: boolean;
   isSaving: boolean;
+  isCleaningUpImage: boolean;
+  isRetryingRecord: boolean;
+  loadError: string;
   message: string;
   messageTone: MessageTone;
   onDraftChange: (change: Partial<CheckInDraft>) => void;
   onImageChange: (selection: ImageSelection, date: string) => void | Promise<void>;
   onImageError: (message: string) => void;
   onReset: () => void | Promise<void>;
+  onRetryRecord: () => void;
   onSubmit: () => void | Promise<unknown>;
 };
 
@@ -64,17 +68,21 @@ export function CheckInEditor({
   isDirty,
   isLoading,
   isSaving,
+  isCleaningUpImage,
+  isRetryingRecord,
+  loadError,
   message,
   messageTone,
   onDraftChange,
   onImageChange,
   onImageError,
   onReset,
+  onRetryRecord,
   onSubmit,
 }: CheckInEditorProps) {
   const canSave = Boolean(draft.attention.trim());
   const state = isDirty ? "未保存" : record ? "已保存" : isLoading ? "正在读取" : "待填写";
-  const isDisabled = isLoading || isSaving;
+  const isDisabled = isLoading || isSaving || isCleaningUpImage;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -99,6 +107,15 @@ export function CheckInEditor({
           </span>
         </div>
       </div>
+
+      {loadError ? (
+        <div className="editor-load-error" role="alert">
+          <p>{loadError}</p>
+          <button disabled={isRetryingRecord} onClick={onRetryRecord} type="button">
+            {isRetryingRecord ? "正在重试…" : "重试"}
+          </button>
+        </div>
+      ) : null}
 
       <form aria-busy={isDisabled} className="checkin-form" onSubmit={submit}>
         <div className="form-grid">

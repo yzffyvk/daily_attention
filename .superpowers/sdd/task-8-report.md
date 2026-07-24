@@ -185,3 +185,47 @@ COMPLETE_WITH_TYPECHECK_CONCERN
   78 tests.
 - `npm run lint`: PASS.
 - `git diff --check`: PASS.
+
+---
+
+# Task 8 Final Gate Fixes
+
+## Status
+
+COMPLETE_WITH_TYPECHECK_CONCERN
+
+## Commit Range
+
+- Base: `8057b38`
+- Final-gate commit: `HEAD` after this report is committed
+
+## Implementation
+
+- The workspace treats a cloud conflict only as `ApiError.status === 409` with `ApiError.code === "VERSION_CONFLICT"`. Other 409 errors, including malformed conflict payloads normalized as `MALFORMED_RESPONSE`, retain the local draft and leave date/month caches and conflict UI untouched.
+- Candidate image cleanup now has a synchronous in-flight ref plus a visible busy state. It locks editor, save/reset, image callbacks, calendar/header controls, dirty-dialog actions, and cloud-conflict actions until deletion settles. Operation tokens prevent stale cleanup continuations from committing a later decision, and save refuses to persist while cleanup is pending.
+- Selected-record query errors keep the editor locked and render an accessible alert with a Retry action. A successful retry hydrates the record again, while `SESSION_EXPIRED` is surfaced with its meaningful server message.
+- The discard-and-logout path now shares the cleanup operation token, closing the remaining cleanup-to-state-change race.
+
+## TDD And Verification
+
+1. RED: focused workspace tests failed on ordinary 409 handling, cleanup locks/dialog controls, and selected-record retry UI before the implementation changes.
+2. Focused unit: `npx vitest run tests/unit/checkins/workspace.test.tsx`
+   - PASS: 1 file, 18 tests.
+3. Full unit: `npm run test:unit`
+   - PASS: 19 files, 83 tests.
+4. Rendered: `npm run test:rendered`
+   - PASS: 4 tests.
+5. Integration: `npm run test:integration`
+   - PASS: 3 files, 9 tests.
+6. Build: `npm run build`
+   - PASS.
+7. Lint: `npm run lint`
+   - PASS.
+8. Typecheck: `npm run typecheck`
+   - Expected repository-wide FAIL only in the six known Task 11-owned Cloudflare diagnostics: missing `cloudflare:workers` in `app/api/auth/wechat/callback/route.ts`, `app/api/auth/wechat/start/route.ts`, and `db/index.ts`; missing `Fetcher`, `D1Database`, and `R2Bucket` in `worker/index.ts`. No modified Task 8 file is reported.
+9. `git diff --check`
+   - PASS.
+
+## Concerns
+
+- The existing Task 11-owned Cloudflare typecheck gap remains. This final gate change does not modify or mask those diagnostics.

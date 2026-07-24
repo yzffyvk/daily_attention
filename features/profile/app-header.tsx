@@ -291,6 +291,7 @@ export function AppHeader({
             <button
               aria-label={isMuted ? "开启打卡提示音" : "关闭打卡提示音"}
               className="icon-button sound-button"
+              disabled={isBusy}
               onClick={onToggleMuted}
               title={isMuted ? "开启打卡提示音" : "关闭打卡提示音"}
               type="button"

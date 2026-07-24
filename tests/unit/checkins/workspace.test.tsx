@@ -283,6 +283,263 @@ describe("CheckInWorkspace", () => {
     expect(container.querySelector(".checkin-form")).toHaveAttribute("aria-busy", "false");
   });
 
+  it("treats unrelated and malformed 409 responses as ordinary errors without mutating cloud caches", async () => {
+    const date = "2026-07-23";
+    const initial = record(date, "缓存中的初版");
+    const unrelatedCurrent = record(date, "不应载入的 409 内容", 2);
+    let saves = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({
+            ok: true,
+            data: [{ date, attention: initial.attention, hasImage: false, version: 1, updatedAt: initial.updatedAt }],
+            requestId: "month-request",
+          }));
+        }
+        if (init?.method === "PUT") {
+          saves += 1;
+          if (saves === 2) {
+            return Promise.resolve(response({
+              ok: false,
+              error: {
+                code: "VERSION_CONFLICT",
+                message: "云端记录已更新，请确认后重试",
+                details: {},
+              },
+              requestId: "malformed-409",
+            }, 409));
+          }
+          return Promise.resolve(response({
+            ok: false,
+            error: {
+              code: "RATE_LIMITED",
+              message: "请稍后再试",
+              details: { current: unrelatedCurrent },
+            },
+            requestId: "ordinary-409",
+          }, 409));
+        }
+        if (path.endsWith(`/${date}`)) {
+          return Promise.resolve(response({ ok: true, data: initial, requestId: "date-request" }));
+        }
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    renderWorkspace(date);
+    const user = userEvent.setup();
+    const attention = screen.getByLabelText("attention");
+    await waitFor(() => expect(attention).toHaveValue("缓存中的初版"));
+    await user.type(attention, "，本地修改");
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+
+    await waitFor(() => expect(screen.getByText("请稍后再试")).toBeVisible());
+    expect(screen.queryByRole("dialog", { name: "云端记录已更新" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("attention")).toHaveValue("缓存中的初版，本地修改");
+    expect(screen.getByRole("button", { name: new RegExp(`${formatCalendarDate(date)}，已保存：缓存中的初版`) })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+
+    await waitFor(() => expect(screen.getByText("服务返回内容不正确，请稍后再试")).toBeVisible());
+    expect(screen.queryByRole("dialog", { name: "云端记录已更新" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("attention")).toHaveValue("缓存中的初版，本地修改");
+    expect(screen.getByRole("button", { name: new RegExp(`${formatCalendarDate(date)}，已保存：缓存中的初版`) })).toBeVisible();
+  });
+
+  it("locks every workspace decision while reset waits for candidate image cleanup", async () => {
+    const date = "2026-07-23";
+    const initial = record(date, "云端初版");
+    const cleanup = deferred<void>();
+    vi.mocked(uploadCheckInImage).mockResolvedValue("checkin-images/user/pending.png");
+    vi.mocked(deleteCheckInImage).mockReturnValue(cleanup.promise);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        if (init?.method === "PUT") {
+          return Promise.resolve(response({
+            ok: false,
+            error: {
+              code: "VERSION_CONFLICT",
+              message: "云端记录已更新，请确认后重试",
+              details: { current: initial },
+            },
+            requestId: "conflict-request",
+          }, 409));
+        }
+        if (path.endsWith(`/${date}`)) {
+          return Promise.resolve(response({ ok: true, data: initial, requestId: "date-request" }));
+        }
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    const { container } = renderWorkspace(date);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByLabelText("attention")).toHaveValue("云端初版"));
+    await user.click(screen.getByRole("button", { name: "替换测试图片" }));
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+    await user.click(await screen.findByRole("button", { name: "保留本地内容" }));
+    await user.click(screen.getByRole("button", { name: "还原未保存的修改" }));
+
+    await waitFor(() => expect(deleteCheckInImage).toHaveBeenCalledWith("checkin-images/user/pending.png"));
+    expect(screen.getByLabelText("attention")).toBeDisabled();
+    expect(screen.getByLabelText("添加图片笔记")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "保存修改" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "还原未保存的修改" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /今日/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /7月24日/ })).toBeDisabled();
+    expect(container.querySelector(".checkin-form")).toHaveAttribute("aria-busy", "true");
+
+    cleanup.resolve();
+
+    await waitFor(() => expect(screen.getByLabelText("attention")).toHaveValue("云端初版"));
+    expect(container.querySelector(".checkin-form")).toHaveAttribute("aria-busy", "false");
+  });
+
+  it("keeps the dirty switch dialog inert until candidate cleanup completes before discarding", async () => {
+    const date = "2026-07-23";
+    const cleanup = deferred<void>();
+    vi.mocked(uploadCheckInImage).mockResolvedValue("checkin-images/user/pending.png");
+    vi.mocked(deleteCheckInImage).mockReturnValue(cleanup.promise);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        if (init?.method === "PUT") {
+          return Promise.resolve(response({
+            ok: false,
+            error: {
+              code: "VERSION_CONFLICT",
+              message: "云端记录已更新，请确认后重试",
+              details: { current: null },
+            },
+            requestId: "conflict-request",
+          }, 409));
+        }
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    renderWorkspace(date);
+    const user = userEvent.setup();
+    await waitForEditorReady();
+    await user.type(screen.getByLabelText("attention"), "待放弃的内容");
+    await user.click(screen.getByRole("button", { name: "替换测试图片" }));
+    await user.click(screen.getByRole("button", { name: /完成打卡/ }));
+    await user.click(await screen.findByRole("button", { name: "保留本地内容" }));
+    await user.click(screen.getByRole("button", { name: /7月24日/ }));
+    await user.click(screen.getByRole("button", { name: "放弃修改" }));
+
+    await waitFor(() => expect(deleteCheckInImage).toHaveBeenCalledWith("checkin-images/user/pending.png"));
+    expect(screen.getByRole("button", { name: "保存并切换" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "放弃修改" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "取消" })).toBeDisabled();
+    expect(screen.getByRole("heading", { name: formatDate(date) })).toBeVisible();
+
+    cleanup.resolve();
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: formatDate("2026-07-24") })).toBeVisible());
+  });
+
+  it("keeps the conflict controls inert until loading the cloud version cleans its candidate", async () => {
+    const date = "2026-07-23";
+    const cloud = record(date, "云端新版本", 2);
+    const cleanup = deferred<void>();
+    vi.mocked(uploadCheckInImage).mockResolvedValue("checkin-images/user/pending.png");
+    vi.mocked(deleteCheckInImage).mockReturnValue(cleanup.promise);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        if (init?.method === "PUT") {
+          return Promise.resolve(response({
+            ok: false,
+            error: {
+              code: "VERSION_CONFLICT",
+              message: "云端记录已更新，请确认后重试",
+              details: { current: cloud },
+            },
+            requestId: "conflict-request",
+          }, 409));
+        }
+        if (path.endsWith(`/${date}`)) {
+          return Promise.resolve(response({ ok: true, data: record(date, "云端初版"), requestId: "date-request" }));
+        }
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    renderWorkspace(date);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByLabelText("attention")).toHaveValue("云端初版"));
+    await user.click(screen.getByRole("button", { name: "替换测试图片" }));
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+    await user.click(await screen.findByRole("button", { name: "载入云端版本" }));
+
+    await waitFor(() => expect(deleteCheckInImage).toHaveBeenCalledWith("checkin-images/user/pending.png"));
+    expect(screen.getByRole("button", { name: "保留本地内容" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "载入云端版本" })).toBeDisabled();
+    expect(screen.getByLabelText("attention")).toHaveValue("云端初版");
+
+    cleanup.resolve();
+
+    await waitFor(() => expect(screen.getByLabelText("attention")).toHaveValue("云端新版本"));
+    expect(screen.queryByRole("dialog", { name: "云端记录已更新" })).not.toBeInTheDocument();
+  });
+
+  it("locks the editor after a selected-record error and retries without clearing its draft", async () => {
+    const date = "2026-07-23";
+    let attempts = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        if (path.endsWith(`/${date}`)) {
+          attempts += 1;
+          if (attempts === 1) {
+            return Promise.resolve(response({
+              ok: false,
+              error: { code: "SESSION_EXPIRED", message: "登录已失效，请重新登录" },
+              requestId: "expired-request",
+            }, 401));
+          }
+          return Promise.resolve(response({ ok: true, data: record(date, "重试后的云端内容"), requestId: "retry-request" }));
+        }
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    renderWorkspace(date);
+    const user = userEvent.setup();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("登录已失效，请重新登录");
+    expect(screen.getByLabelText("attention")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "重试" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "重试" }));
+
+    await waitFor(() => expect(screen.getByLabelText("attention")).toBeEnabled());
+    expect(screen.getByLabelText("attention")).toHaveValue("重试后的云端内容");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("keeps the selected date and displayed month when a cross-month switch is cancelled", async () => {
     const today = getTodayKey();
     const todayMonth = monthKeyForDate(today);
@@ -515,7 +772,7 @@ describe("CheckInWorkspace", () => {
     expect(cancel).toHaveFocus();
   });
 
-  it("keeps a later image removal when an earlier replacement cleanup resolves late", async () => {
+  it("defers a later image decision until an earlier replacement cleanup resolves", async () => {
     const date = "2026-07-23";
     const cloudRecord = recordWithImage(date, "云端初版");
     const cleanup = deferred<void>();
@@ -557,11 +814,13 @@ describe("CheckInWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "替换测试图片" }));
     await waitFor(() => expect(deleteCheckInImage).toHaveBeenCalledWith("checkin-images/user/pending.png"));
+    expect(screen.getByRole("button", { name: "测试移除图片" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "测试移除图片" }));
 
-    await waitFor(() => expect(screen.getByLabelText("图片草稿状态")).toHaveTextContent("none:true"));
+    expect(screen.getByLabelText("图片草稿状态")).toHaveTextContent("replacement.png:false");
     cleanup.resolve();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await waitFor(() => expect(screen.getByRole("button", { name: "测试移除图片" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "测试移除图片" }));
 
     expect(screen.getByLabelText("图片草稿状态")).toHaveTextContent("none:true");
   });
