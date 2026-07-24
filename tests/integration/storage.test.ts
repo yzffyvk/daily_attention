@@ -70,7 +70,8 @@ describe("private check-in image storage", () => {
     const read = await userOne.session.get(`/api/checkins/${date}`);
     expect(read.status).toBe(200);
     expect(read.body.data.imageUrl).toEqual(expect.stringContaining("/storage/v1/object/sign/"));
-    expect((await fetch(read.body.data.imageUrl)).status).toBe(200);
+    const signedReadUrl = read.body.data.imageUrl as string;
+    expect((await fetch(signedReadUrl)).status).toBe(200);
 
     expect(
       (await userTwo.session.put(`/api/checkins/${date}`, checkIn(null, null))).status,
@@ -98,6 +99,7 @@ describe("private check-in image storage", () => {
       body: JSON.stringify({ path }),
     });
     expect(deleted.status).toBe(200);
+    expect((await fetch(signedReadUrl)).status).not.toBe(200);
   });
 
   it("validates signed-upload metadata and authentication", async () => {

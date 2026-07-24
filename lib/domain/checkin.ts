@@ -16,7 +16,12 @@ export const checkInInputSchema = z.object({
   sourceUrl: sourceUrlSchema,
   summary: z.string().max(5000),
   inspiration: z.string().max(2000),
-  imagePath: z.string().min(1).max(1024).nullable(),
+  imagePath: z
+    .string()
+    .min(1)
+    .max(1024)
+    .refine((value) => /\S/u.test(value), "图片路径不能为空白")
+    .nullable(),
   imageName: z.string().max(255),
   version: z.number().int().positive().nullable(),
 });

@@ -31,14 +31,14 @@ describe("check-in contracts", () => {
     ).toBe(false);
   });
 
-  it("rejects an empty image path", () => {
+  it.each(["", "\t", "\n"])("rejects an image path made only of whitespace (%j)", (imagePath) => {
     expect(
       checkInInputSchema.safeParse({
         attention: "x",
         sourceUrl: "",
         summary: "",
         inspiration: "",
-        imagePath: "",
+        imagePath,
         imageName: "",
         version: null,
       }).success,

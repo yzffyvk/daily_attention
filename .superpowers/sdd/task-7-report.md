@@ -137,3 +137,31 @@ COMPLETE
 ### Concerns
 
 None identified. The migration applied cleanly to the current local database, and all new database behavior tests run inside the existing rollback transaction.
+
+## Focused Task 7 Robustness Fix
+
+### Status
+
+COMPLETE
+
+### Changes
+
+- Added forward-only migration `supabase/migrations/202607240002_checkin_image_path_whitespace.sql`; the applied `202607240001` migration was not rewritten.
+- Replaced the named check constraint expression with a POSIX-space-aware requirement: `NULL` remains valid, non-`NULL` paths must contain at least one character outside `[:space:]`, and paths remain limited to 1024 characters.
+- Extended the API/domain schema with Unicode-aware whitespace rejection and regression cases for tab and newline image paths.
+- Extended the live Storage integration test to fetch the prior signed URL after owner deletion and assert it is no longer readable.
+- The progress ledger was not modified.
+
+### TDD And Verification
+
+1. RED: domain tests failed for tab/newline-only paths; pgTAP failed the new catalog assertion and both tab/newline behavior cases against the pre-migration local schema.
+2. `NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase migration up --local`: PASS; applied `202607240002_checkin_image_path_whitespace.sql` without reset.
+3. `NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase test db`: PASS; 4 files, 99 assertions.
+4. `NPM_CONFIG_UPDATE_NOTIFIER=false npm run test:unit -- tests/unit/domain/checkin.test.ts tests/unit/checkins/date-route.test.ts tests/unit/storage/service.test.ts`: PASS; 15 files, 56 tests.
+5. `NPM_CONFIG_UPDATE_NOTIFIER=false npm run test:integration`: PASS; 3 files, 9 tests, including post-delete signed URL unreadability.
+6. `NPM_CONFIG_UPDATE_NOTIFIER=false npm run lint`: PASS.
+7. `git diff --check`: PASS.
+
+### Concerns
+
+None identified for this focused fix. Repository-wide typechecking was not part of this verification pass; the prior report records its unrelated legacy Cloudflare ambient-type failures.

@@ -1,5 +1,5 @@
 begin;
-select plan(22);
+select plan(24);
 
 select has_schema('private', 'private schema exists');
 select has_table('public', 'profiles', 'profiles exists');
@@ -51,8 +51,8 @@ select is(
       and c.conname = 'check_ins_image_path_check'
       and c.contype = 'c'
   ),
-  'CHECK (image_path IS NULL OR length(TRIM(BOTH FROM image_path)) > 0 AND length(image_path) <= 1024)',
-  'image paths allow NULL or non-blank trimmed paths up to 1024 characters'
+  'CHECK (image_path IS NULL OR image_path ~ ''[^[:space:]]''::text AND length(image_path) <= 1024)',
+  'image paths allow NULL or a path with a non-POSIX-space character up to 1024 characters'
 );
 
 insert into auth.users (id)
@@ -106,6 +106,20 @@ select throws_ok(
   '23514',
   'new row for relation "check_ins" violates check constraint "check_ins_image_path_check"',
   'check-ins reject whitespace-only image paths'
+);
+select throws_ok(
+  $$insert into public.check_ins (user_id, checkin_date, attention, image_path)
+    values ('00000000-0000-0000-0000-000000000201', '2026-07-31', 'Valid attention', E'\t')$$,
+  '23514',
+  'new row for relation "check_ins" violates check constraint "check_ins_image_path_check"',
+  'check-ins reject tab-only image paths'
+);
+select throws_ok(
+  $$insert into public.check_ins (user_id, checkin_date, attention, image_path)
+    values ('00000000-0000-0000-0000-000000000201', '2026-08-01', 'Valid attention', E'\n')$$,
+  '23514',
+  'new row for relation "check_ins" violates check constraint "check_ins_image_path_check"',
+  'check-ins reject newline-only image paths'
 );
 select lives_ok(
   $$insert into public.check_ins (user_id, checkin_date, attention, image_path)
