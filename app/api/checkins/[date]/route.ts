@@ -1,147 +1,123 @@
-import { env } from "cloudflare:workers";
-import { and, eq } from "drizzle-orm";
-import { getWeChatUser } from "@/app/wechat-auth";
-import { getDb } from "@/db";
-import { checkIns } from "@/db/schema";
+import { checkInInputSchema, dateKeySchema } from "@/lib/domain/checkin";
+import {
+  checkInFailure,
+  checkInServiceFailure,
+  checkInSuccess,
+  createCheckInRequestContext,
+} from "@/server/checkins/http";
+import { saveCheckIn } from "@/server/checkins/service";
 
 type RouteContext = {
   params: Promise<{ date: string }>;
 };
 
-type CheckInPayload = {
-  attention?: string;
-  sourceUrl?: string;
-  summary?: string;
-  inspiration?: string;
-  imageName?: string;
-  imageDataUrl?: string;
-  removeImage?: boolean;
-};
+export const dynamic = "force-dynamic";
 
-type Bindings = {
-  ATTENTION_IMAGES?: R2Bucket;
-};
-
-function parseImageDataUrl(value: string) {
-  const match = value.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
-  if (!match) throw new Error("图片格式不正确");
-  const binary = atob(match[2]);
-  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-  if (bytes.byteLength > 6 * 1024 * 1024) {
-    throw new Error("图片处理后仍然过大");
-  }
-  return { contentType: match[1], bytes };
-}
-
-async function userKey(userId: string) {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(userId),
-  );
-  return Array.from(new Uint8Array(digest))
-    .map((value) => value.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-export async function PUT(request: Request, context: RouteContext) {
-  const user = await getWeChatUser();
-  if (!user) {
-    return Response.json({ error: "请先登录" }, { status: 401 });
-  }
-
+async function parseDate(context: RouteContext, requestId: string) {
   const { date } = await context.params;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return Response.json({ error: "日期格式不正确" }, { status: 400 });
+  const parsed = dateKeySchema.safeParse(date);
+  if (!parsed.success) {
+    return {
+      response: checkInFailure(
+        "VALIDATION_ERROR",
+        parsed.error.issues[0].message,
+        requestId,
+        422,
+        { field: "date" },
+      ),
+    };
   }
+  return { date: parsed.data };
+}
 
+export async function GET(_request: Request, routeContext: RouteContext) {
+  const requestId = crypto.randomUUID();
   try {
-    const payload = (await request.json()) as CheckInPayload;
-    const attention = payload.attention?.trim() ?? "";
-    const summary = payload.summary?.trim() ?? "";
-    if (!attention || !summary) {
-      return Response.json(
-        { error: "attention 和知识点小结不能为空" },
-        { status: 400 },
+    const context = await createCheckInRequestContext();
+    if (!context) {
+      return checkInFailure(
+        "SESSION_EXPIRED",
+        "登录已失效，请重新登录",
+        requestId,
+        401,
       );
     }
 
-    const db = getDb();
-    const [existing] = await db
-      .select()
-      .from(checkIns)
-      .where(and(eq(checkIns.userId, user.id), eq(checkIns.date, date)))
-      .limit(1);
-
-    const bucket = (env as unknown as Bindings).ATTENTION_IMAGES;
-    let imageKey = existing?.imageKey ?? null;
-    let imageName = existing?.imageName ?? "";
-
-    if (payload.removeImage && imageKey) {
-      await bucket?.delete(imageKey);
-      imageKey = null;
-      imageName = "";
+    const parsedDate = await parseDate(routeContext, requestId);
+    if ("response" in parsedDate) return parsedDate.response;
+    const record = await context.repository.findByDate(
+      context.userId,
+      parsedDate.date,
+    );
+    if (!record) {
+      return checkInFailure(
+        "NOT_FOUND",
+        "这一天还没有打卡记录",
+        requestId,
+        404,
+      );
     }
-
-    if (payload.imageDataUrl) {
-      if (!bucket) throw new Error("图片存储暂不可用");
-      const image = parseImageDataUrl(payload.imageDataUrl);
-      const nextImageKey = `users/${await userKey(user.id)}/${date}/${crypto.randomUUID()}`;
-      await bucket.put(nextImageKey, image.bytes, {
-        httpMetadata: { contentType: image.contentType },
-      });
-      if (imageKey && imageKey !== nextImageKey) {
-        await bucket.delete(imageKey);
-      }
-      imageKey = nextImageKey;
-      imageName = payload.imageName?.trim() || "图片笔记";
-    }
-
-    const updatedAt = new Date().toISOString();
-    const id = existing?.id ?? crypto.randomUUID();
-    const [row] = await db
-      .insert(checkIns)
-      .values({
-        id,
-        userId: user.id,
-        date,
-        attention,
-        sourceUrl: payload.sourceUrl?.trim() ?? "",
-        summary,
-        inspiration: payload.inspiration?.trim() ?? "",
-        imageKey,
-        imageName,
-        updatedAt,
-      })
-      .onConflictDoUpdate({
-        target: [checkIns.userId, checkIns.date],
-        set: {
-          attention,
-          sourceUrl: payload.sourceUrl?.trim() ?? "",
-          summary,
-          inspiration: payload.inspiration?.trim() ?? "",
-          imageKey,
-          imageName,
-          updatedAt,
-        },
-      })
-      .returning();
-
-    return Response.json({
-      checkIn: {
-        id: row.id,
-        date: row.date,
-        attention: row.attention,
-        sourceUrl: row.sourceUrl,
-        summary: row.summary,
-        inspiration: row.inspiration,
-        imageName: row.imageName,
-        imageUrl: row.imageKey
-          ? `/api/checkins/${row.date}/image?v=${encodeURIComponent(row.updatedAt)}`
-          : "",
-      },
-    });
+    return checkInSuccess(record, requestId);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "保存失败";
-    return Response.json({ error: message }, { status: 500 });
+    return checkInServiceFailure(error, requestId);
+  }
+}
+export async function PUT(request: Request, routeContext: RouteContext) {
+  const requestId = crypto.randomUUID();
+  try {
+    const context = await createCheckInRequestContext();
+    if (!context) {
+      return checkInFailure(
+        "SESSION_EXPIRED",
+        "登录已失效，请重新登录",
+        requestId,
+        401,
+      );
+    }
+
+    const parsedDate = await parseDate(routeContext, requestId);
+    if ("response" in parsedDate) return parsedDate.response;
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return checkInFailure(
+        "VALIDATION_ERROR",
+        "请求内容不正确",
+        requestId,
+        422,
+      );
+    }
+    const parsedInput = checkInInputSchema.safeParse(body);
+    if (!parsedInput.success) {
+      const issue = parsedInput.error.issues[0];
+      return checkInFailure(
+        "VALIDATION_ERROR",
+        issue.message,
+        requestId,
+        422,
+        { field: issue.path[0]?.toString() },
+      );
+    }
+
+    const result = await saveCheckIn(
+      context.userId,
+      parsedDate.date,
+      parsedInput.data,
+      context.repository,
+    );
+    if (!result.ok) {
+      return checkInFailure(
+        "VERSION_CONFLICT",
+        "云端记录已更新，请确认后重试",
+        requestId,
+        409,
+        { current: result.current },
+      );
+    }
+    return checkInSuccess(result.record, requestId);
+  } catch (error) {
+    return checkInServiceFailure(error, requestId);
   }
 }

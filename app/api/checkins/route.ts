@@ -1,37 +1,43 @@
-import { desc, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { checkIns } from "@/db/schema";
-import { getWeChatUser } from "@/app/wechat-auth";
+import { monthQuerySchema } from "@/lib/domain/checkin";
+import {
+  checkInFailure,
+  checkInServiceFailure,
+  checkInSuccess,
+  createCheckInRequestContext,
+} from "@/server/checkins/http";
 
-export async function GET() {
-  const user = await getWeChatUser();
-  if (!user) {
-    return Response.json({ error: "请先登录" }, { status: 401 });
-  }
+export const dynamic = "force-dynamic";
 
+export async function GET(request: Request) {
+  const requestId = crypto.randomUUID();
   try {
-    const rows = await getDb()
-      .select()
-      .from(checkIns)
-      .where(eq(checkIns.userId, user.id))
-      .orderBy(desc(checkIns.date));
+    const context = await createCheckInRequestContext();
+    if (!context) {
+      return checkInFailure(
+        "SESSION_EXPIRED",
+        "登录已失效，请重新登录",
+        requestId,
+        401,
+      );
+    }
 
-    return Response.json({
-      checkIns: rows.map((row) => ({
-        id: row.id,
-        date: row.date,
-        attention: row.attention,
-        sourceUrl: row.sourceUrl,
-        summary: row.summary,
-        inspiration: row.inspiration,
-        imageName: row.imageName,
-        imageUrl: row.imageKey
-          ? `/api/checkins/${row.date}/image?v=${encodeURIComponent(row.updatedAt)}`
-          : "",
-      })),
-    });
+    const month = new URL(request.url).searchParams.get("month") ?? "";
+    const parsed = monthQuerySchema.safeParse(month);
+    if (!parsed.success) {
+      return checkInFailure(
+        "VALIDATION_ERROR",
+        parsed.error.issues[0].message,
+        requestId,
+        422,
+        { field: "month" },
+      );
+    }
+
+    return checkInSuccess(
+      await context.repository.findByMonth(context.userId, parsed.data),
+      requestId,
+    );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "记录加载失败";
-    return Response.json({ error: message }, { status: 500 });
+    return checkInServiceFailure(error, requestId);
   }
 }

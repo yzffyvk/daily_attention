@@ -7,6 +7,7 @@ export type ApiFailure = {
     details?: {
       field?: string;
       retryAfterSeconds?: number;
+      current?: unknown;
     };
   };
   requestId: string;

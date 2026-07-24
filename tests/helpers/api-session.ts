@@ -30,4 +30,12 @@ export class ApiSession {
   post(path: string, body: unknown) {
     return this.request(path, { method: "POST", body: JSON.stringify(body) });
   }
+
+  put(path: string, body: unknown) {
+    return this.request(path, { method: "PUT", body: JSON.stringify(body) });
+  }
+
+  get(path: string) {
+    return this.request(path);
+  }
 }
