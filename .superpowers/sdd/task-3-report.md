@@ -94,3 +94,68 @@ All five functions reported `prosecdef = true`, `search_path=\"\"`, no `authenti
 ## Concerns
 
 No implementation or security concerns found within the specified scope. The local host lacks a `psql` binary, so catalog review used the already-running Supabase database container; this did not affect migration or test execution.
+
+## Review-Fix: Behavioral Security Coverage
+
+### Files Changed
+
+- `supabase/tests/database/rls.test.sql`
+- `supabase/tests/database/account-functions.test.sql`
+- `.superpowers/sdd/task-3-report.md`
+
+### Meaningful Test Results
+
+- The pgTAP plan expanded from 32 to 60 assertions without removing or weakening any existing assertion: `rls.test.sql` has 16, `account-functions.test.sql` has 27, and `schema.test.sql` retains 17.
+- Storage tests insert fully formed object rows (`bucket_id`, UUID-prefixed `name`, `owner`, `owner_id`, and image metadata), then prove owned insert/select/delete behavior, hidden foreign and wrong-bucket rows, and `42501` policy failures for foreign-path and wrong-bucket inserts.
+- The check-in reassignment test expects `42501` and `new row violates row-level security policy for table "check_ins"`; it can only pass when the update policy's `WITH CHECK` rejects the new `user_id`.
+- Both `anon` and `authenticated` invoke all five account RPCs and receive the expected `42501 permission denied for function ...` failure. Under `service_role`, the lifecycle creates and returns a profile, resolves its alias, reads and conditionally replaces its recovery digest, rejects a stale digest, updates identity, resolves the new alias, and proves the old alias is absent.
+
+### Security Behaviors Proven
+
+- Authenticated Storage access is limited to `checkin-images/<caller-uuid>/...`; other UUID paths and buckets are invisible, and policy-violating inserts fail at RLS.
+- An authenticated caller cannot turn an owned check-in into another user's row.
+- Privileged account functions are executable only by `service_role`, while their real registration, recovery, and identity mutations preserve the expected data contract.
+
+### Self-Review
+
+- All new fixtures and role changes are inside the existing transaction/rollback boundaries.
+- The Storage delete test enables `storage.allow_delete_query` only with transaction-local scope because Storage's protective trigger otherwise rejects every direct SQL delete before RLS can run.
+- No migration, production SQL, generated type, or unrelated application file changed; no production defect was found.
+
+### Verification
+
+```bash
+NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase db reset
+```
+
+Exit 0. Applied both account/check-in migrations.
+
+```bash
+NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase test db
+```
+
+Exit 0. All 3 database test files passed with 60 assertions.
+
+```bash
+npm run test:unit
+```
+
+Exit 0. 2 files and 4 tests passed.
+
+```bash
+npm run lint
+```
+
+Exit 0.
+
+```bash
+npm test
+```
+
+Exit 0. `vinext build` completed and 7 rendered HTML tests passed.
+
+```bash
+git diff --check
+```
+
+Exit 0.
