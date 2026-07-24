@@ -30,8 +30,11 @@ async function registeredSession() {
     password: "password123",
     avatarKey: 1,
   });
+  if (response.status === 201) {
+    const userId = response.body?.data?.profile?.id;
+    if (typeof userId === "string") trackIntegrationUser(userId);
+  }
   expect(response.status).toBe(201);
-  trackIntegrationUser(response.body.data.profile.id as string);
   return session;
 }
 
@@ -72,6 +75,64 @@ describe("check-in routes", () => {
     expect(month.body.data[0]).not.toHaveProperty("summary");
 
     expect((await userTwo.get(`/api/checkins/${date}`)).status).toBe(404);
+  });
+
+  it("resolves concurrent first saves and updates without depending on request order", async () => {
+    const user = await registeredSession();
+    const concurrentDate = "2026-07-24";
+
+    const firstSaves = await Promise.all([
+      user.put(`/api/checkins/${concurrentDate}`, entry(null)),
+      user.put(`/api/checkins/${concurrentDate}`, entry(null)),
+    ]);
+    const successfulCreates = firstSaves.filter(
+      (response) => response.status === 200,
+    );
+    const createConflicts = firstSaves.filter(
+      (response) => response.status === 409,
+    );
+    expect(successfulCreates).toHaveLength(1);
+    expect(createConflicts).toHaveLength(1);
+
+    const created = successfulCreates[0];
+    const createConflict = createConflicts[0];
+    expect(created.body.data).toMatchObject({
+      date: concurrentDate,
+      version: 1,
+    });
+    expect(createConflict.body.error).toMatchObject({
+      code: "VERSION_CONFLICT",
+    });
+    expect(createConflict.body.error.details.current).toEqual(
+      created.body.data,
+    );
+
+    const updates = await Promise.all([
+      user.put(`/api/checkins/${concurrentDate}`, entry(1)),
+      user.put(`/api/checkins/${concurrentDate}`, entry(1)),
+    ]);
+    const successfulUpdates = updates.filter(
+      (response) => response.status === 200,
+    );
+    const updateConflicts = updates.filter(
+      (response) => response.status === 409,
+    );
+    expect(successfulUpdates).toHaveLength(1);
+    expect(updateConflicts).toHaveLength(1);
+
+    const updated = successfulUpdates[0];
+    const updateConflict = updateConflicts[0];
+    expect(updated.body.data).toMatchObject({
+      date: concurrentDate,
+      version: 2,
+    });
+    expect(updateConflict.body.error).toMatchObject({
+      code: "VERSION_CONFLICT",
+      details: { current: { version: 2 } },
+    });
+    expect(updateConflict.body.error.details.current).toEqual(
+      updated.body.data,
+    );
   });
 
   it("returns session and validation errors without caching", async () => {
