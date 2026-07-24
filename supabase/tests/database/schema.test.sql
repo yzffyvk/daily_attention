@@ -1,5 +1,5 @@
 begin;
-select plan(12);
+select plan(17);
 
 select has_schema('private', 'private schema exists');
 select has_table('public', 'profiles', 'profiles exists');
@@ -40,6 +40,45 @@ select ok(exists (
     and c.conname = 'check_ins_source_url_check'
     and c.contype = 'c'
 ), 'source URL is constrained');
+
+insert into auth.users (id)
+values ('00000000-0000-0000-0000-000000000201');
+
+select throws_ok(
+  $$insert into public.profiles (id, display_name, avatar_key)
+    values ('00000000-0000-0000-0000-000000000201', 'Schema test', 0)$$,
+  '23514',
+  'new row for relation "profiles" violates check constraint "profiles_avatar_key_check"',
+  'profiles reject avatar keys outside 1-5'
+);
+select throws_ok(
+  $$insert into public.profiles (id, display_name, avatar_key)
+    values ('00000000-0000-0000-0000-000000000201', 'Schema test', 6)$$,
+  '23514',
+  'new row for relation "profiles" violates check constraint "profiles_avatar_key_check"',
+  'profiles reject avatar keys above 5'
+);
+select throws_ok(
+  $$insert into public.check_ins (user_id, checkin_date, attention)
+    values ('00000000-0000-0000-0000-000000000201', '2026-07-24', '   ')$$,
+  '23514',
+  'new row for relation "check_ins" violates check constraint "check_ins_attention_check"',
+  'check-ins reject blank attention'
+);
+select throws_ok(
+  $$insert into public.check_ins (user_id, checkin_date, attention, source_url)
+    values ('00000000-0000-0000-0000-000000000201', '2026-07-25', 'Valid attention', 'ftp://example.com')$$,
+  '23514',
+  'new row for relation "check_ins" violates check constraint "check_ins_source_url_check"',
+  'check-ins reject non-HTTP source URLs'
+);
+select throws_ok(
+  $$insert into public.check_ins (user_id, checkin_date, attention, image_path)
+    values ('00000000-0000-0000-0000-000000000201', '2026-07-26', 'Valid attention', repeat('x', 1025))$$,
+  '23514',
+  'new row for relation "check_ins" violates check constraint "check_ins_image_path_check"',
+  'check-ins reject image paths longer than 1024 characters'
+);
 
 select * from finish();
 rollback;

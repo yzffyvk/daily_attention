@@ -38,7 +38,8 @@ create table public.check_ins (
     ),
   summary text not null default '' constraint check_ins_summary_check check (length(summary) <= 5000),
   inspiration text not null default '' constraint check_ins_inspiration_check check (length(inspiration) <= 2000),
-  image_path text,
+  image_path text
+    constraint check_ins_image_path_check check (image_path is null or length(image_path) <= 1024),
   image_name varchar(255) not null default '',
   version integer not null default 1 constraint check_ins_version_check check (version >= 1),
   created_at timestamptz not null default now(),

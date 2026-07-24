@@ -2,7 +2,7 @@
 
 ## Status
 
-`DONE_WITH_CONCERNS`
+`DONE_WITH_KNOWN_REPOSITORY_CONCERN`
 
 ## Implementation Summary
 
@@ -124,11 +124,6 @@ Connecting to local database...
 All tests successful.
 Files=1, Tests=12,  0 wallclock secs ( 0.01 usr + 0.00 sys = 0.01 CPU)
 Result: PASS
-npm notice
-npm notice New major version of npm available! 10.9.8 -> 12.0.1
-npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.1
-npm notice To update run: npm install -g npm@12.0.1
-npm notice
 ```
 
 **GREEN evidence:** All 12 planned assertions passed, including the three catalog-backed checks for `profiles_avatar_key_check`, `check_ins_attention_check`, and `check_ins_source_url_check`.
@@ -139,3 +134,62 @@ npm notice
 - `.superpowers/sdd/task-2-report.md` — documented the historical failed attempt and successful follow-up.
 
 **Self-review:** No migration, application code, or first-nine assertion was changed. `git diff --check` passed after removing incidental report trailing spaces.
+
+## Review-Fix: Database Constraint Behavior Coverage
+
+**Status:** `GREEN`
+
+**Root cause:** Task 1 limits `imagePath` to 1024 characters, but `public.check_ins.image_path` had no matching database constraint. The schema test also verified named constraints only through PostgreSQL catalogs rather than by attempting invalid writes.
+
+**RED before the migration edit:**
+
+```text
+NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase test db
+
+Connecting to local database...
+# Failed test 17: "check-ins reject image paths longer than 1024 characters"
+#       caught: no exception
+#       wanted: 23514
+Failed 1/17 subtests
+Result: FAIL
+```
+
+The other 16 assertions, including real invalid avatar, blank attention, and non-HTTP source URL inserts, passed in the same run.
+
+**GREEN after the migration edit:**
+
+```text
+NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase db reset
+
+Applying migration 202607230001_accounts_and_checkins.sql...
+Finished supabase db reset on branch main.
+
+NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase test db
+
+All tests successful.
+Files=1, Tests=17,  0 wallclock secs ( 0.01 usr +  0.00 sys = 0.01 CPU)
+Result: PASS
+```
+
+The update-notifier environment setting intentionally keeps npm version notices out of the successful database-test transcript without changing the command's test behavior.
+
+**Files changed:**
+
+- `supabase/migrations/202607230001_accounts_and_checkins.sql` — added named `check_ins_image_path_check`, enforcing `image_path is null or length(image_path) <= 1024`.
+- `supabase/tests/database/schema.test.sql` — preserved the 12 schema/object assertions and added five real write-failure assertions: avatar keys below and above bounds, blank attention, non-HTTP source URL, and an overlong image path.
+- `.superpowers/sdd/task-2-report.md` — recorded the review fix and removed npm update-notice noise from the prior successful transcript.
+
+**Self-review:** The behavior tests insert a real `auth.users` fixture inside the test transaction, so foreign keys cannot mask the target checks. Every `throws_ok` asserts SQLSTATE `23514` and the exact named check-violation message; the tests exercise live database constraints rather than mocks or catalog expressions.
+
+**Final verification:**
+
+| Command | Result |
+| --- | --- |
+| `NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase db reset` | PASS — recreated the local database and applied `202607230001_accounts_and_checkins.sql`. |
+| `NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase test db` | PASS — 1 file, 17 assertions. |
+| `npm run test:unit` | PASS — 2 files, 4 tests. |
+| `npm run lint` | PASS — ESLint completed with no errors. |
+| `npm test` | PASS — vinext build and 7 rendered HTML tests. |
+| `git diff --check` | PASS — no whitespace errors. |
+
+**Final concerns:** All Task 2 review findings are resolved. The known repository-wide `npm run typecheck` failure for existing Cloudflare bindings remains outside this task and was not changed or re-tested.
