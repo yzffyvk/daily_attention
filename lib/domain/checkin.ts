@@ -1,0 +1,25 @@
+import { z } from "zod";
+
+export const dateKeySchema = z.string().refine((value) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value;
+}, "日期格式不正确");
+
+const sourceUrlSchema = z.union([
+  z.literal(""),
+  z.string().url().max(2048).refine((value) => /^https?:\/\//u.test(value), "仅支持 HTTP/HTTPS 链接"),
+]);
+
+export const checkInInputSchema = z.object({
+  attention: z.string().trim().min(1, "请填写 attention").max(120),
+  sourceUrl: sourceUrlSchema,
+  summary: z.string().max(5000),
+  inspiration: z.string().max(2000),
+  imagePath: z.string().max(1024).nullable(),
+  imageName: z.string().max(255),
+  version: z.number().int().positive().nullable(),
+});
+
+export const monthQuerySchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/u, "月份格式不正确");
+export type CheckInInput = z.infer<typeof checkInInputSchema>;
