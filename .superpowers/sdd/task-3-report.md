@@ -159,3 +159,61 @@ git diff --check
 ```
 
 Exit 0.
+
+## Final Review-Fix: Direct Private-Table Role Behavior
+
+### Exact Behavior Covered
+
+- Expanded `account-functions.test.sql` from 27 to 35 assertions while preserving both existing `table_privs_are` metadata assertions.
+- Under transaction-scoped `set local role anon`, direct valid-value `SELECT` and `INSERT` attempts against both `private.login_aliases` and `private.auth_rate_limits` each fail with SQLSTATE `42501` and the exact `permission denied for schema private` message.
+- Under transaction-scoped `set local role authenticated`, the same direct valid-value `SELECT` and `INSERT` attempts against both private tables each fail with SQLSTATE `42501` and the exact schema-privilege error.
+- Seeded rows and valid foreign keys, digests, actions, timestamps, and counters ensure the assertions cannot pass because of empty results, malformed values, constraints, or duplicate keys; schema/table privilege denial is the target.
+
+### Verification
+
+```bash
+NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase db reset
+```
+
+Exit 0.
+
+```bash
+NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase test db
+```
+
+Exit 0. All 3 database test files passed with 68 assertions: `rls.test.sql` 16, `account-functions.test.sql` 35, and `schema.test.sql` 17.
+
+```bash
+npm run test:unit
+```
+
+Exit 0. 2 files and 4 tests passed.
+
+```bash
+npm run lint
+```
+
+Exit 0.
+
+```bash
+npm test
+```
+
+Exit 0. `vinext build` completed and 7 rendered HTML tests passed.
+
+```bash
+git diff --check
+```
+
+Exit 0.
+
+### Files Changed
+
+- `supabase/tests/database/account-functions.test.sql`
+- `.superpowers/sdd/task-3-report.md`
+
+### Self-Review
+
+- No migration, generated type, or application code changed.
+- Existing assertions were retained; only the appropriate pgTAP plan count was expanded.
+- The final diff is limited to direct role-behavior security tests and this labeled report addendum.
