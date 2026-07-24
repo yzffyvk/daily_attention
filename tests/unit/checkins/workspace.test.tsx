@@ -910,6 +910,105 @@ describe("CheckInWorkspace", () => {
     expect(screen.getByRole("button", { name: "关闭资料设置" })).toBeEnabled();
   });
 
+  it("keeps cancel and discard available while a dirty record is revalidating", async () => {
+    const date = "2026-07-23";
+    const initial = record(date, "云端初版");
+    const refresh = deferred<Response>();
+    let reads = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        if (path.endsWith(`/${date}`)) {
+          reads += 1;
+          return reads === 1
+            ? Promise.resolve(response({ ok: true, data: initial, requestId: "initial-request" }))
+            : refresh.promise;
+        }
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    const { queryClient } = renderWorkspaceWithCachedRecord(date, initial);
+    const user = userEvent.setup();
+    await waitForEditorReady();
+    await user.type(screen.getByLabelText("attention"), "，本地修改");
+
+    act(() => {
+      void queryClient.invalidateQueries({ queryKey: checkInKeys.date(date) });
+    });
+    await waitFor(() => expect(reads).toBe(2));
+    expect(screen.getByLabelText("attention")).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "退出当前用户" }));
+
+    expect(screen.getByRole("button", { name: "保存并退出" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "放弃修改并退出" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "取消" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog", { name: "退出前还有修改没有保存" })).not.toBeInTheDocument();
+
+    refresh.resolve(response({ ok: true, data: initial, requestId: "refresh-request" }));
+    await waitFor(() => expect(screen.getByLabelText("attention")).toBeEnabled());
+  });
+
+  it("allows discard-and-logout after a dirty record revalidation error", async () => {
+    const date = "2026-07-23";
+    const initial = record(date, "云端初版");
+    let reads = 0;
+    let logoutRequests = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        if (path === "/api/auth/logout" && init?.method === "POST") {
+          logoutRequests += 1;
+          return Promise.resolve(response({
+            ok: false,
+            error: { code: "SERVICE_UNAVAILABLE", message: "暂时无法退出" },
+            requestId: "logout-request",
+          }, 503));
+        }
+        if (path.endsWith(`/${date}`)) {
+          reads += 1;
+          return reads === 1
+            ? Promise.resolve(response({ ok: true, data: initial, requestId: "initial-request" }))
+            : Promise.resolve(response({
+                ok: false,
+                error: { code: "SESSION_EXPIRED", message: "登录已失效，请重新登录" },
+                requestId: "expired-request",
+              }, 401));
+        }
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    const { queryClient } = renderWorkspaceWithCachedRecord(date, initial);
+    const user = userEvent.setup();
+    await waitForEditorReady();
+    await user.type(screen.getByLabelText("attention"), "，准备放弃");
+
+    act(() => {
+      void queryClient.invalidateQueries({ queryKey: checkInKeys.date(date) });
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("登录已失效，请重新登录");
+    await user.click(screen.getByRole("button", { name: "退出当前用户" }));
+
+    expect(screen.getByRole("button", { name: "保存并退出" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "放弃修改并退出" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "取消" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "放弃修改并退出" }));
+
+    await waitFor(() => expect(logoutRequests).toBe(1));
+    expect(await screen.findByText("暂时无法退出")).toBeVisible();
+  });
+
   it("keeps the selected date and displayed month when a cross-month switch is cancelled", async () => {
     const today = getTodayKey();
     const todayMonth = monthKeyForDate(today);

@@ -43,6 +43,13 @@ export const profilePatchSchema = z.object({
   name: normalizedNameSchema.optional(),
   currentPassword: z.string().optional(),
 }).superRefine((value, context) => {
+  if (value.name === undefined && value.avatarKey === undefined) {
+    context.addIssue({
+      code: "custom",
+      path: [],
+      message: "请至少修改名称或头像",
+    });
+  }
   if (value.name !== undefined && !value.currentPassword) {
     context.addIssue({
       code: "custom",

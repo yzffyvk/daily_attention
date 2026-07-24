@@ -184,6 +184,7 @@ export function CheckInWorkspace({
   const draftBaseRecordRef = useRef<CheckInRecord | null>(null);
   const editorLockedRef = useRef(false);
   const saveInFlightRef = useRef(false);
+  const logoutInFlightRef = useRef(false);
   const imageOperationRef = useRef(0);
   const imageCleanupInFlightRef = useRef(false);
   const imagePreparationInFlightRef = useRef(false);
@@ -194,8 +195,9 @@ export function CheckInWorkspace({
   const saveMutation = useSaveCheckIn();
   const isAwaitingSelectedRecord = hydratedDate !== selectedDate || checkInQuery.isFetching;
   const hasSelectedRecordError = checkInQuery.isError;
-  const isEditorLocked = isSaving || saveMutation.isPending || isAwaitingSelectedRecord || hasSelectedRecordError || isCleaningUpImage || isPreparingImage;
-  const isHeaderBusy = isSaving || saveMutation.isPending || isCleaningUpImage || isPreparingImage || Boolean(conflict);
+  const isDialogActionBusy = isSaving || saveMutation.isPending || isCleaningUpImage || isPreparingImage;
+  const isEditorLocked = isDialogActionBusy || isAwaitingSelectedRecord || hasSelectedRecordError;
+  const isHeaderBusy = isDialogActionBusy || Boolean(conflict);
   const selectedRecord = checkInQuery.data ?? null;
   const isDirty = isDraftDirty(draft, draftBaseRecord);
   const canSave = Boolean(draft.attention.trim());
@@ -558,7 +560,8 @@ export function CheckInWorkspace({
   }
 
   async function logout() {
-    if (imageCleanupInFlightRef.current || imagePreparationInFlightRef.current || saveInFlightRef.current) return;
+    if (imageCleanupInFlightRef.current || imagePreparationInFlightRef.current || saveInFlightRef.current || logoutInFlightRef.current) return;
+    logoutInFlightRef.current = true;
     editorLockedRef.current = true;
     setIsSaving(true);
     try {
@@ -570,6 +573,7 @@ export function CheckInWorkspace({
     } catch (error) {
       setStatus(messageForError(error), "error");
     } finally {
+      logoutInFlightRef.current = false;
       editorLockedRef.current = false;
       setIsSaving(false);
     }
@@ -580,7 +584,7 @@ export function CheckInWorkspace({
   }
 
   async function discardAndLogout() {
-    if (editorLockedRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current) return;
+    if (saveInFlightRef.current || logoutInFlightRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current) return;
     const operation = imageOperationRef.current + 1;
     imageOperationRef.current = operation;
     if (await abandonLocalDraft(selectedRecord, operation)) await logout();
@@ -725,14 +729,14 @@ export function CheckInWorkspace({
           }
           discardLabel="放弃修改并退出"
           onCancel={() => {
-            if (!editorLockedRef.current && !imageCleanupInFlightRef.current && !imagePreparationInFlightRef.current) {
+            if (!saveInFlightRef.current && !logoutInFlightRef.current && !imageCleanupInFlightRef.current && !imagePreparationInFlightRef.current) {
               setLogoutPending(false);
             }
           }}
           onDiscard={discardAndLogout}
           onSave={saveAndLogout}
-          isBusy={isEditorLocked}
-          saveDisabled={!canSave}
+          isBusy={isDialogActionBusy}
+          saveDisabled={!canSave || isAwaitingSelectedRecord || hasSelectedRecordError}
           saveLabel="保存并退出"
           title="退出前还有修改没有保存"
         />

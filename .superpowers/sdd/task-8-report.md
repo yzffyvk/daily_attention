@@ -367,3 +367,42 @@ COMPLETE_WITH_TYPECHECK_CONCERN
 ## Concerns
 
 - `tsc --noEmit --incremental false` retains only the six existing Task 11-owned Cloudflare ambient-type diagnostics. No Task 8 code masks or changes them.
+
+---
+
+# Task 8 Focused Re-review Follow-up
+
+## Status
+
+COMPLETE_WITH_TYPECHECK_CONCERN
+
+## Commit Range
+
+- Base: `daa0805`
+- Follow-up commit: `HEAD` after this report is committed
+
+## Implementation
+
+- Dirty logout confirmation now separates record-read locking from action busy state. Selected-record loading or errors keep cloud save disabled while Cancel and Discard-and-logout remain available.
+- Save, image cleanup, image preparation, conflict, and logout races retain synchronous guards; logout now also has its own in-flight ref to prevent duplicate requests.
+- `profilePatchSchema` now requires at least one mutable field (`name` or `avatarKey`). Empty and password-only PATCH bodies stop at request validation and return the established no-store `422 VALIDATION_ERROR` response.
+
+## TDD And Verification
+
+1. RED: focused tests produced five expected failures: both logout-dialog scenarios disabled Discard, empty/password-only PATCH returned 500, and the domain schema accepted both invalid payloads.
+2. GREEN focused: `npx vitest run tests/unit/domain/user.test.ts tests/unit/auth/me-route.test.ts tests/unit/checkins/workspace.test.tsx`
+   - PASS: 3 files, 45 tests.
+3. Full unit: `npm run test:unit`
+   - PASS: 22 files, 123 tests.
+4. Build: `npm run build`
+   - PASS.
+5. Lint: `npm run lint`
+   - PASS with no warnings.
+6. Typecheck: `npm run typecheck -- --incremental false`
+   - Reports only the six known Task 11-owned Cloudflare diagnostics; no Task 8 file is reported.
+7. Diff check: `git diff --check`
+   - PASS.
+
+## Concerns
+
+- The six legacy Cloudflare type diagnostics remain intentionally untouched for Task 11.

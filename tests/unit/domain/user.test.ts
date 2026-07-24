@@ -38,4 +38,11 @@ describe("user contracts", () => {
       }).success,
     ).toBe(true);
   });
+
+  it("rejects profile patches without a mutable field", () => {
+    expect(profilePatchSchema.safeParse({}).success).toBe(false);
+    expect(
+      profilePatchSchema.safeParse({ currentPassword: "password123" }).success,
+    ).toBe(false);
+  });
 });
