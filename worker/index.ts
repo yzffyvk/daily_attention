@@ -1,18 +1,22 @@
-/** Cloudflare Worker entry point for the vinext-starter template. */
+/** Cloudflare Worker entry point for the vinext application. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 
-interface Env {
-  ASSETS: Fetcher;
-  DB: D1Database;
-  ATTENTION_IMAGES: R2Bucket;
-  IMAGES: {
-    input(stream: ReadableStream): {
-      transform(options: Record<string, unknown>): {
-        output(options: { format: string; quality: number }): Promise<{ response(): Response }>;
-      };
+interface AssetFetcher {
+  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+}
+
+interface ImageBinding {
+  input(stream: ReadableStream): {
+    transform(options: Record<string, unknown>): {
+      output(options: { format: string; quality: number }): Promise<{ response(): Response }>;
     };
   };
+}
+
+interface Env {
+  ASSETS: AssetFetcher;
+  IMAGES: ImageBinding;
 }
 
 interface ExecutionContext {

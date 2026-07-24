@@ -18,6 +18,21 @@ test("guards the cloud journal page and installs one query provider", async () =
   assert.match(providers, /staleTime:\s*30_000/);
 });
 
+test("uses Supabase instead of local profiles, WeChat, D1, or R2", async () => {
+  const [packageJson, viteConfig, worker, home] = await Promise.all([
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/(app)/page.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(packageJson, /@supabase\/ssr/);
+  assert.doesNotMatch(packageJson, /drizzle/);
+  assert.doesNotMatch(viteConfig, /d1_databases|r2_buckets/);
+  assert.doesNotMatch(worker, /D1Database|R2Bucket/);
+  assert.match(home, /CheckInWorkspace/);
+});
+
 test("uses typed envelope parsing for check-ins, uploads, and profile updates", async () => {
   const client = await readFile(
     new URL("../features/checkins/api.ts", import.meta.url),
