@@ -370,6 +370,21 @@ COMPLETE_WITH_TYPECHECK_CONCERN
 
 ---
 
+# Task 8 Logout Recovery Cache Follow-up
+
+## Implementation
+
+- Abandoning a local draft now reads the selected date's latest query-cache record after asynchronous candidate-image cleanup. If logout then fails, a cloud refresh that completed during cleanup is restored instead of the stale record captured when the user clicked.
+- Added a regression test covering conflict-retained image cleanup, a concurrent cache refresh, and a failed logout.
+
+## Verification
+
+- Focused workspace suite: PASS, 39 tests.
+- Lint and `git diff --check`: PASS.
+- Typecheck reports only the six known Task 11-owned Cloudflare diagnostics.
+
+---
+
 # Task 8 Focused Re-review Follow-up
 
 ## Status

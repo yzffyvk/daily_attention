@@ -378,7 +378,11 @@ export function CheckInWorkspace({
       await cleanupPendingImage(uploadedImagePath, false, operation);
     }
     if (!isCurrentImageOperation(operation)) return false;
-    hydrateDraft(record, selectedDateRef.current);
+    const activeDate = selectedDateRef.current;
+    const latestRecord = queryClient.getQueryData<CheckInRecord | null>(
+      checkInKeys.date(activeDate),
+    );
+    hydrateDraft(latestRecord === undefined ? record : latestRecord, activeDate);
     return true;
   }
 

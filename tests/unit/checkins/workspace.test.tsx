@@ -1009,6 +1009,73 @@ describe("CheckInWorkspace", () => {
     expect(await screen.findByText("暂时无法退出")).toBeVisible();
   });
 
+  it("restores the latest cached record when candidate cleanup finishes before a failed logout", async () => {
+    const date = "2026-07-23";
+    const initial = record(date, "云端初版");
+    const conflictRecord = record(date, "冲突时云端版本", 2);
+    const refreshedRecord = record(date, "清理期间刷新的云端版本", 3);
+    const cleanupRequest = deferred<void>();
+    let logoutRequests = 0;
+    vi.mocked(uploadCheckInImage).mockResolvedValue("checkin-images/user/pending.png");
+    vi.mocked(deleteCheckInImage).mockReturnValue(cleanupRequest.promise);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        if (path === "/api/auth/logout" && init?.method === "POST") {
+          logoutRequests += 1;
+          return Promise.resolve(response({
+            ok: false,
+            error: { code: "SERVICE_UNAVAILABLE", message: "暂时无法退出" },
+            requestId: "logout-request",
+          }, 503));
+        }
+        if (init?.method === "PUT") {
+          return Promise.resolve(response({
+            ok: false,
+            error: {
+              code: "VERSION_CONFLICT",
+              message: "云端记录已更新，请确认后重试",
+              details: { current: conflictRecord },
+            },
+            requestId: "conflict-request",
+          }, 409));
+        }
+        if (path.endsWith(`/${date}`)) {
+          return Promise.resolve(response({ ok: true, data: initial, requestId: "date-request" }));
+        }
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    const { queryClient } = renderWorkspaceWithCachedRecord(date, initial);
+    const user = userEvent.setup();
+    await waitForEditorReady();
+    await user.type(screen.getByLabelText("attention"), "，本地修改");
+    await user.click(screen.getByRole("button", { name: "替换测试图片" }));
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+    await user.click(await screen.findByRole("button", { name: "保留本地内容" }));
+    await user.click(screen.getByRole("button", { name: "退出当前用户" }));
+    await user.click(screen.getByRole("button", { name: "放弃修改并退出" }));
+
+    await waitFor(() => {
+      expect(deleteCheckInImage).toHaveBeenCalledWith("checkin-images/user/pending.png");
+    });
+    act(() => {
+      queryClient.setQueryData(checkInKeys.date(date), refreshedRecord);
+    });
+    cleanupRequest.resolve();
+
+    await waitFor(() => expect(logoutRequests).toBe(1));
+    expect(await screen.findByText("暂时无法退出")).toBeVisible();
+    await waitFor(() => {
+      expect(screen.getByLabelText("attention")).toHaveValue("清理期间刷新的云端版本");
+    });
+  });
+
   it("keeps the selected date and displayed month when a cross-month switch is cancelled", async () => {
     const today = getTodayKey();
     const todayMonth = monthKeyForDate(today);
