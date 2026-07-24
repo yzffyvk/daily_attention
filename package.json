@@ -29,7 +29,7 @@
     "canvas-confetti": "^1.9.4",
     "idb": "^8.0.3",
     "lucide-react": "^1.26.0",
-    "next": "16.2.6",
+    "next": "16.2.11",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "zod": "^4.4.3"
@@ -48,7 +48,7 @@
     "@vitejs/plugin-react": "6.0.2",
     "@vitejs/plugin-rsc": "0.5.26",
     "eslint": "9.39.4",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "16.2.11",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^29.1.1",
     "react-server-dom-webpack": "19.2.6",

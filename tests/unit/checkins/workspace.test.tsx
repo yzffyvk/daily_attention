@@ -100,6 +100,7 @@ vi.mock("@/features/checkins/image-note-uploader", () => ({
         测试移除图片
       </button>
       <output aria-label="图片草稿状态">{file?.name ?? "none"}:{String(removeImage)}</output>
+      <output aria-label="图片上传禁用状态">{String(disabled)}</output>
     </div>
   ),
 }));
@@ -279,12 +280,12 @@ describe("CheckInWorkspace", () => {
     expect(screen.getByText("已恢复本地草稿")).toBeVisible();
   });
 
-  it("keeps the form editable after an offline cloud-read failure without enabling upload or cloud save", async () => {
+  it("keeps the form editable after an offline cloud-read failure and persists an image draft without uploading", async () => {
     const date = getTodayKey();
     Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("offline"))));
 
-    render(
+    const view = render(
       <TestQueryProvider>
         <CheckInWorkspace initialDate={date} initialToday={date} userId="authenticated-subject" />
       </TestQueryProvider>,
@@ -295,16 +296,72 @@ describe("CheckInWorkspace", () => {
     const attention = screen.getByLabelText("attention");
     await userEvent.setup().type(attention, "离线内容");
     expect(screen.getByRole("button", { name: /完成打卡/ })).toBeDisabled();
-    expect(screen.getByLabelText("添加图片笔记")).toBeDisabled();
+    expect(screen.getByLabelText("添加图片笔记")).toBeEnabled();
+    await userEvent.setup().click(screen.getByRole("button", { name: "替换测试图片" }));
 
     await waitFor(
-      async () => expect(await loadDraft("authenticated-subject", date)).toMatchObject({ attention: "离线内容" }),
+      async () => {
+        const stored = await loadDraft("authenticated-subject", date);
+        expect(stored).toMatchObject({
+          attention: "离线内容",
+          imageName: "replacement.png",
+        });
+        expect(typeof stored?.imageBlob).toBe("object");
+      },
       { timeout: 1_000 },
     );
+    expect(uploadCheckInImage).not.toHaveBeenCalled();
+
+    view.unmount();
+    render(
+      <TestQueryProvider>
+        <CheckInWorkspace initialDate={date} initialToday={date} userId="authenticated-subject" />
+      </TestQueryProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByLabelText("图片草稿状态")).toHaveTextContent("replacement.png:false");
+    });
 
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     act(() => window.dispatchEvent(new Event("online")));
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0);
+  });
+
+  it("keeps an offline image preparation when connectivity returns before compression settles", async () => {
+    const date = getTodayKey();
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("offline"))));
+
+    render(
+      <TestQueryProvider>
+        <CheckInWorkspace initialDate={date} initialToday={date} userId="authenticated-subject" />
+      </TestQueryProvider>,
+    );
+
+    await waitForEditorReady();
+    await userEvent.setup().type(screen.getByLabelText("attention"), "离线图片");
+    await userEvent.setup().click(screen.getByRole("button", { name: "开始测试图片整理" }));
+    await waitFor(() => expect(screen.getByText("正在整理图片")).toBeVisible());
+
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    act(() => window.dispatchEvent(new Event("online")));
+    await waitFor(() => {
+      expect(screen.getByLabelText("图片上传禁用状态")).toHaveTextContent("false");
+    });
+    act(() => imagePreparation.complete());
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("图片草稿状态")).toHaveTextContent("replacement.png:false");
+    });
+    await waitFor(
+      async () => {
+        const stored = await loadDraft("authenticated-subject", date);
+        expect(stored?.imageName).toBe("replacement.png");
+        expect(typeof stored?.imageBlob).toBe("object");
+      },
+      { timeout: 1_000 },
+    );
+    expect(uploadCheckInImage).not.toHaveBeenCalled();
   });
 
   it.each([

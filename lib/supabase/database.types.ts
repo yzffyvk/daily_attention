@@ -146,6 +146,10 @@ export type Database = {
         Args: { target_user_id: string }
         Returns: string
       }
+      release_checkin_image_upload_reservation: {
+        Args: { target_path: string; target_user_id: string }
+        Returns: boolean
+      }
       replace_recovery_digest: {
         Args: {
           expected_digest: string
@@ -153,6 +157,18 @@ export type Database = {
           target_user_id: string
         }
         Returns: boolean
+      }
+      reserve_checkin_image_upload: {
+        Args: {
+          target_path: string
+          target_size: number
+          target_user_id: string
+        }
+        Returns: {
+          allowed: boolean
+          reason: string
+          retry_after_seconds: number
+        }[]
       }
       resolve_login_name: {
         Args: { target_login_name: string }

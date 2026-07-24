@@ -34,6 +34,12 @@ export async function createCheckInRequestContext() {
   const supabase = await createServerSupabase();
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user) return null;
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("id", data.user.id)
+    .maybeSingle();
+  if (profileError || !profile) return null;
   return {
     userId: data.user.id,
     repository: createCheckInRepository(supabase),
@@ -42,7 +48,14 @@ export async function createCheckInRequestContext() {
 }
 
 export function checkInServiceFailure(error: unknown, requestId: string) {
-  console.error("check-in request failed", { requestId, error });
+  const errorType = error instanceof Error ? error.name : typeof error;
+  const errorCode = (
+    typeof error === "object"
+    && error !== null
+    && "code" in error
+    && typeof error.code === "string"
+  ) ? error.code : undefined;
+  console.error("check-in request failed", { requestId, errorType, errorCode });
   return checkInFailure(
     "SERVICE_UNAVAILABLE",
     "服务暂时不可用，请稍后再试",

@@ -1,23 +1,26 @@
 import { z } from "zod";
 import { dateKeySchema } from "@/lib/domain/checkin";
-import {
-  assertOwnedImagePath,
-  createCheckInUpload,
-  removeCheckInImage,
-} from "@/server/storage/service";
+import { createAdminSupabase } from "@/lib/supabase/admin";
 import {
   checkInFailure,
   checkInServiceFailure,
   checkInSuccess,
   createCheckInRequestContext,
 } from "@/server/checkins/http";
+import {
+  assertOwnedImagePath,
+  createCheckInUpload,
+  isStorageUploadLimitError,
+  releaseCheckInUploadReservation,
+  removeCheckInImage,
+} from "@/server/storage/service";
 
 const maxImageBytes = 10 * 1024 * 1024;
 const imageMimeTypeSchema = z.enum(["image/jpeg", "image/png", "image/webp"]);
 const uploadRequestSchema = z.object({
   date: dateKeySchema,
   mimeType: imageMimeTypeSchema,
-  size: z.number().int().nonnegative(),
+  size: z.number().int().positive(),
 });
 const deleteRequestSchema = z.object({ path: z.string().min(1).max(1024) });
 
@@ -74,15 +77,28 @@ export async function POST(request: Request) {
       );
     }
 
-    return checkInSuccess(
-      await createCheckInUpload(
-        context.userId,
-        parsedInput.data.date,
-        parsedInput.data.mimeType,
-        context.supabase,
-      ),
-      requestId,
-    );
+    try {
+      return checkInSuccess(
+        await createCheckInUpload(
+          context.userId,
+          parsedInput.data.date,
+          parsedInput.data.mimeType,
+          parsedInput.data.size,
+          createAdminSupabase(),
+        ),
+        requestId,
+      );
+    } catch (error) {
+      if (isStorageUploadLimitError(error)) {
+        return checkInFailure(
+          "RATE_LIMITED",
+          "图片上传过于频繁或存储空间已达上限",
+          requestId,
+          429,
+        );
+      }
+      throw error;
+    }
   } catch (error) {
     return checkInServiceFailure(error, requestId);
   }
@@ -125,6 +141,11 @@ export async function DELETE(request: Request) {
       );
     }
     await removeCheckInImage(context.userId, parsedInput.data.path, context.supabase);
+    await releaseCheckInUploadReservation(
+      context.userId,
+      parsedInput.data.path,
+      createAdminSupabase(),
+    );
     return checkInSuccess({}, requestId);
   } catch (error) {
     return checkInServiceFailure(error, requestId);

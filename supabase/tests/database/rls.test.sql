@@ -1,5 +1,5 @@
 begin;
-select plan(16);
+select plan(20);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at)
 values
@@ -17,9 +17,17 @@ values
   ('00000000-0000-4000-8000-000000000002', '2026-07-23', 'two');
 
 select is(
-  (select count(*)::integer from storage.objects where bucket_id = 'checkin-images'),
+  (
+    select count(*)::integer
+    from storage.objects
+    where bucket_id = 'checkin-images'
+      and owner_id in (
+        '00000000-0000-4000-8000-000000000001',
+        '00000000-0000-4000-8000-000000000002'
+      )
+  ),
   0,
-  'storage starts empty'
+  'storage starts without these test users'
 );
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
@@ -27,6 +35,13 @@ values ('other-images', 'other-images', false, 10485760, array['image/png']);
 
 insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
 values
+  (
+    'checkin-images',
+    '00000000-0000-4000-8000-000000000001/own.png',
+    '00000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000001',
+    '{"size":1,"mimetype":"image/png"}'::jsonb
+  ),
   (
     'checkin-images',
     '00000000-0000-4000-8000-000000000002/other.png',
@@ -86,16 +101,18 @@ select throws_ok(
   'new row violates row-level security policy for table "check_ins"',
   'user cannot reassign their own check-in to another user'
 );
-select lives_ok(
+select throws_ok(
   $$insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
     values (
       'checkin-images',
-      '00000000-0000-4000-8000-000000000001/own.png',
+      '00000000-0000-4000-8000-000000000001/new-own.png',
       '00000000-0000-4000-8000-000000000001',
       '00000000-0000-4000-8000-000000000001',
       '{"size":1,"mimetype":"image/png"}'::jsonb
     )$$,
-  'user can insert a valid storage object in their own path'
+  '42501',
+  null,
+  'user cannot directly insert even in their own storage path'
 );
 select results_eq(
   $$select bucket_id, name, owner, owner_id, metadata
@@ -159,6 +176,48 @@ select is_empty(
 );
 select has_table('private', 'login_aliases', 'private mapping exists');
 select schema_privs_are('private', 'authenticated', array[]::text[], 'authenticated has no private schema privileges');
+
+reset role;
+insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at)
+values ('00000000-0000-4000-8000-000000000003', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'shadow@internal.invalid', '', now(), now(), now());
+insert into public.check_ins (user_id, checkin_date, attention)
+values ('00000000-0000-4000-8000-000000000003', '2026-07-23', 'shadow');
+insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
+values (
+  'checkin-images',
+  '00000000-0000-4000-8000-000000000003/shadow.png',
+  '00000000-0000-4000-8000-000000000003',
+  '00000000-0000-4000-8000-000000000003',
+  '{"size":1,"mimetype":"image/png"}'::jsonb
+);
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"00000000-0000-4000-8000-000000000003","role":"authenticated"}',
+  true
+);
+select is_empty(
+  $$select id from public.check_ins$$,
+  'an authenticated user without a profile cannot read check-ins'
+);
+select throws_ok(
+  $$insert into public.check_ins (user_id, checkin_date, attention)
+    values ('00000000-0000-4000-8000-000000000003', '2026-07-24', 'shadow-write')$$,
+  '42501',
+  null,
+  'an authenticated user without a profile cannot insert check-ins'
+);
+select is_empty(
+  $$select id from storage.objects where bucket_id = 'checkin-images'$$,
+  'an authenticated user without a profile cannot read Storage objects'
+);
+select is_empty(
+  $$delete from storage.objects
+    where bucket_id = 'checkin-images'
+      and name = '00000000-0000-4000-8000-000000000003/shadow.png'
+    returning id$$,
+  'an authenticated user without a profile cannot delete Storage objects'
+);
 
 select * from finish();
 rollback;

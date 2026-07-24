@@ -135,4 +135,29 @@ describe("private check-in image storage", () => {
       })).status,
     ).toBe(413);
   });
+
+  it("returns 429 after five signed-upload requests in ten minutes", async () => {
+    const { session } = await registeredSession();
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const response = await session.post("/api/uploads/checkin-image", {
+        date,
+        mimeType: "image/png",
+        size: 1024,
+      });
+      expect(response.status).toBe(200);
+    }
+
+    const limited = await session.post("/api/uploads/checkin-image", {
+      date,
+      mimeType: "image/png",
+      size: 1024,
+    });
+
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(limited.body.error).toMatchObject({
+      code: "RATE_LIMITED",
+      message: "图片上传过于频繁或存储空间已达上限",
+    });
+  });
 });

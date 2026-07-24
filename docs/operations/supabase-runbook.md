@@ -42,6 +42,8 @@ npx supabase migration list --linked
 
 Read the dry-run output before applying it. Apply only the ordered migrations in `supabase/migrations`; do not modify an already-applied migration or use destructive reset commands against production. Follow a database change with the RLS checks below before directing traffic to the web release.
 
+In Supabase Auth settings, disable project sign-ups, keep email/password sign-in enabled for the application's internal account addresses, set the minimum password length to at least 8, and keep anonymous sign-ins disabled. Application registration uses the server-only Admin API so users cannot bypass the name, recovery-code, profile, and application rate-limit workflow by calling Supabase Auth directly. Verify these settings again after project cloning or restore.
+
 ## Sites Runtime Variables
 
 Set these runtime variables in the managed Sites project for the exact release environment:

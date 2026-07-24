@@ -16,10 +16,18 @@ export function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
     event.preventDefault();
     setError(null);
     setIsSubmitting(true);
-    const result = await postAuth<Record<string, never>>("/api/auth/login", { name, password });
-    setIsSubmitting(false);
-    if (!result.ok) return setError(result.error);
-    onLoggedIn();
+    try {
+      const result = await postAuth<Record<string, never>>("/api/auth/login", { name, password });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      onLoggedIn();
+    } catch {
+      setError({ message: "请求未能完成，请稍后重试" });
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (

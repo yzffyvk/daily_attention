@@ -1635,6 +1635,19 @@ button.calendar-cell:hover {
   margin: 0;
 }
 
+.recovery-rotation-dialog {
+  width: min(100%, 29rem);
+}
+
+.recovery-rotation-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.recovery-rotation-form .auth-field input {
+  min-height: 2.8rem;
+}
+
 .conflict-dialog {
   width: min(100%, 34rem);
 }

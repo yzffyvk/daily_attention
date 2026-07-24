@@ -2,10 +2,11 @@
 
 /* eslint-disable @next/next/no-img-element */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarDays, Check, ChevronDown, LogOut, Pencil, Volume2, VolumeX, X } from "lucide-react";
+import { CalendarDays, Check, ChevronDown, KeyRound, LogOut, Pencil, Volume2, VolumeX, X } from "lucide-react";
 import type { FormEvent, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
-import { ApiError, getCurrentProfile, updateCurrentProfile } from "@/features/checkins/api";
+import { RecoveryCodeDialog } from "@/features/auth/recovery-code-dialog";
+import { ApiError, getCurrentProfile, rotateRecoveryCode, updateCurrentProfile } from "@/features/checkins/api";
 import { formatDate } from "@/features/checkins/dates";
 import { useCheckInStats } from "@/features/checkins/queries";
 import type { AccountProfile } from "@/server/auth/ports";
@@ -198,6 +199,150 @@ function ProfileDialog({
   );
 }
 
+function RecoveryCodeRotationDialog({
+  onClose,
+  onRotated,
+  returnFocusRef,
+}: {
+  onClose: () => void;
+  onRotated: (recoveryCode: string) => void;
+  returnFocusRef: RefObject<HTMLButtonElement | null>;
+}) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [error, setError] = useState("");
+  const dialogRef = useRef<HTMLElement>(null);
+  const passwordInputRef = useRef<HTMLInputElement>(null);
+  const onCloseRef = useRef(onClose);
+  const completedRef = useRef(false);
+  const rotationMutation = useMutation({
+    mutationFn: rotateRecoveryCode,
+  });
+  const isPendingRef = useRef(rotationMutation.isPending);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+    isPendingRef.current = rotationMutation.isPending;
+  });
+
+  useEffect(() => {
+    const returnFocusTarget = returnFocusRef.current;
+    const focusTimer = window.setTimeout(() => passwordInputRef.current?.focus(), 0);
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !isPendingRef.current) {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const focusable = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled])',
+        ),
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener("keydown", handleKeyDown);
+      if (!completedRef.current) returnFocusTarget?.focus();
+    };
+  }, [returnFocusRef]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!currentPassword) {
+      setError("请输入当前密码");
+      return;
+    }
+    setError("");
+    try {
+      const recoveryCode = await rotationMutation.mutateAsync(currentPassword);
+      completedRef.current = true;
+      onRotated(recoveryCode);
+    } catch (mutationError) {
+      setError(
+        mutationError instanceof ApiError
+          ? mutationError.message
+          : "恢复码更新失败，请稍后再试",
+      );
+    }
+  }
+
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <section
+        aria-labelledby="recovery-rotation-title"
+        aria-modal="true"
+        className="switch-dialog recovery-rotation-dialog"
+        ref={dialogRef}
+        role="dialog"
+      >
+        <button
+          aria-label="关闭恢复码更新"
+          className="dialog-close icon-button"
+          disabled={rotationMutation.isPending}
+          onClick={onClose}
+          type="button"
+        >
+          <X aria-hidden="true" size={18} />
+        </button>
+        <p className="eyebrow">ACCOUNT SECURITY</p>
+        <h2 id="recovery-rotation-title">更新恢复码</h2>
+        <p>生成新恢复码后，旧恢复码会立即失效。请先确认当前密码。</p>
+        <form className="recovery-rotation-form" onSubmit={submit}>
+          <label className="auth-field" htmlFor="recovery-rotation-password">
+            <span>当前密码</span>
+            <input
+              aria-describedby={error ? "recovery-rotation-error" : undefined}
+              aria-invalid={error ? "true" : undefined}
+              autoComplete="current-password"
+              id="recovery-rotation-password"
+              onChange={(event) => setCurrentPassword(event.target.value)}
+              ref={passwordInputRef}
+              type="password"
+              value={currentPassword}
+            />
+          </label>
+          {error ? (
+            <p className="login-error" id="recovery-rotation-error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          <div className="dialog-actions">
+            <button
+              className="primary-button"
+              disabled={rotationMutation.isPending || !currentPassword}
+              type="submit"
+            >
+              {rotationMutation.isPending ? "正在生成…" : "生成新的恢复码"}
+            </button>
+            <button
+              className="text-button"
+              disabled={rotationMutation.isPending}
+              onClick={onClose}
+              type="button"
+            >
+              取消
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 export function AppHeader({
   initialProfile,
   today,
@@ -211,6 +356,8 @@ export function AppHeader({
 }: AppHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [recoveryRotationOpen, setRecoveryRotationOpen] = useState(false);
+  const [rotatedRecoveryCode, setRotatedRecoveryCode] = useState("");
   const accountTriggerRef = useRef<HTMLButtonElement>(null);
   const [previousBusy, setPreviousBusy] = useState(isBusy);
   const profileQuery = useQuery({
@@ -231,6 +378,8 @@ export function AppHeader({
     if (isBusy) {
       setMenuOpen(false);
       setProfileOpen(false);
+      setRecoveryRotationOpen(false);
+      setRotatedRecoveryCode("");
     }
   }
 
@@ -274,6 +423,17 @@ export function AppHeader({
                       type="button"
                     >
                       <Pencil aria-hidden="true" size={15} />编辑资料
+                    </button>
+                    <button
+                      disabled={isBusy}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        setRecoveryRotationOpen(true);
+                      }}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <KeyRound aria-hidden="true" size={15} />更新恢复码
                     </button>
                     <button disabled={isBusy} onClick={requestLogout} role="menuitem" type="button">
                       <LogOut aria-hidden="true" size={15} />退出登录
@@ -362,6 +522,24 @@ export function AppHeader({
         </div>
       </header>
       {profileOpen && profile && !isBusy ? <ProfileDialog onClose={() => setProfileOpen(false)} profile={profile} returnFocusRef={accountTriggerRef} /> : null}
+      {recoveryRotationOpen && profile && !isBusy ? (
+        <RecoveryCodeRotationDialog
+          onClose={() => setRecoveryRotationOpen(false)}
+          onRotated={(recoveryCode) => {
+            setRecoveryRotationOpen(false);
+            setRotatedRecoveryCode(recoveryCode);
+          }}
+          returnFocusRef={accountTriggerRef}
+        />
+      ) : null}
+      {rotatedRecoveryCode && profile && !isBusy ? (
+        <RecoveryCodeDialog
+          name={profile.displayName}
+          onClose={() => setRotatedRecoveryCode("")}
+          open
+          recoveryCode={rotatedRecoveryCode}
+        />
+      ) : null}
     </>
   );
 }

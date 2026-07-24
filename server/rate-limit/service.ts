@@ -8,6 +8,20 @@ export const RATE_LIMITS = {
 } as const;
 
 type RateLimitRpcResult = { allowed: boolean; retry_after_seconds: number };
+type StorageUploadLimitReason =
+  | "RATE_LIMITED"
+  | "STORAGE_QUOTA_EXCEEDED";
+type StorageUploadLimitRpcResult = {
+  allowed: boolean;
+  reason: StorageUploadLimitReason | null;
+  retry_after_seconds: number;
+};
+type RpcClient = {
+  rpc: (
+    name: string,
+    params: Record<string, unknown>,
+  ) => PromiseLike<{ data: unknown; error: unknown }>;
+};
 
 function isRateLimitRpcResult(value: unknown): value is RateLimitRpcResult {
   if (!value || typeof value !== "object") return false;
@@ -21,6 +35,32 @@ function isRateLimitRpcResult(value: unknown): value is RateLimitRpcResult {
 
 function isSupabaseRpcError(value: unknown): value is { message: string } {
   return !!value && typeof value === "object" && typeof (value as Record<string, unknown>).message === "string";
+}
+
+function isStorageUploadLimitRpcResult(
+  value: unknown,
+): value is StorageUploadLimitRpcResult {
+  if (!value || typeof value !== "object") return false;
+  const result = value as Record<string, unknown>;
+  const allowed = result.allowed;
+  const reason = result.reason;
+  const retryAfterSeconds = result.retry_after_seconds;
+  if (typeof allowed !== "boolean") return false;
+  if (
+    typeof retryAfterSeconds !== "number"
+    || !Number.isSafeInteger(retryAfterSeconds)
+    || retryAfterSeconds < 0
+  ) {
+    return false;
+  }
+  if (allowed) return reason === null && retryAfterSeconds === 0;
+  if (reason === "RATE_LIMITED") return retryAfterSeconds > 0;
+  return reason === "STORAGE_QUOTA_EXCEEDED" && retryAfterSeconds === 0;
+}
+
+function throwRpcError(error: unknown, fallback: string) {
+  if (!isSupabaseRpcError(error)) throw new Error(fallback);
+  throw error;
 }
 
 export async function bucketDigest(action: string, rawBucket: string) {
@@ -42,7 +82,7 @@ export async function bucketDigest(action: string, rawBucket: string) {
 export async function consumeRateLimit(
   action: keyof typeof RATE_LIMITS,
   rawBucket: string,
-  admin: { rpc: (name: string, params: Record<string, unknown>) => PromiseLike<{ data: unknown; error: unknown }> },
+  admin: RpcClient,
 ) {
   const limit = RATE_LIMITS[action];
   const digest = await bucketDigest(action, rawBucket);
@@ -53,8 +93,7 @@ export async function consumeRateLimit(
     target_window_seconds: limit.windowSeconds,
   });
   if (error !== null) {
-    if (!isSupabaseRpcError(error)) throw new Error("Rate-limit RPC failed");
-    throw error;
+    throwRpcError(error, "Rate-limit RPC failed");
   }
   if (!Array.isArray(data) || data.length !== 1 || !isRateLimitRpcResult(data[0])) {
     throw new Error("Malformed rate-limit RPC response");
@@ -65,5 +104,53 @@ export async function consumeRateLimit(
       code: "RATE_LIMITED",
       retryAfterSeconds: result.retry_after_seconds,
     });
+  }
+}
+
+export async function reserveStorageUpload(
+  input: { userId: string; path: string; size: number },
+  admin: RpcClient,
+) {
+  const { data, error } = await admin.rpc("reserve_checkin_image_upload", {
+    target_user_id: input.userId,
+    target_path: input.path,
+    target_size: input.size,
+  });
+  if (error !== null) {
+    throwRpcError(error, "Storage upload limit RPC failed");
+  }
+  if (
+    !Array.isArray(data)
+    || data.length !== 1
+    || !isStorageUploadLimitRpcResult(data[0])
+  ) {
+    throw new Error("Malformed storage upload limit response");
+  }
+  const result = data[0];
+  if (!result.allowed) {
+    throw Object.assign(new Error("RATE_LIMITED"), {
+      code: "RATE_LIMITED",
+      reason: result.reason,
+      retryAfterSeconds: result.retry_after_seconds,
+    });
+  }
+}
+
+export async function releaseStorageUploadReservation(
+  input: { userId: string; path: string },
+  admin: RpcClient,
+) {
+  const { data, error } = await admin.rpc(
+    "release_checkin_image_upload_reservation",
+    {
+      target_user_id: input.userId,
+      target_path: input.path,
+    },
+  );
+  if (error !== null) {
+    throwRpcError(error, "Storage upload reservation release failed");
+  }
+  if (typeof data !== "boolean") {
+    throw new Error("Malformed storage upload reservation release response");
   }
 }

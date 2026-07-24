@@ -2,6 +2,9 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { postAuth } from "@/features/auth/auth-card";
+import { LoginForm } from "@/features/auth/login-form";
+import { RecoverForm } from "@/features/auth/recover-form";
 import { RegisterForm } from "@/features/auth/register-form";
 import { RecoveryCodeDialog } from "@/features/auth/recovery-code-dialog";
 import { authFailure } from "@/server/auth/response";
@@ -92,5 +95,59 @@ describe("registration UI", () => {
     expect(name).toHaveValue("学习者");
     expect(name).toHaveAttribute("aria-invalid", "true");
     expect(name).toHaveAttribute("aria-describedby", error.id);
+  });
+});
+
+describe("authentication network failures", () => {
+  it("turns a rejected auth request into a friendly failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+
+    await expect(postAuth("/api/auth/login", {})).resolves.toEqual({
+      ok: false,
+      error: { message: "网络连接失败，请检查网络后重试" },
+    });
+  });
+
+  it("unlocks the login form and shows a friendly error after a network failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    const user = userEvent.setup();
+    render(<LoginForm onLoggedIn={vi.fn()} />);
+
+    await user.type(screen.getByLabelText("名称"), "学习者");
+    await user.type(screen.getByLabelText("密码"), "password123");
+    await user.click(screen.getByRole("button", { name: "登录" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("网络连接失败，请检查网络后重试");
+    expect(screen.getByRole("button", { name: "登录" })).toBeEnabled();
+  });
+
+  it("unlocks the registration form and shows a friendly error after a network failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    const user = userEvent.setup();
+    render(<RegisterForm onRegistered={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("输入一个好记的名称"), "学习者");
+    await user.click(screen.getByRole("radio", { name: "头像 1" }));
+    await user.type(screen.getByLabelText("密码"), "password123");
+    await user.type(screen.getByLabelText("确认密码"), "password123");
+    await user.click(screen.getByRole("button", { name: "注册并进入" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("网络连接失败，请检查网络后重试");
+    expect(screen.getByRole("button", { name: "注册并进入" })).toBeEnabled();
+  });
+
+  it("unlocks the recovery form and shows a friendly error after a network failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    const user = userEvent.setup();
+    render(<RecoverForm onRecovered={vi.fn()} />);
+
+    await user.type(screen.getByLabelText("名称"), "学习者");
+    await user.type(screen.getByLabelText("恢复码"), "01234-56789-ABCDE-FGHJK-MNPQRS");
+    await user.type(screen.getByLabelText("新密码"), "new-password123");
+    await user.type(screen.getByLabelText("确认新密码"), "new-password123");
+    await user.click(screen.getByRole("button", { name: "重设密码" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("网络连接失败，请检查网络后重试");
+    expect(screen.getByRole("button", { name: "重设密码" })).toBeEnabled();
   });
 });

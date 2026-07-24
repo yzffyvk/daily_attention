@@ -221,4 +221,123 @@ describe("profile header", () => {
 
     expect(accountTrigger).toHaveFocus();
   });
+
+  it("rotates and shows a recovery code once after confirming the current password", async () => {
+    const profile = { id: "profile-1", avatarKey: 1, displayName: "学习者" };
+    const rotatedCode = "ABCDE-FGHJK-MNPQR-STUVW-XYZ234";
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.startsWith("/api/checkins/stats?")) {
+        return Promise.resolve(response({
+          ok: true,
+          data: { totalCount: 0, currentStreak: 0, hasTodayRecord: false },
+          requestId: "stats-request",
+        }));
+      }
+      if (path === "/api/auth/recovery-code/rotate") {
+        return Promise.resolve(response({
+          ok: true,
+          data: { recoveryCode: rotatedCode },
+          requestId: "rotate-request",
+        }));
+      }
+      return Promise.resolve(response({
+        ok: true,
+        data: { profile },
+        requestId: "profile-request",
+      }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <TestQueryProvider>
+        <AppHeader
+          initialProfile={profile}
+          isCelebrating={false}
+          isMuted={false}
+          onRequestLogout={vi.fn()}
+          onSelectToday={vi.fn()}
+          onToggleMuted={vi.fn()}
+          today="2026-07-23"
+        />
+      </TestQueryProvider>,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "打开账户菜单" }));
+    await user.click(screen.getByRole("menuitem", { name: "更新恢复码" }));
+
+    expect(screen.getByRole("dialog", { name: "更新恢复码" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "生成新的恢复码" })).toBeDisabled();
+    await user.type(screen.getByLabelText("当前密码"), "password123");
+    await user.click(screen.getByRole("button", { name: "生成新的恢复码" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/auth/recovery-code/rotate",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ currentPassword: "password123" }),
+      }),
+    );
+    expect(await screen.findByRole("heading", { name: "恢复码只显示这一次" })).toBeVisible();
+    expect(screen.getByLabelText("恢复码")).toHaveTextContent(rotatedCode);
+    expect(screen.queryByRole("dialog", { name: "更新恢复码" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "我已保存" }));
+    expect(screen.queryByText(rotatedCode)).not.toBeInTheDocument();
+  });
+
+  it("keeps the recovery-code rotation dialog usable after an API error", async () => {
+    const profile = { id: "profile-1", avatarKey: 1, displayName: "学习者" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        if (String(input).startsWith("/api/checkins/stats?")) {
+          return Promise.resolve(response({
+            ok: true,
+            data: { totalCount: 0, currentStreak: 0, hasTodayRecord: false },
+            requestId: "stats-request",
+          }));
+        }
+        if (String(input) === "/api/auth/recovery-code/rotate") {
+          return Promise.resolve(response({
+            ok: false,
+            error: {
+              code: "INVALID_CREDENTIALS",
+              message: "当前密码不正确",
+              details: { field: "currentPassword" },
+            },
+            requestId: "rotate-error-request",
+          }, 401));
+        }
+        return Promise.resolve(response({
+          ok: true,
+          data: { profile },
+          requestId: "profile-request",
+        }));
+      }),
+    );
+
+    render(
+      <TestQueryProvider>
+        <AppHeader
+          initialProfile={profile}
+          isCelebrating={false}
+          isMuted={false}
+          onRequestLogout={vi.fn()}
+          onSelectToday={vi.fn()}
+          onToggleMuted={vi.fn()}
+          today="2026-07-23"
+        />
+      </TestQueryProvider>,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "打开账户菜单" }));
+    await user.click(screen.getByRole("menuitem", { name: "更新恢复码" }));
+    await user.type(screen.getByLabelText("当前密码"), "wrong-password");
+    await user.click(screen.getByRole("button", { name: "生成新的恢复码" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("当前密码不正确");
+    expect(screen.getByRole("button", { name: "生成新的恢复码" })).toBeEnabled();
+    expect(screen.getByLabelText("当前密码")).toHaveValue("wrong-password");
+  });
 });

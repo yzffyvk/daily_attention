@@ -238,3 +238,14 @@ export async function updateCurrentProfile(input: {
   });
   return result.profile;
 }
+
+export async function rotateRecoveryCode(currentPassword: string) {
+  const result = await requestApi<{ recoveryCode: string }>(
+    "/api/auth/recovery-code/rotate",
+    {
+      method: "POST",
+      body: JSON.stringify({ currentPassword }),
+    },
+  );
+  return result.recoveryCode;
+}

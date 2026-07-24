@@ -159,7 +159,23 @@ function ImageNoteUploaderSession({
   }, []);
 
   useEffect(() => {
-    if (!file) revokeFilePreview();
+    const timer = window.setTimeout(() => {
+      if (!file) {
+        revokeFilePreview();
+        setFilePreview(null);
+        return;
+      }
+      if (filePreviewRef.current?.file === file) return;
+
+      revokeFilePreview();
+      const preview = {
+        file,
+        url: URL.createObjectURL(file),
+      };
+      filePreviewRef.current = preview;
+      setFilePreview(preview);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [file]);
 
   useLayoutEffect(() => {

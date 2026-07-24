@@ -156,8 +156,11 @@ describe("check-in image replacement cleanup", () => {
     expect(mocks.remove).toHaveBeenCalledWith("user-1", previousImagePath, supabase);
     expect(consoleError).toHaveBeenCalledWith(
       "check-in image cleanup failed",
-      expect.objectContaining({ previousImagePath, savedImagePath: nextImagePath }),
+      expect.objectContaining({ errorType: "Error", requestId: expect.any(String) }),
     );
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain(previousImagePath);
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain(nextImagePath);
+    expect(consoleError.mock.calls[0]?.[1]).not.toHaveProperty("error");
     consoleError.mockRestore();
   });
 

@@ -35,22 +35,73 @@ describe("check-in image paths", () => {
   });
 
   it("creates non-upsert upload signatures in the private image bucket", async () => {
-    const createSignedUploadUrl = vi.fn().mockResolvedValue({
-      data: { path: "user-1/2026-07-23/new.png", token: "upload-token" },
+    const rpc = vi.fn().mockResolvedValue({
+      data: [{ allowed: true, reason: null, retry_after_seconds: 0 }],
       error: null,
     });
-    const supabase = supabaseStorage({ createSignedUploadUrl });
+    const createSignedUploadUrl = vi.fn(
+      async (path: string) => ({
+        data: { path, token: "upload-token" },
+        error: null,
+      }),
+    );
+    const supabase = {
+      ...supabaseStorage({ createSignedUploadUrl }),
+      rpc,
+    } as unknown as SupabaseClient<Database>;
 
     await expect(
-      createCheckInUpload("user-1", "2026-07-23", "image/png", supabase),
+      createCheckInUpload(
+        "user-1",
+        "2026-07-23",
+        "image/png",
+        1024,
+        supabase,
+      ),
     ).resolves.toEqual({
-      path: "user-1/2026-07-23/new.png",
+      path: expect.stringMatching(/^user-1\/2026-07-23\/.+\.png$/u),
       token: "upload-token",
     });
     expect(supabase.storage.from).toHaveBeenCalledWith("checkin-images");
     expect(createSignedUploadUrl).toHaveBeenCalledWith(
       expect.stringMatching(/^user-1\/2026-07-23\/.+\.png$/u),
       { upsert: false },
+    );
+  });
+
+  it("releases a quota reservation when Storage cannot create the signature", async () => {
+    const rpc = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: [{ allowed: true, reason: null, retry_after_seconds: 0 }],
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: true, error: null });
+    const createSignedUploadUrl = vi.fn().mockResolvedValue({
+      data: null,
+      error: new Error("storage unavailable"),
+    });
+    const supabase = {
+      ...supabaseStorage({ createSignedUploadUrl }),
+      rpc,
+    } as unknown as SupabaseClient<Database>;
+
+    await expect(
+      createCheckInUpload(
+        "user-1",
+        "2026-07-23",
+        "image/png",
+        1024,
+        supabase,
+      ),
+    ).rejects.toThrow("storage unavailable");
+
+    expect(rpc).toHaveBeenLastCalledWith(
+      "release_checkin_image_upload_reservation",
+      expect.objectContaining({
+        target_user_id: "user-1",
+        target_path: expect.stringMatching(/^user-1\/2026-07-23\/.+\.png$/u),
+      }),
     );
   });
 

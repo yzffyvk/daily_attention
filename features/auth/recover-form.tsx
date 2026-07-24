@@ -19,10 +19,18 @@ export function RecoverForm({ onRecovered }: { onRecovered: (result: { name: str
     if (newPassword !== confirmation) return setError({ message: "两次输入的密码不一致" });
     setError(null);
     setIsSubmitting(true);
-    const result = await postAuth<{ recoveryCode: string }>("/api/auth/recover", { name, recoveryCode, newPassword });
-    setIsSubmitting(false);
-    if (!result.ok) return setError(result.error);
-    onRecovered({ name, recoveryCode: result.data.recoveryCode });
+    try {
+      const result = await postAuth<{ recoveryCode: string }>("/api/auth/recover", { name, recoveryCode, newPassword });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      onRecovered({ name, recoveryCode: result.data.recoveryCode });
+    } catch {
+      setError({ message: "请求未能完成，请稍后重试" });
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (

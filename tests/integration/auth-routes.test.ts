@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
+import { createClient } from "@supabase/supabase-js";
 import { ApiSession } from "../helpers/api-session";
 import {
   cleanupIntegrationFixtures,
@@ -32,6 +33,28 @@ afterAll(async () => {
 });
 
 describe("authentication routes", () => {
+  it("rejects direct Supabase sign-up outside the application registration route", async () => {
+    const url = process.env.TEST_SUPABASE_URL;
+    const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+    if (!url || !publishableKey) throw new Error("Missing integration Supabase bindings");
+    const directClient = createClient(url, publishableKey, {
+      auth: {
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        persistSession: false,
+      },
+    });
+
+    const { data, error } = await directClient.auth.signUp({
+      email: `${crypto.randomUUID()}@example.test`,
+      password: "password123",
+    });
+
+    expect(data.user).toBeNull();
+    expect(data.session).toBeNull();
+    expect(error).toMatchObject({ code: "signup_disabled", status: 422 });
+  });
+
   it("registers, logs out, logs in, updates a profile, and rotates recovery credentials", async () => {
     const { ip, session } = fixtureSession();
     const name = `测试-${crypto.randomUUID().slice(0, 12)}`;

@@ -204,6 +204,7 @@ export function CheckInWorkspace({
   const {
     deleteAfterCloudSave,
     isOffline,
+    storageState: draftStorageState,
   } = useCheckInDraft({
     userId,
     date: selectedDate,
@@ -449,10 +450,6 @@ export function CheckInWorkspace({
   }
 
   async function handleImageChange(selection: ImageSelection, identity: string) {
-    if (isOffline) {
-      setStatus("离线，内容已保存在此浏览器", "neutral");
-      return;
-    }
     const operation = imageOperationRef.current + 1;
     imageOperationRef.current = operation;
     const isCurrentOperation = () => (
@@ -478,12 +475,23 @@ export function CheckInWorkspace({
       };
     });
     if (!isCurrentOperation()) return;
-    setStatus(selection.file ? "图片笔记已加入，记得完成保存" : "图片将在保存后移除");
+    setStatus(
+      isOffline
+        ? "图片修改已保存为本地草稿，联网后可完成打卡"
+        : selection.file
+          ? "图片笔记已加入，记得完成保存"
+          : "图片将在保存后移除",
+    );
   }
 
   async function saveCurrentRecord() {
     if (isOffline) {
-      setStatus("离线，内容已保存在此浏览器", "neutral");
+      setStatus(
+        draftStorageState === "unavailable"
+          ? "浏览器草稿保存失败，请保持页面开启并稍后重试"
+          : "离线，内容已保存在此浏览器",
+        draftStorageState === "unavailable" ? "error" : "neutral",
+      );
       return false;
     }
     if (saveInFlightRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current || editorLockedRef.current) return false;
@@ -709,6 +717,7 @@ export function CheckInWorkspace({
           isPreparingImage={isPreparingImage}
           isRetryingRecord={checkInQuery.isFetching}
           isOffline={isOffline}
+          draftStorageState={draftStorageState}
           loadError={isCloudReadFailure ? messageForError(checkInQuery.error) : ""}
           message={message}
           messageTone={messageTone}

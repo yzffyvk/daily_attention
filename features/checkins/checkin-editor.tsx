@@ -2,6 +2,7 @@
 
 import { Check, RotateCcw } from "lucide-react";
 import type { FormEvent } from "react";
+import type { DraftStorageState } from "@/features/drafts/use-checkin-draft";
 import { formatDate } from "./dates";
 import { ImageNoteUploader, type ImageSelection } from "./image-note-uploader";
 import type { CheckInRecord } from "./types";
@@ -52,6 +53,7 @@ type CheckInEditorProps = {
   isPreparingImage: boolean;
   isRetryingRecord: boolean;
   isOffline: boolean;
+  draftStorageState: DraftStorageState;
   loadError: string;
   message: string;
   messageTone: MessageTone;
@@ -75,6 +77,7 @@ export function CheckInEditor({
   isPreparingImage,
   isRetryingRecord,
   isOffline,
+  draftStorageState,
   loadError,
   message,
   messageTone,
@@ -89,7 +92,11 @@ export function CheckInEditor({
   const canSave = Boolean(draft.attention.trim());
   const state = isPreparingImage ? "正在整理图片" : isDirty ? "未保存" : record ? "已保存" : isLoading ? "正在读取" : "待填写";
   const isDisabled = isLoading || isSaving || isCleaningUpImage || isPreparingImage;
-  const isUploaderDisabled = isLoading || isSaving || isCleaningUpImage || isOffline;
+  const isUploaderDisabled =
+    isSaving ||
+    isCleaningUpImage ||
+    (isLoading && !isPreparingImage);
+  const localDraftUnavailable = isDirty && draftStorageState === "unavailable";
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -221,8 +228,14 @@ export function CheckInEditor({
             </button>
           </div>
           <div className="save-status">
-            <span aria-live="polite" className={`save-message ${messageTone}`} role="status">
-              {isOffline ? "离线，内容已保存在此浏览器" : isPreparingImage ? "正在整理图片，请稍候" : message || (isDirty ? "有修改尚未保存" : "已同步到云端")}
+            <span aria-live="polite" className={`save-message ${localDraftUnavailable ? "error" : messageTone}`} role="status">
+              {localDraftUnavailable
+                ? "浏览器草稿保存失败，请保持页面开启并尽快重试"
+                : isOffline
+                  ? "离线，内容已保存在此浏览器"
+                  : isPreparingImage
+                    ? "正在整理图片，请稍候"
+                    : message || (isDirty ? "有修改尚未保存" : "已同步到云端")}
             </span>
             <small>云端记录</small>
           </div>

@@ -84,6 +84,22 @@ test("uses only Supabase formal runtime paths while preserving Sites and image b
   assert.match(worker, /env\.IMAGES/);
 });
 
+test("disables direct Supabase sign-up and rejects sessions without an application profile", async () => {
+  const [config, page, requestContext] = await Promise.all([
+    readFile(new URL("../supabase/config.toml", import.meta.url), "utf8"),
+    readFile(new URL("../app/(app)/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../server/checkins/http.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(config, /\[auth\][\s\S]*?enable_signup\s*=\s*false/);
+  assert.match(config, /\[auth\.email\][\s\S]*?enable_signup\s*=\s*true/);
+  assert.match(config, /minimum_password_length\s*=\s*8/);
+  assert.match(page, /if \(error \|\| !profile\) redirect\("\/login"\)/);
+  assert.match(requestContext, /\.from\("profiles"\)/);
+  assert.match(requestContext, /if \(profileError \|\| !profile\) return null/);
+  assert.doesNotMatch(requestContext, /console\.error\([^)]*\{\s*requestId,\s*error\s*\}/s);
+});
+
 test("uses typed envelope parsing for check-ins, uploads, and profile updates", async () => {
   const client = await readFile(
     new URL("../features/checkins/api.ts", import.meta.url),

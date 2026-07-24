@@ -41,11 +41,19 @@ export type ApiResult<T> =
   | { ok: false; error: { message: string; field?: string } };
 
 export async function postAuth<T>(path: string, body: unknown): Promise<ApiResult<T>> {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    return {
+      ok: false,
+      error: { message: "网络连接失败，请检查网络后重试" },
+    };
+  }
   try {
     const result = await response.json() as ApiResult<T> & {
       error?: { message?: string; details?: { field?: string } };

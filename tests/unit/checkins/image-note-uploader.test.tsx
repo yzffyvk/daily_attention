@@ -116,6 +116,31 @@ afterEach(() => {
 });
 
 describe("ImageNoteUploader", () => {
+  it("creates and revokes a preview for an image file restored from local draft storage", async () => {
+    const createObjectURL = vi.fn(() => "blob:restored-preview");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+    const restored = new File(["restored"], "restored-note.png", { type: "image/png" });
+
+    const view = render(
+      <ImageNoteUploader
+        existingImage={null}
+        file={restored}
+        identity="2026-07-23"
+        onChange={vi.fn()}
+        onError={vi.fn()}
+        removeImage={false}
+      />,
+    );
+
+    const preview = await screen.findByAltText("restored-note.png");
+    expect(preview).toHaveAttribute("src", "blob:restored-preview");
+    expect(createObjectURL).toHaveBeenCalledWith(restored);
+
+    view.unmount();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:restored-preview");
+  });
+
   it("limits the longest prepared image edge to 1600px and returns at most 2MiB", async () => {
     const browser = installImageCanvas({
       width: 3200,

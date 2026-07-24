@@ -10,7 +10,7 @@ import {
   type StoredDraft,
 } from "@/lib/indexed-db/drafts";
 
-type DraftStorageState = "loading" | "ready" | "unavailable";
+export type DraftStorageState = "loading" | "ready" | "unavailable";
 
 type ActiveWrite = {
   controller: AbortController;

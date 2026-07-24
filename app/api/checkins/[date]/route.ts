@@ -161,12 +161,17 @@ export async function PUT(request: Request, routeContext: RouteContext) {
           context.supabase,
         );
       } catch (error) {
+        const errorType = error instanceof Error ? error.name : typeof error;
+        const errorCode = (
+          typeof error === "object"
+          && error !== null
+          && "code" in error
+          && typeof error.code === "string"
+        ) ? error.code : undefined;
         console.error("check-in image cleanup failed", {
           requestId,
-          userId: context.userId,
-          previousImagePath: previous.imagePath,
-          savedImagePath: result.record.imagePath,
-          error,
+          errorType,
+          errorCode,
         });
       }
     }

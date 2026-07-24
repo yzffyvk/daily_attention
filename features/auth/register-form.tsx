@@ -30,10 +30,18 @@ export function RegisterForm({ onRegistered }: { onRegistered: (result: Register
     if (password !== confirmation) return setError({ message: "两次输入的密码不一致" });
     setError(null);
     setIsSubmitting(true);
-    const result = await postAuth<Registered>("/api/auth/register", { name, password, avatarKey });
-    setIsSubmitting(false);
-    if (!result.ok) return setError(result.error);
-    onRegistered(result.data);
+    try {
+      const result = await postAuth<Registered>("/api/auth/register", { name, password, avatarKey });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      onRegistered(result.data);
+    } catch {
+      setError({ message: "请求未能完成，请稍后重试" });
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (

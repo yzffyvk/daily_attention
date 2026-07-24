@@ -16,21 +16,18 @@ export default async function AppPage() {
     .select("id, display_name, avatar_key")
     .eq("id", data.claims.sub)
     .maybeSingle();
+  if (error || !profile) redirect("/login");
 
   return (
     <CheckInWorkspaceClient
       initialDate={serverToday}
       initialToday={serverToday}
       userId={data.claims.sub}
-      initialProfile={
-        error || !profile
-          ? null
-          : {
-              id: profile.id,
-              displayName: profile.display_name,
-              avatarKey: profile.avatar_key,
-            }
-      }
+      initialProfile={{
+        id: profile.id,
+        displayName: profile.display_name,
+        avatarKey: profile.avatar_key,
+      }}
     />
   );
 }
