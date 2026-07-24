@@ -29,3 +29,26 @@ after reconnecting.
   frontend-only.
 
 Task 10 legacy import was intentionally not implemented.
+
+## Review Follow-up
+
+Independent review races were fixed on top of `d59aee7`:
+
+- Confirmed cloud saves now synchronously cancel a pending debounce, abort and
+  settle all active draft writes, and only then delete the local draft.
+- Delayed local reads capture a dirty-edit generation and cannot restore over
+  online post-hydration edits or immediate offline edits.
+- Draft writes now use an abortable explicit IndexedDB readwrite transaction,
+  with abort checks before opening, after opening, and during the transaction.
+  Date changes, user changes, unmounts, and confirmed cloud saves abort active
+  writes; `AbortError` remains a normal cancellation state.
+
+Follow-up verification on 2026-07-25:
+
+- Focused draft/workspace tests: 3 files, 69 tests passed in 6.89 s.
+- Full unit suite: 24 files, 154 tests passed in 10.18 s.
+- Lint: passed without errors or warnings.
+- Production build: passed after the implementation change.
+- Rendered-output tests were not rerun because no markup changed.
+- Typecheck reported only the same six accepted legacy Cloudflare declaration
+  errors and no Task 9 errors.

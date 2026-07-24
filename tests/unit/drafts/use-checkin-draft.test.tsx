@@ -58,6 +58,16 @@ function storedDraft(updatedAt = "2026-07-23T11:00:00.000Z") {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, reject, resolve };
+}
+
 function useDraft(options?: Partial<Parameters<typeof useCheckInDraft>[0]>) {
   return useCheckInDraft({
     userId: "auth-user-1",
@@ -131,6 +141,77 @@ describe("useCheckInDraft", () => {
     );
   });
 
+  it("does not restore a delayed local draft over an edit made after cloud hydration", async () => {
+    const localLoad = deferred<ReturnType<typeof storedDraft> | undefined>();
+    const onRestore = vi.fn();
+    draftStore.loadDraft.mockReturnValue(localLoad.promise);
+    const { rerender } = renderHook(
+      ({ currentDraft, dirty }) => useDraft({
+        draft: currentDraft,
+        isDirty: dirty,
+        onRestore,
+      }),
+      {
+        initialProps: {
+          currentDraft: emptyDraft,
+          dirty: false,
+        },
+      },
+    );
+
+    await flushDraftEffects();
+    rerender({
+      currentDraft: { ...emptyDraft, attention: "cloud" },
+      dirty: false,
+    });
+    await flushDraftEffects();
+    rerender({
+      currentDraft: { ...emptyDraft, attention: "edited after hydration" },
+      dirty: true,
+    });
+    await flushDraftEffects();
+    await act(async () => {
+      localLoad.resolve(storedDraft());
+      await localLoad.promise;
+    });
+
+    expect(onRestore).not.toHaveBeenCalled();
+  });
+
+  it("does not restore a delayed local draft over an immediate offline edit", async () => {
+    const localLoad = deferred<ReturnType<typeof storedDraft> | undefined>();
+    const onRestore = vi.fn();
+    draftStore.loadDraft.mockReturnValue(localLoad.promise);
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
+    const { rerender } = renderHook(
+      ({ currentDraft, dirty }) => useDraft({
+        cloudRecord: undefined,
+        draft: currentDraft,
+        isDirty: dirty,
+        onRestore,
+      }),
+      {
+        initialProps: {
+          currentDraft: emptyDraft,
+          dirty: false,
+        },
+      },
+    );
+
+    await flushDraftEffects();
+    rerender({
+      currentDraft: { ...emptyDraft, attention: "offline edit" },
+      dirty: true,
+    });
+    await flushDraftEffects();
+    await act(async () => {
+      localLoad.resolve(storedDraft());
+      await localLoad.promise;
+    });
+
+    expect(onRestore).not.toHaveBeenCalled();
+  });
+
   it("debounces dirty writes and cancels the old date when selection changes", async () => {
     const { rerender } = renderHook(
       ({ selectedDate }) => useDraft({ date: selectedDate, cloudRecord: null }),
@@ -150,7 +231,10 @@ describe("useCheckInDraft", () => {
     });
 
     expect(draftStore.saveDraft).toHaveBeenCalledTimes(1);
-    expect(draftStore.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ date: "2026-07-24" }));
+    expect(draftStore.saveDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ date: "2026-07-24" }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it("ignores a stale write failure after the selected date changes", async () => {
@@ -177,6 +261,87 @@ describe("useCheckInDraft", () => {
     expect(result.current.storageState).toBe("ready");
   });
 
+  it.each([
+    ["date change", "auth-user-1", "2026-07-24"],
+    ["user change", "auth-user-2", date],
+  ])("aborts a started write on %s so the old key cannot land", async (
+    _reason,
+    nextUserId,
+    nextDate,
+  ) => {
+    const writtenKeys: string[] = [];
+    let finishWrite!: () => void;
+    let writeSignal: AbortSignal | undefined;
+    draftStore.saveDraft.mockImplementation((
+      stored: ReturnType<typeof storedDraft>,
+      options?: { signal?: AbortSignal },
+    ) => new Promise<void>((resolve) => {
+      writeSignal = options?.signal;
+      finishWrite = () => {
+        if (!writeSignal?.aborted) writtenKeys.push(`${stored.userId}:${stored.date}`);
+        resolve();
+      };
+    }));
+    const { rerender } = renderHook(
+      ({ currentUserId, selectedDate }) => useDraft({
+        userId: currentUserId,
+        date: selectedDate,
+        cloudRecord: null,
+      }),
+      {
+        initialProps: {
+          currentUserId: "auth-user-1",
+          selectedDate: date,
+        },
+      },
+    );
+
+    await flushDraftEffects();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    expect(writeSignal).toBeDefined();
+
+    rerender({ currentUserId: nextUserId, selectedDate: nextDate });
+    await flushDraftEffects();
+    expect(writeSignal?.aborted).toBe(true);
+    await act(async () => {
+      finishWrite();
+      await Promise.resolve();
+    });
+
+    expect(writtenKeys).not.toContain(`auth-user-1:${date}`);
+  });
+
+  it("aborts a started write when the hook unmounts", async () => {
+    const writtenKeys: string[] = [];
+    let finishWrite!: () => void;
+    let writeSignal: AbortSignal | undefined;
+    draftStore.saveDraft.mockImplementation((
+      stored: ReturnType<typeof storedDraft>,
+      options?: { signal?: AbortSignal },
+    ) => new Promise<void>((resolve) => {
+      writeSignal = options?.signal;
+      finishWrite = () => {
+        if (!writeSignal?.aborted) writtenKeys.push(`${stored.userId}:${stored.date}`);
+        resolve();
+      };
+    }));
+    const { unmount } = renderHook(() => useDraft({ cloudRecord: null }));
+
+    await flushDraftEffects();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    expect(writeSignal).toBeDefined();
+
+    unmount();
+    expect(writeSignal?.aborted).toBe(true);
+    finishWrite();
+    await Promise.resolve();
+    expect(writtenKeys).toHaveLength(0);
+  });
+
   it("keeps a draft when storage cannot be written", async () => {
     draftStore.saveDraft.mockRejectedValue(new Error("quota exceeded"));
     const { result } = renderHook(() => useDraft({ cloudRecord: null }));
@@ -189,6 +354,20 @@ describe("useCheckInDraft", () => {
 
     expect(draftStore.deleteDraft).not.toHaveBeenCalled();
     expect(result.current.storageState).toBe("unavailable");
+  });
+
+  it("treats an aborted write as cancellation instead of a storage failure", async () => {
+    draftStore.saveDraft.mockRejectedValue(
+      new DOMException("The operation was aborted.", "AbortError"),
+    );
+    const { result } = renderHook(() => useDraft({ cloudRecord: null }));
+
+    await flushDraftEffects();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+    });
+
+    expect(result.current.storageState).toBe("ready");
   });
 
   it("never snapshots uploaded image paths in a local draft", () => {
@@ -214,6 +393,50 @@ describe("useCheckInDraft", () => {
       await result.current.deleteAfterCloudSave();
     });
 
+    expect(draftStore.deleteDraft).toHaveBeenCalledWith("auth-user-1", date);
+  });
+
+  it("cancels a due debounced write before deleting after a cloud save", async () => {
+    const { result } = renderHook(() => useDraft({ cloudRecord: null }));
+
+    await flushDraftEffects();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(399);
+      await result.current.deleteAfterCloudSave();
+      await vi.advanceTimersByTimeAsync(1);
+    });
+
+    expect(draftStore.saveDraft).not.toHaveBeenCalled();
+    expect(draftStore.deleteDraft).toHaveBeenCalledWith("auth-user-1", date);
+  });
+
+  it("waits for a late write to settle before deleting after a cloud save", async () => {
+    let resolveWrite!: () => void;
+    let writeSignal: AbortSignal | undefined;
+    draftStore.saveDraft.mockImplementation((
+      _stored: ReturnType<typeof storedDraft>,
+      options?: { signal?: AbortSignal },
+    ) => new Promise<void>((resolve) => {
+      writeSignal = options?.signal;
+      resolveWrite = resolve;
+    }));
+    const { result } = renderHook(() => useDraft({ cloudRecord: null }));
+
+    await flushDraftEffects();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    let deletion!: Promise<void>;
+    act(() => {
+      deletion = result.current.deleteAfterCloudSave();
+    });
+
+    expect(writeSignal?.aborted).toBe(true);
+    expect(draftStore.deleteDraft).not.toHaveBeenCalled();
+    await act(async () => {
+      resolveWrite();
+      await deletion;
+    });
     expect(draftStore.deleteDraft).toHaveBeenCalledWith("auth-user-1", date);
   });
 

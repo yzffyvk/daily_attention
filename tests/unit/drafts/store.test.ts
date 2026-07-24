@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deleteAttentionDraftDatabase,
   loadDraft,
@@ -58,5 +58,58 @@ describe("draft storage", () => {
     expect(typeof stored?.imageBlob).toBe("object");
     expect(stored).not.toHaveProperty("imageUrl");
     expect(JSON.stringify(stored)).not.toContain("data:");
+  });
+
+  it("does not write when aborted before the database opens", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(saveDraft({
+      userId: "user-1",
+      date,
+      attention: "aborted",
+      sourceUrl: "",
+      summary: "",
+      inspiration: "",
+      imageBlob: null,
+      imageName: "",
+      removeImage: false,
+      baseVersion: null,
+      updatedAt: "2026-07-23T10:00:00.000Z",
+    }, { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(await loadDraft("user-1", date)).toBeUndefined();
+  });
+
+  it("aborts an active readwrite transaction before the old key commits", async () => {
+    await loadDraft("open-database", date);
+    const controller = new AbortController();
+    const originalTransaction = IDBDatabase.prototype.transaction;
+    vi.spyOn(IDBDatabase.prototype, "transaction").mockImplementation(function (
+      this: IDBDatabase,
+      storeNames: string | Iterable<string>,
+      mode?: IDBTransactionMode,
+      options?: IDBTransactionOptions,
+    ) {
+      const transaction = originalTransaction.call(this, storeNames, mode, options);
+      if (mode === "readwrite") queueMicrotask(() => controller.abort());
+      return transaction;
+    });
+
+    await expect(saveDraft({
+      userId: "user-1",
+      date,
+      attention: "stale",
+      sourceUrl: "",
+      summary: "",
+      inspiration: "",
+      imageBlob: null,
+      imageName: "",
+      removeImage: false,
+      baseVersion: null,
+      updatedAt: "2026-07-23T10:00:00.000Z",
+    }, { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(await loadDraft("user-1", date)).toBeUndefined();
   });
 });
