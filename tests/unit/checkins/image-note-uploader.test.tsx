@@ -1,6 +1,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ImageNoteUploader, type ImageCompressor } from "@/features/checkins/image-note-uploader";
+import {
+  compressImage,
+  ImageNoteUploader,
+  type ImageCompressor,
+} from "@/features/checkins/image-note-uploader";
+
+const targetImageBytes = 2 * 1024 * 1024;
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -34,12 +40,194 @@ function renderUploader(
   return { ...result, onChange, onError, onPreparationChange };
 }
 
+function installImageCanvas({
+  width,
+  height,
+  outputSize,
+}: {
+  width: number;
+  height: number;
+  outputSize: (attempt: {
+    width: number;
+    height: number;
+    quality: number | undefined;
+    index: number;
+  }) => number;
+}) {
+  const attempts: Array<{
+    width: number;
+    height: number;
+    quality: number | undefined;
+    index: number;
+  }> = [];
+  const drawImage = vi.fn();
+  const canvas = {
+    width: 0,
+    height: 0,
+    getContext: vi.fn(() => ({ clearRect: vi.fn(), drawImage })),
+    toBlob: vi.fn((
+      callback: BlobCallback,
+      _type?: string,
+      quality?: number,
+    ) => {
+      const attempt = {
+        width: canvas.width,
+        height: canvas.height,
+        quality,
+        index: attempts.length,
+      };
+      attempts.push(attempt);
+      callback(new Blob(
+        [new Uint8Array(outputSize(attempt))],
+        { type: "image/jpeg" },
+      ));
+    }),
+  };
+  const originalCreateElement = document.createElement.bind(document);
+  vi.spyOn(document, "createElement").mockImplementation((
+    tagName: string,
+    options?: ElementCreationOptions,
+  ) => (
+    tagName === "canvas"
+      ? canvas as unknown as HTMLCanvasElement
+      : originalCreateElement(tagName, options)
+  ));
+  vi.stubGlobal("URL", {
+    createObjectURL: vi.fn(() => "blob:source"),
+    revokeObjectURL: vi.fn(),
+  });
+  vi.stubGlobal("Image", class {
+    width = width;
+    height = height;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+
+    set src(_value: string) {
+      queueMicrotask(() => this.onload?.());
+    }
+  });
+  return { attempts, canvas, drawImage };
+}
+
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe("ImageNoteUploader", () => {
+  it("limits the longest prepared image edge to 1600px and returns at most 2MiB", async () => {
+    const browser = installImageCanvas({
+      width: 3200,
+      height: 800,
+      outputSize: () => 1_200_000,
+    });
+    const source = new File(["source"], "wide.png", { type: "image/png" });
+
+    const prepared = await compressImage(source);
+
+    expect(browser.attempts[0]).toMatchObject({ width: 1600, height: 400 });
+    expect(browser.drawImage).toHaveBeenCalled();
+    expect(prepared.size).toBeLessThanOrEqual(targetImageBytes);
+    expect(prepared.type).toBe("image/jpeg");
+  });
+
+  it("re-encodes a small-dimension JPEG that exceeds 2MiB instead of returning it unchanged", async () => {
+    const browser = installImageCanvas({
+      width: 800,
+      height: 600,
+      outputSize: ({ index }) => index === 0 ? targetImageBytes + 1 : 1_400_000,
+    });
+    const source = new File(
+      [new Uint8Array(targetImageBytes + 100_000)],
+      "oversized.jpg",
+      { type: "image/jpeg" },
+    );
+
+    const prepared = await compressImage(source);
+
+    expect(prepared).not.toBe(source);
+    expect(browser.attempts.length).toBeGreaterThan(1);
+    expect(browser.attempts[0]).toMatchObject({ width: 800, height: 600 });
+    expect(browser.attempts[1].quality).toBeLessThan(browser.attempts[0].quality ?? 1);
+    expect(prepared.size).toBeLessThanOrEqual(targetImageBytes);
+  });
+
+  it("uses bounded downscaling after quality reduction cannot reach 2MiB", async () => {
+    const browser = installImageCanvas({
+      width: 2400,
+      height: 1800,
+      outputSize: ({ width: attemptWidth }) => (
+        attemptWidth === 1600 ? targetImageBytes + 1 : 1_500_000
+      ),
+    });
+    const source = new File(
+      [new Uint8Array(targetImageBytes + 100_000)],
+      "detailed.png",
+      { type: "image/png" },
+    );
+
+    const prepared = await compressImage(source);
+
+    expect(browser.attempts[0]).toMatchObject({ width: 1600, height: 1200 });
+    expect(browser.attempts.some((attempt) => attempt.width < 1600)).toBe(true);
+    expect(browser.attempts.length).toBeLessThanOrEqual(20);
+    expect(prepared.size).toBeLessThanOrEqual(targetImageBytes);
+  });
+
+  it("rejects clearly when bounded preparation cannot reach 2MiB", async () => {
+    installImageCanvas({
+      width: 2400,
+      height: 1800,
+      outputSize: () => targetImageBytes + 1,
+    });
+    const source = new File(
+      [new Uint8Array(targetImageBytes + 100_000)],
+      "impossible.png",
+      { type: "image/png" },
+    );
+
+    await expect(compressImage(source)).rejects.toThrow(
+      "图片压缩后仍超过 2MB，请选择更小或内容更简单的图片",
+    );
+  });
+
+  it("surfaces an over-target preparation error without calling onChange", async () => {
+    const preparationError = new Error(
+      "图片压缩后仍超过 2MB，请选择更小或内容更简单的图片",
+    );
+    preparationError.name = "ImagePreparationError";
+    const { onChange, onError } = renderUploader(
+      vi.fn().mockRejectedValue(preparationError),
+    );
+    const source = new File(["source"], "source.png", { type: "image/png" });
+
+    fireEvent.change(screen.getByLabelText("添加图片笔记"), {
+      target: { files: [source] },
+    });
+
+    await waitFor(() => expect(onError).toHaveBeenCalledWith(preparationError.message));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps the 10MiB input cap before preparation", async () => {
+    const compressor = vi.fn();
+    const { onChange, onError } = renderUploader(compressor);
+    const source = new File(
+      [new Uint8Array(10 * 1024 * 1024 + 1)],
+      "too-large.png",
+      { type: "image/png" },
+    );
+
+    fireEvent.change(screen.getByLabelText("添加图片笔记"), {
+      target: { files: [source] },
+    });
+
+    expect(onError).toHaveBeenCalledWith("请选择 10MB 以内的 JPEG、PNG 或 WebP 图片");
+    expect(compressor).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("drops stale compression work after its date identity changes and revokes its URL", async () => {
     const compressed = deferred<File>();
     const compressor = vi.fn(() => compressed.promise);

@@ -798,6 +798,32 @@ h2 {
   font-weight: 600;
 }
 
+.stats-query-error {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 0.65rem;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #e0a59b;
+  border-radius: 6px;
+  padding: 0.55rem 0.7rem;
+  background: #fff4f1;
+  color: #873b30;
+  font-size: 0.72rem;
+}
+
+.stats-query-error button,
+.calendar-query-state button {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--green-dark);
+  font: inherit;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 0.18rem;
+}
+
 .today-button {
   display: inline-flex;
   grid-column: 1 / -1;
@@ -851,6 +877,30 @@ h2 {
   display: flex;
   gap: 0.45rem;
   align-items: center;
+}
+
+.calendar-query-state {
+  display: grid;
+  min-height: 15rem;
+  place-items: center;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 1.5rem;
+  background: var(--paper-soft);
+  color: var(--ink-soft);
+  text-align: center;
+}
+
+.calendar-query-state.error {
+  gap: 0.75rem;
+  align-content: center;
+  border-color: #e0a59b;
+  background: #fff4f1;
+  color: #873b30;
+}
+
+.calendar-query-state p {
+  margin: 0;
 }
 
 .icon-button,

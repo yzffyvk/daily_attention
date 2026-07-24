@@ -135,6 +135,38 @@ describe("check-in routes", () => {
     );
   });
 
+  it("returns lifetime totals and a current streak across month boundaries with RLS isolation", async () => {
+    const userOne = await registeredSession();
+    const userTwo = await registeredSession();
+    const dates = [
+      "2025-12-20",
+      "2026-06-29",
+      "2026-06-30",
+      "2026-07-01",
+      "2026-07-10",
+    ];
+    for (const checkInDate of dates) {
+      expect((await userOne.put(`/api/checkins/${checkInDate}`, entry(null))).status).toBe(200);
+    }
+
+    const stats = await userOne.get("/api/checkins/stats?today=2026-07-01");
+    expect(stats.status).toBe(200);
+    expect(stats.body.data).toEqual({
+      totalCount: 5,
+      currentStreak: 3,
+      hasTodayRecord: true,
+    });
+    expect(stats.headers.get("Cache-Control")).toBe("private, no-store");
+
+    const isolated = await userTwo.get("/api/checkins/stats?today=2026-07-01");
+    expect(isolated.status).toBe(200);
+    expect(isolated.body.data).toEqual({
+      totalCount: 0,
+      currentStreak: 0,
+      hasTodayRecord: false,
+    });
+  });
+
   it("returns session and validation errors without caching", async () => {
     const anonymous = new ApiSession();
     const unauthorized = await anonymous.get(`/api/checkins/${date}`);
@@ -143,10 +175,14 @@ describe("check-in routes", () => {
     expect(unauthorized.headers.get("Cache-Control")).toBe(
       "private, no-store",
     );
+    expect((await anonymous.get("/api/checkins/stats?today=2026-07-01")).status).toBe(401);
 
     const user = await registeredSession();
     const invalid = await user.get("/api/checkins?month=2026-13");
     expect(invalid.status).toBe(422);
     expect(invalid.body.error.code).toBe("VALIDATION_ERROR");
+    const invalidStats = await user.get("/api/checkins/stats?today=2026-02-30");
+    expect(invalidStats.status).toBe(422);
+    expect(invalidStats.body.error.code).toBe("VALIDATION_ERROR");
   });
 });

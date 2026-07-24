@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getCheckIn, getMonthCheckIns, saveCheckIn } from "./api";
+import { getCheckIn, getCheckInStats, getMonthCheckIns, saveCheckIn } from "./api";
 import { monthKeyForDate } from "./dates";
 import type { CheckInInput } from "@/lib/domain/checkin";
 import type { CheckInRecord, CheckInSummary } from "./types";
@@ -8,6 +8,8 @@ export const checkInKeys = {
   all: ["checkins"] as const,
   month: (month: string) => ["checkins", "month", month] as const,
   date: (date: string) => ["checkins", "date", date] as const,
+  stats: (today: string) => ["checkins", "stats", today] as const,
+  statsRoot: ["checkins", "stats"] as const,
 };
 
 export function useMonthCheckIns(month: string) {
@@ -21,6 +23,13 @@ export function useCheckIn(date: string) {
   return useQuery({
     queryKey: checkInKeys.date(date),
     queryFn: () => getCheckIn(date),
+  });
+}
+
+export function useCheckInStats(today: string) {
+  return useQuery({
+    queryKey: checkInKeys.stats(today),
+    queryFn: () => getCheckInStats(today),
   });
 }
 
@@ -58,6 +67,7 @@ export function useSaveCheckIn() {
     onSuccess(record) {
       queryClient.setQueryData(checkInKeys.date(record.date), record);
       setMonthRecord(queryClient, record, record.date);
+      void queryClient.invalidateQueries({ queryKey: checkInKeys.statsRoot });
     },
   });
 }

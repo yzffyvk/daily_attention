@@ -2,7 +2,7 @@ import type { ApiFailure, ApiSuccess } from "@/lib/api/result";
 import { createBrowserSupabase } from "@/lib/supabase/browser";
 import type { AccountProfile } from "@/server/auth/ports";
 import type { CheckInInput } from "@/lib/domain/checkin";
-import type { CheckInRecord, CheckInSummary } from "./types";
+import type { CheckInRecord, CheckInStats, CheckInSummary } from "./types";
 
 type ApiEnvelope<T> = ApiSuccess<T> | ApiFailure;
 
@@ -163,6 +163,12 @@ export async function requestApi<T>(
 
 export async function getMonthCheckIns(month: string) {
   return requestApi<CheckInSummary[]>(`/api/checkins?month=${encodeURIComponent(month)}`);
+}
+
+export async function getCheckInStats(today: string) {
+  return requestApi<CheckInStats>(
+    `/api/checkins/stats?today=${encodeURIComponent(today)}`,
+  );
 }
 
 export async function getCheckIn(date: string): Promise<CheckInRecord | null> {

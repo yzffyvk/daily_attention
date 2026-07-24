@@ -6,6 +6,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 
 export default async function AppPage() {
+  const serverToday = getTodayKey();
   const supabase = await createServerSupabase();
   const { data } = await supabase.auth.getClaims();
   if (!data?.claims?.sub) redirect("/login");
@@ -18,7 +19,8 @@ export default async function AppPage() {
 
   return (
     <CheckInWorkspace
-      initialDate={getTodayKey()}
+      initialDate={serverToday}
+      initialToday={serverToday}
       initialProfile={
         error || !profile
           ? null

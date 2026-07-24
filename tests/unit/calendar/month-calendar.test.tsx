@@ -58,4 +58,45 @@ describe("MonthCalendar", () => {
     );
     expect(onSelectDate).toHaveBeenCalledWith("2026-07-25");
   });
+
+  it("shows an accessible loading state instead of an empty month before data arrives", () => {
+    render(
+      <MonthCalendar
+        isLoading
+        month="2026-07"
+        onMonthChange={vi.fn()}
+        onRetry={vi.fn()}
+        onSelectDate={vi.fn()}
+        selectedDate="2026-07-23"
+        summaries={undefined}
+        today="2026-07-24"
+      />,
+    );
+
+    expect(screen.getByRole("status", { name: "正在读取月度记录" })).toBeVisible();
+    expect(screen.queryByLabelText("月度学习日历")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "7月22日，暂无记录" })).not.toBeInTheDocument();
+  });
+
+  it("shows a retryable month error without presenting unknown dates as empty", async () => {
+    const onRetry = vi.fn();
+    render(
+      <MonthCalendar
+        errorMessage="月度记录读取失败"
+        isRetrying={false}
+        month="2026-07"
+        onMonthChange={vi.fn()}
+        onRetry={onRetry}
+        onSelectDate={vi.fn()}
+        selectedDate="2026-07-23"
+        summaries={undefined}
+        today="2026-07-24"
+      />,
+    );
+
+    expect(screen.getByRole("alert", { name: "月度记录读取失败" })).toBeVisible();
+    expect(screen.queryByLabelText("月度学习日历")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "重试月度记录" }));
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
 });

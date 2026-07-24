@@ -7,10 +7,14 @@ import type { CheckInSummary } from "@/features/checkins/types";
 type MonthCalendarProps = {
   month: string;
   selectedDate: string;
-  summaries: CheckInSummary[];
+  summaries: CheckInSummary[] | undefined;
   today: string;
   disabled?: boolean;
+  errorMessage?: string;
+  isLoading?: boolean;
+  isRetrying?: boolean;
   onMonthChange: (month: string) => void;
+  onRetry?: () => void;
   onSelectDate: (date: string) => void;
 };
 
@@ -35,7 +39,11 @@ export function MonthCalendar({
   summaries,
   today,
   disabled = false,
+  errorMessage = "",
+  isLoading = false,
+  isRetrying = false,
   onMonthChange,
+  onRetry,
   onSelectDate,
 }: MonthCalendarProps) {
   const current = monthDate(month);
@@ -43,7 +51,10 @@ export function MonthCalendar({
   const monthIndex = current.getMonth();
   const firstWeekday = current.getDay();
   const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
-  const summaryByDate = new Map(summaries.map((summary) => [summary.date, summary]));
+  const hasMonthData = summaries !== undefined;
+  const summaryByDate = new Map(
+    (summaries ?? []).map((summary) => [summary.date, summary]),
+  );
   const isCurrentMonth = month === monthKeyForDate(today);
 
   return (
@@ -88,48 +99,77 @@ export function MonthCalendar({
         </div>
       </div>
 
-      <div className="calendar-weekdays" aria-hidden="true">
-        {weekdays.map((weekday) => (
-          <span key={weekday}>{weekday}</span>
-        ))}
-      </div>
-      <div aria-label="月度学习日历" className="calendar-grid">
-        {Array.from({ length: firstWeekday }, (_, index) => (
-          <span aria-hidden="true" className="calendar-cell blank" key={`blank-${index}`} />
-        ))}
-        {Array.from({ length: daysInMonth }, (_, index) => {
-          const day = index + 1;
-          const date = dateKey(year, monthIndex, day);
-          const summary = summaryByDate.get(date);
-          const selected = date === selectedDate;
-          const isToday = date === today;
-          return (
-            <button
-              aria-label={calendarLabel(date, summary, selected, isToday)}
-              aria-pressed={selected}
-              className={`calendar-cell${summary ? " recorded" : ""}${isToday ? " today" : ""}${selected ? " selected" : ""}`}
-              disabled={disabled}
-              key={date}
-              onClick={() => onSelectDate(date)}
-              type="button"
-            >
-              <span className="calendar-cell-top">
-                <b>{day}</b>
-                {summary ? (
-                  <i aria-hidden="true"><Check size={13} strokeWidth={3} /></i>
-                ) : null}
-              </span>
-              <small>{summary?.attention ?? (isToday ? "记录今天" : "")}</small>
-              {isToday ? <em>今天</em> : null}
-            </button>
-          );
-        })}
-      </div>
-      <div className="calendar-legend">
-        <span><i className="legend-dot recorded-dot" />已打卡</span>
-        <span><i className="legend-dot selected-dot" />当前选中</span>
-        <span><i className="legend-dot today-dot" />今天</span>
-      </div>
+      {errorMessage ? (
+        <div
+          aria-label="月度记录读取失败"
+          className="calendar-query-state error"
+          role="alert"
+        >
+          <p>{errorMessage}</p>
+          <button
+            disabled={isRetrying}
+            onClick={onRetry}
+            type="button"
+          >
+            {isRetrying ? "正在重试月度记录…" : "重试月度记录"}
+          </button>
+        </div>
+      ) : null}
+      {!hasMonthData && !errorMessage ? (
+        <div
+          aria-label="正在读取月度记录"
+          className="calendar-query-state"
+          role="status"
+        >
+          {isLoading ? "正在读取这个月的学习记录…" : "正在准备这个月的学习记录…"}
+        </div>
+      ) : null}
+      {hasMonthData ? (
+        <>
+          <div className="calendar-weekdays" aria-hidden="true">
+            {weekdays.map((weekday) => (
+              <span key={weekday}>{weekday}</span>
+            ))}
+          </div>
+          <div aria-label="月度学习日历" className="calendar-grid">
+            {Array.from({ length: firstWeekday }, (_, index) => (
+              <span aria-hidden="true" className="calendar-cell blank" key={`blank-${index}`} />
+            ))}
+            {Array.from({ length: daysInMonth }, (_, index) => {
+              const day = index + 1;
+              const date = dateKey(year, monthIndex, day);
+              const summary = summaryByDate.get(date);
+              const selected = date === selectedDate;
+              const isToday = date === today;
+              return (
+                <button
+                  aria-label={calendarLabel(date, summary, selected, isToday)}
+                  aria-pressed={selected}
+                  className={`calendar-cell${summary ? " recorded" : ""}${isToday ? " today" : ""}${selected ? " selected" : ""}`}
+                  disabled={disabled}
+                  key={date}
+                  onClick={() => onSelectDate(date)}
+                  type="button"
+                >
+                  <span className="calendar-cell-top">
+                    <b>{day}</b>
+                    {summary ? (
+                      <i aria-hidden="true"><Check size={13} strokeWidth={3} /></i>
+                    ) : null}
+                  </span>
+                  <small>{summary?.attention ?? (isToday ? "记录今天" : "")}</small>
+                  {isToday ? <em>今天</em> : null}
+                </button>
+              );
+            })}
+          </div>
+          <div className="calendar-legend">
+            <span><i className="legend-dot recorded-dot" />已打卡</span>
+            <span><i className="legend-dot selected-dot" />当前选中</span>
+            <span><i className="legend-dot today-dot" />今天</span>
+          </div>
+        </>
+      ) : null}
     </section>
   );
 }

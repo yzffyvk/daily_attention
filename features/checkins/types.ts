@@ -18,6 +18,12 @@ export type CheckInSummary = Pick<
   "date" | "attention" | "version" | "updatedAt"
 > & { hasImage: boolean };
 
+export type CheckInStats = {
+  totalCount: number;
+  currentStreak: number;
+  hasTodayRecord: boolean;
+};
+
 export type VersionConflict = {
   ok: false;
   reason: "VERSION_CONFLICT";

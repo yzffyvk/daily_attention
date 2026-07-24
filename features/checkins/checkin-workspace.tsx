@@ -3,7 +3,7 @@
 import confetti from "canvas-confetti";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MonthCalendar } from "@/features/calendar/month-calendar";
 import { AppHeader } from "@/features/profile/app-header";
 import type { AccountProfile } from "@/server/auth/ports";
@@ -20,7 +20,13 @@ import {
   type CheckInDraft,
   type MessageTone,
 } from "./checkin-editor";
-import { formatDate, getTodayKey, monthKeyForDate, calculateStreak } from "./dates";
+import {
+  formatDate,
+  formatUpdatedAt,
+  getTodayKey,
+  millisecondsUntilNextLocalMidnight,
+  monthKeyForDate,
+} from "./dates";
 import { DirtySwitchDialog, useDialogFocus } from "./dirty-switch-dialog";
 import type { ImageSelection } from "./image-note-uploader";
 import { checkInKeys, setMonthRecord, useCheckIn, useMonthCheckIns, useSaveCheckIn } from "./queries";
@@ -30,6 +36,7 @@ const muteStorageKey = "attention-journal-muted";
 
 type CheckInWorkspaceProps = {
   initialDate: string;
+  initialToday?: string;
   initialProfile?: AccountProfile | null;
 };
 
@@ -66,7 +73,7 @@ function ConflictDialog({
         {conflict.current ? (
           <div className="cloud-record" aria-label="云端记录">
             <strong>{conflict.current.attention}</strong>
-            <span>版本 {conflict.current.version} · {formatDate(conflict.current.date)}</span>
+            <span>版本 {conflict.current.version} · 云端更新于 {formatUpdatedAt(conflict.current.updatedAt)}</span>
             {conflict.current.summary ? <p>{conflict.current.summary}</p> : null}
           </div>
         ) : (
@@ -129,13 +136,29 @@ function messageForError(error: unknown) {
   return "保存失败，请稍后再试";
 }
 
+function isDefinitiveSaveRejection(error: unknown) {
+  if (!(error instanceof ApiError)) return false;
+  if (
+    error.status === 0 ||
+    error.code === "NETWORK_ERROR" ||
+    error.code === "MALFORMED_RESPONSE"
+  ) {
+    return false;
+  }
+  return [400, 401, 403, 404, 422].includes(error.status);
+}
+
 function recordSnapshot(record: CheckInRecord | null) {
   return record ? { ...record } : null;
 }
 
-export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckInWorkspaceProps) {
+export function CheckInWorkspace({
+  initialDate,
+  initialToday = initialDate,
+  initialProfile = null,
+}: CheckInWorkspaceProps) {
   const queryClient = useQueryClient();
-  const [today] = useState(getTodayKey);
+  const [today, setToday] = useState(initialToday);
   const [selectedDate, setSelectedDate] = useState(initialDate);
   const [month, setMonth] = useState(() => monthKeyForDate(initialDate));
   const [draft, setDraft] = useState<CheckInDraft>(() => draftFromRecord(null));
@@ -154,6 +177,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
   const [isCleaningUpImage, setIsCleaningUpImage] = useState(false);
   const [isPreparingImage, setIsPreparingImage] = useState(false);
   const toastTimerRef = useRef<number | null>(null);
+  const todayRef = useRef(initialToday);
   const selectedDateRef = useRef(initialDate);
   const draftRef = useRef(draft);
   const draftBaseRecordRef = useRef<CheckInRecord | null>(null);
@@ -162,28 +186,17 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
   const imageOperationRef = useRef(0);
   const imageCleanupInFlightRef = useRef(false);
   const imagePreparationInFlightRef = useRef(false);
+  const ambiguousCandidatePathsRef = useRef(new Set<string>());
 
   const monthQuery = useMonthCheckIns(month);
-  const currentMonth = monthKeyForDate(today);
-  const currentMonthQuery = useMonthCheckIns(currentMonth);
   const checkInQuery = useCheckIn(selectedDate);
   const saveMutation = useSaveCheckIn();
   const isAwaitingSelectedRecord = hydratedDate !== selectedDate || checkInQuery.isFetching;
   const hasSelectedRecordError = checkInQuery.isError;
   const isEditorLocked = isSaving || saveMutation.isPending || isAwaitingSelectedRecord || hasSelectedRecordError || isCleaningUpImage || isPreparingImage;
   const selectedRecord = checkInQuery.data ?? null;
-  const monthSummaries = monthQuery.data ?? [];
-  const todaySummaries = useMemo(
-    () => (currentMonth === month ? monthQuery.data ?? [] : currentMonthQuery.data ?? []),
-    [currentMonth, currentMonthQuery.data, month, monthQuery.data],
-  );
   const isDirty = isDraftDirty(draft, draftBaseRecord);
   const canSave = Boolean(draft.attention.trim());
-  const hasTodayRecord = todaySummaries.some((summary) => summary.date === today);
-  const streak = useMemo(
-    () => calculateStreak(todaySummaries, today),
-    [today, todaySummaries],
-  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -238,6 +251,54 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
     return () => window.clearTimeout(timer);
   }, [checkInQuery.data, checkInQuery.isFetching, checkInQuery.isSuccess, hydrateDraft, hydratedDate, selectedDate]);
 
+  useEffect(() => {
+    let midnightTimer: number | null = null;
+
+    function refreshLocalToday() {
+      const browserToday = getTodayKey();
+      const previousToday = todayRef.current;
+      if (browserToday !== previousToday) {
+        todayRef.current = browserToday;
+        setToday(browserToday);
+
+        const draftIsClean = !isDraftDirty(
+          draftRef.current,
+          draftBaseRecordRef.current,
+        );
+        if (
+          selectedDateRef.current === previousToday &&
+          draftIsClean &&
+          !saveInFlightRef.current &&
+          !imageCleanupInFlightRef.current &&
+          !imagePreparationInFlightRef.current
+        ) {
+          const cached = queryClient.getQueryData<CheckInRecord | null>(
+            checkInKeys.date(browserToday),
+          );
+          imageOperationRef.current += 1;
+          selectedDateRef.current = browserToday;
+          setMonth(monthKeyForDate(browserToday));
+          setSelectedDate(browserToday);
+          hydrateDraft(
+            cached ?? null,
+            cached === undefined ? null : browserToday,
+          );
+          setPendingDate(null);
+        }
+      }
+
+      midnightTimer = window.setTimeout(
+        refreshLocalToday,
+        millisecondsUntilNextLocalMidnight(),
+      );
+    }
+
+    refreshLocalToday();
+    return () => {
+      if (midnightTimer !== null) window.clearTimeout(midnightTimer);
+    };
+  }, [hydrateDraft, queryClient]);
+
   useEffect(() => () => {
     if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
     imagePreparationInFlightRef.current = false;
@@ -285,6 +346,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
   }
 
   async function cleanupPendingImage(path: string, quiet = false, operation = imageOperationRef.current) {
+    if (ambiguousCandidatePathsRef.current.has(path)) return false;
     if (imageCleanupInFlightRef.current) return false;
     imageCleanupInFlightRef.current = true;
     editorLockedRef.current = true;
@@ -331,7 +393,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
   function selectToday() {
     if (editorLockedRef.current || imageCleanupInFlightRef.current) return;
     if (today === selectedDate) {
-      setMonth(currentMonth);
+      setMonth(monthKeyForDate(today));
       scrollToEditor();
       return;
     }
@@ -411,6 +473,9 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
         },
       });
 
+      if (pendingImagePath) {
+        ambiguousCandidatePathsRef.current.delete(pendingImagePath);
+      }
       hydrateDraft(record, activeDate);
       setStatus(
         activeRecord
@@ -449,12 +514,18 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
       }
 
       if (pendingImagePath) {
-        await cleanupPendingImage(pendingImagePath, true);
-        setDraft((current) =>
-          current.uploadedImagePath === pendingImagePath
-            ? { ...current, uploadedImagePath: null }
-            : current,
-        );
+        if (isDefinitiveSaveRejection(error)) {
+          const deleted = await cleanupPendingImage(pendingImagePath, true);
+          if (deleted) {
+            setDraft((current) =>
+              current.uploadedImagePath === pendingImagePath
+                ? { ...current, uploadedImagePath: null }
+                : current,
+            );
+          }
+        } else {
+          ambiguousCandidatePathsRef.current.add(pendingImagePath);
+        }
       }
       setStatus(messageForError(error), "error");
       return false;
@@ -533,7 +604,6 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
     <main className="app-page">
       <section className="page-shell">
         <AppHeader
-          hasTodayRecord={hasTodayRecord}
           initialProfile={initialProfile}
           isBusy={isEditorLocked || Boolean(conflict)}
           isDateSelectionDisabled={isEditorLocked}
@@ -552,19 +622,21 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
             window.localStorage.setItem(muteStorageKey, String(nextMuted));
             setStatus(nextMuted ? "打卡提示音已关闭" : "打卡提示音已开启");
           }}
-          streak={streak}
           today={today}
-          totalRecords={todaySummaries.length}
         />
         <MonthCalendar
+          errorMessage={monthQuery.isError ? messageForError(monthQuery.error) : ""}
+          isLoading={monthQuery.isPending}
+          isRetrying={monthQuery.isFetching}
           month={month}
           disabled={isEditorLocked}
           onMonthChange={(nextMonth) => {
             if (!editorLockedRef.current && !imageCleanupInFlightRef.current) setMonth(nextMonth);
           }}
+          onRetry={() => void monthQuery.refetch()}
           onSelectDate={requestDateChange}
           selectedDate={selectedDate}
-          summaries={monthSummaries}
+          summaries={monthQuery.data}
           today={today}
         />
         <CheckInEditor
@@ -577,8 +649,8 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
           isPreparingImage={isPreparingImage}
           isRetryingRecord={checkInQuery.isFetching}
           loadError={hasSelectedRecordError ? messageForError(checkInQuery.error) : ""}
-          message={message || (monthQuery.error ? messageForError(monthQuery.error) : "")}
-          messageTone={message ? messageTone : monthQuery.error ? "error" : messageTone}
+          message={message}
+          messageTone={messageTone}
           onDraftChange={(change) => {
             if (!editorLockedRef.current) {
               setDraft((current) => ({ ...current, ...change }));
@@ -667,7 +739,10 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
           conflict={conflict}
           isBusy={isCleaningUpImage || isPreparingImage}
           onClose={() => {
-            if (!imageCleanupInFlightRef.current && !imagePreparationInFlightRef.current) setConflict(null);
+            if (!imageCleanupInFlightRef.current && !imagePreparationInFlightRef.current) {
+              setBaseVersion(conflict.current?.version ?? null);
+              setConflict(null);
+            }
           }}
           onLoadCloudVersion={loadCloudVersion}
         />

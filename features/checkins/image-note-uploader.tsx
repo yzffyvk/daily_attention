@@ -27,6 +27,18 @@ type ImageNoteUploaderProps = {
 
 const acceptedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const maxImageBytes = 10 * 1024 * 1024;
+const targetImageBytes = 2 * 1024 * 1024;
+const maxImageDimension = 1600;
+const outputQualities = [0.86, 0.74, 0.62, 0.5] as const;
+const outputScales = [1, 0.82, 0.66, 0.52, 0.4] as const;
+const overTargetMessage = "图片压缩后仍超过 2MB，请选择更小或内容更简单的图片";
+
+export class ImagePreparationError extends Error {
+  constructor(message = overTargetMessage) {
+    super(message);
+    this.name = "ImagePreparationError";
+  }
+}
 
 export async function compressImage(file: File) {
   if (
@@ -34,7 +46,8 @@ export async function compressImage(file: File) {
     typeof URL.createObjectURL !== "function" ||
     typeof document === "undefined"
   ) {
-    return file;
+    if (file.size <= targetImageBytes) return file;
+    throw new ImagePreparationError();
   }
 
   const objectUrl = URL.createObjectURL(file);
@@ -46,26 +59,42 @@ export async function compressImage(file: File) {
       image.onerror = () => reject(new Error("无法读取图片"));
     });
 
-    const maxEdge = 1280;
-    const scale = Math.min(1, maxEdge / Math.max(image.width, image.height));
-    if (scale === 1 && file.type === "image/jpeg") return file;
+    const sourceMaxEdge = Math.max(image.width, image.height);
+    if (sourceMaxEdge <= 0) throw new Error("无法读取图片");
+    const initialScale = Math.min(1, maxImageDimension / sourceMaxEdge);
+    if (initialScale === 1 && file.size <= targetImageBytes) return file;
 
     const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(image.width * scale));
-    canvas.height = Math.max(1, Math.round(image.height * scale));
     const context = canvas.getContext("2d");
     if (!context) throw new Error("无法处理图片");
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-
-    const blob = await new Promise<Blob | null>((resolve) => {
-      canvas.toBlob(resolve, "image/jpeg", 0.82);
-    });
-    if (!blob) throw new Error("无法处理图片");
     const fileName = file.name.replace(/\.[^.]+$/u, "") || "image";
-    return new File([blob], `${fileName}.jpg`, {
-      type: "image/jpeg",
-      lastModified: file.lastModified,
-    });
+    const initialWidth = Math.max(1, Math.round(image.width * initialScale));
+    const initialHeight = Math.max(1, Math.round(image.height * initialScale));
+    let encodedAtLeastOnce = false;
+
+    for (const outputScale of outputScales) {
+      canvas.width = Math.max(1, Math.round(initialWidth * outputScale));
+      canvas.height = Math.max(1, Math.round(initialHeight * outputScale));
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+      for (const quality of outputQualities) {
+        const blob = await new Promise<Blob | null>((resolve) => {
+          canvas.toBlob(resolve, "image/jpeg", quality);
+        });
+        if (!blob) continue;
+        encodedAtLeastOnce = true;
+        if (blob.size <= targetImageBytes) {
+          return new File([blob], `${fileName}.jpg`, {
+            type: "image/jpeg",
+            lastModified: file.lastModified,
+          });
+        }
+      }
+    }
+
+    if (!encodedAtLeastOnce) throw new Error("无法处理图片");
+    throw new ImagePreparationError();
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
@@ -196,11 +225,15 @@ function ImageNoteUploaderSession({
         revokeFilePreview();
         setFilePreview(null);
       }
-    } catch {
+    } catch (error) {
       if (!isCurrent(generation)) return;
       revokeFilePreview();
       setFilePreview(null);
-      onError("图片读取失败，请换一张重试");
+      onError(
+        error instanceof Error && error.name === "ImagePreparationError"
+          ? error.message
+          : "图片读取失败，请换一张重试",
+      );
     } finally {
       if (isCurrent(generation)) setPreparation(false);
     }

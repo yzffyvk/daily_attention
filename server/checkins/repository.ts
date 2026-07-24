@@ -36,6 +36,7 @@ function nextMonth(month: string) {
 export interface CheckInRepository {
   findByDate(userId: string, date: string): Promise<CheckInRecord | null>;
   findByMonth(userId: string, month: string): Promise<CheckInSummary[]>;
+  findAllDates(userId: string): Promise<string[]>;
   insert(
     userId: string,
     date: string,
@@ -80,6 +81,16 @@ export function createCheckInRepository(
         version: row.version,
         updatedAt: row.updated_at,
       }));
+    },
+
+    async findAllDates(userId) {
+      const { data, error } = await supabase
+        .from("check_ins")
+        .select("checkin_date")
+        .eq("user_id", userId)
+        .order("checkin_date", { ascending: true });
+      if (error) throw error;
+      return (data ?? []).map((row) => row.checkin_date);
     },
 
     async insert(userId, date, input) {

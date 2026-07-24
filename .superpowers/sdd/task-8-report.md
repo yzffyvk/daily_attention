@@ -273,3 +273,56 @@ COMPLETE_WITH_TYPECHECK_CONCERN
 ## Concerns
 
 - The existing Task 11-owned Cloudflare typecheck gap remains; this follow-up does not modify or mask it.
+
+---
+
+# Task 8 Final Product Fixes
+
+## Status
+
+COMPLETE_WITH_TYPECHECK_CONCERN
+
+## Commit Range
+
+- Base: `3e456e5`
+- Final product-fixes commit: `HEAD` after this report is committed
+
+## Implementation
+
+- Keep-local conflict resolution now adopts the cloud record's current version, or `null` after cloud deletion, while preserving every local draft field. The conflict dialog reports the cloud update timestamp.
+- Candidate images survive network, aborted, malformed, and service responses that may have followed a commit. Definite pre-commit rejection cleanup remains limited to safe validation/auth/forbidden/not-found responses, and later Reset/Discard actions do not delete ownership-ambiguous candidates.
+- Viewed-month loading and errors have dedicated accessible states and retry controls. Lifetime totals and cross-month current streaks now come from a typed, authenticated, no-store stats endpoint backed by a request-scoped RLS repository.
+- The client reconciles server-rendered today with browser-local today after hydration, preserves dirty drafts, and refreshes date behavior at each local midnight.
+- Image preparation enforces a 1600px maximum edge and a 2MiB output target with bounded quality and scale reduction. Uncompressible images report a clear error without updating the draft; the 10MiB input cap remains.
+- Existing version ownership, query locking, maintenance, focus, profile, dirty-draft, and image-operation behaviors remain covered.
+
+## TDD Evidence
+
+1. RED: keep-local retry tests initially submitted the stale version, including the cloud-deleted case.
+2. RED: ambiguous save tests initially deleted or discarded candidate images; the Reset regression reproduced deletion of a potentially committed path.
+3. RED: month loading/error, lifetime stats, local-midnight, and image-bound tests failed before their implementations existed.
+4. GREEN focused: `npx vitest run tests/unit/checkins/workspace.test.tsx tests/unit/calendar/month-calendar.test.tsx tests/unit/checkins/image-note-uploader.test.tsx tests/unit/checkins/stats-service.test.ts tests/unit/profile/app-header.test.tsx tests/unit/checkins/service.test.ts --reporter=dot`
+   - PASS: 6 files, 58 tests.
+
+## Final Verification
+
+1. Full unit: `npm run test:unit`
+   - PASS: 21 files, 113 tests.
+2. Rendered: `npm run test:rendered`
+   - PASS: 4 tests.
+3. Integration: `npm run test:integration`
+   - PASS: 3 files, 10 tests.
+4. Database: `npm run supabase:test`
+   - PASS: 4 files, 105 tests.
+5. Production build: `npm run build`
+   - PASS.
+6. Lint: `npm run lint`
+   - PASS.
+7. Typecheck: `npm run typecheck -- --incremental false`
+   - FAILS only on the six existing Cloudflare ambient-type diagnostics: unresolved `cloudflare:workers` imports in `app/api/auth/wechat/callback/route.ts`, `app/api/auth/wechat/start/route.ts`, and `db/index.ts`; missing `Fetcher`, `D1Database`, and `R2Bucket` globals in `worker/index.ts`. No Task 8 file is reported.
+8. Diff check: `git diff --check`
+   - PASS after appending this report.
+
+## Concerns
+
+- The existing Cloudflare ambient-type gap remains the sole failing verification check. This change neither modifies nor suppresses those diagnostics.

@@ -8,6 +8,15 @@ export function getTodayKey(now = new Date()) {
   ].join("-");
 }
 
+export function millisecondsUntilNextLocalMidnight(now = new Date()) {
+  const nextMidnight = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() + 1,
+  );
+  return Math.max(1, nextMidnight.getTime() - now.getTime());
+}
+
 export function dateKey(year: number, monthIndex: number, day: number) {
   return [
     year,
@@ -37,6 +46,15 @@ export function formatDate(date: string) {
     day: "numeric",
     weekday: "short",
   }).format(new Date(`${date}T12:00:00`));
+}
+
+export function formatUpdatedAt(updatedAt: string) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(updatedAt));
 }
 
 export function formatMonth(month: string) {

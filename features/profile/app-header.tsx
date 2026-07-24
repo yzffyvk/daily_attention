@@ -7,6 +7,7 @@ import type { FormEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, getCurrentProfile, updateCurrentProfile } from "@/features/checkins/api";
 import { formatDate } from "@/features/checkins/dates";
+import { useCheckInStats } from "@/features/checkins/queries";
 import type { AccountProfile } from "@/server/auth/ports";
 
 const avatarKeys = [1, 2, 3, 4, 5];
@@ -17,9 +18,6 @@ type AppHeaderProps = {
   today: string;
   isCelebrating: boolean;
   isMuted: boolean;
-  hasTodayRecord: boolean;
-  streak: number;
-  totalRecords: number;
   isBusy?: boolean;
   isDateSelectionDisabled?: boolean;
   onSelectToday: () => void;
@@ -201,9 +199,6 @@ export function AppHeader({
   today,
   isCelebrating,
   isMuted,
-  hasTodayRecord,
-  streak,
-  totalRecords,
   isBusy = false,
   isDateSelectionDisabled = false,
   onSelectToday,
@@ -218,7 +213,13 @@ export function AppHeader({
     queryFn: getCurrentProfile,
     initialData: initialProfile ?? undefined,
   });
+  const statsQuery = useCheckInStats(today);
   const profile = profileQuery.data ?? initialProfile;
+  const stats = statsQuery.data;
+  const hasTodayRecord = stats?.hasTodayRecord ?? false;
+  const statsMessage = statsQuery.error instanceof ApiError
+    ? statsQuery.error.message
+    : "学习统计读取失败，请稍后重试";
 
   if (previousBusy !== isBusy) {
     setPreviousBusy(isBusy);
@@ -303,22 +304,54 @@ export function AppHeader({
             </span>
             <div>
               <small>今天</small>
-              <strong>{hasTodayRecord ? "已经打卡" : "等待 attention"}</strong>
+              <strong>
+                {stats
+                  ? hasTodayRecord
+                    ? "已经打卡"
+                    : "等待 attention"
+                  : statsQuery.isError
+                    ? "统计待重试"
+                    : "正在读取"}
+              </strong>
             </div>
           </div>
-          <div aria-label="学习统计" className="metric-row">
+          <div
+            aria-busy={statsQuery.isPending || statsQuery.isFetching}
+            aria-label="学习统计"
+            className="metric-row"
+          >
             <div>
-              <span>本月连续</span>
-              <strong>{streak}<small>天</small></strong>
+              <span>当前连续</span>
+              <strong>{stats?.currentStreak ?? "—"}{stats ? <small>天</small> : null}</strong>
             </div>
             <div>
-              <span>本月记录</span>
-              <strong>{totalRecords}<small>篇</small></strong>
+              <span>累计记录</span>
+              <strong>{stats?.totalCount ?? "—"}{stats ? <small>篇</small> : null}</strong>
             </div>
           </div>
+          {statsQuery.isError ? (
+            <div
+              aria-label="学习统计错误"
+              className="stats-query-error"
+              role="status"
+            >
+              <span>{statsMessage}</span>
+              <button
+                disabled={statsQuery.isFetching}
+                onClick={() => void statsQuery.refetch()}
+                type="button"
+              >
+                {statsQuery.isFetching ? "正在重试…" : "重试学习统计"}
+              </button>
+            </div>
+          ) : null}
           <button className="today-button" disabled={isBusy || isDateSelectionDisabled} onClick={onSelectToday} type="button">
             <CalendarDays aria-hidden="true" size={18} />
-            {hasTodayRecord ? "回看今日记录" : "开始今日打卡"}
+            {stats
+              ? hasTodayRecord
+                ? "回看今日记录"
+                : "开始今日打卡"
+              : "查看今日"}
           </button>
         </div>
       </header>
