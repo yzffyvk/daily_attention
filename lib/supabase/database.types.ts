@@ -108,7 +108,67 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      complete_registration: {
+        Args: {
+          target_auth_email: string
+          target_avatar_key: number
+          target_login_name: string
+          target_recovery_digest: string
+          target_user_id: string
+        }
+        Returns: {
+          avatar_key: number
+          created_at: string
+          display_name: string
+          id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      read_recovery_digest: {
+        Args: { target_user_id: string }
+        Returns: string
+      }
+      replace_recovery_digest: {
+        Args: {
+          expected_digest: string
+          next_digest: string
+          target_user_id: string
+        }
+        Returns: boolean
+      }
+      resolve_login_name: {
+        Args: { target_login_name: string }
+        Returns: {
+          auth_email: string
+          user_id: string
+        }[]
+      }
+      update_profile_identity: {
+        Args: {
+          target_avatar_key: number
+          target_login_name: string
+          target_user_id: string
+        }
+        Returns: {
+          avatar_key: number
+          created_at: string
+          display_name: string
+          id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
     }
     Enums: {
       [_ in never]: never
