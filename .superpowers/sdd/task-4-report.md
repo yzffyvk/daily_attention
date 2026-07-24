@@ -131,3 +131,46 @@ Result: expected RED, 4 failing rate-limit assertions. The first call failed wit
 - The recovery digest is consumed before an external password change, so a CAS loser cannot change the password. The compensating CAS is conditional on the claimed digest, so it cannot overwrite a later recovery result.
 - There is no cross-system transaction with Supabase Auth. If `updatePassword` rejects after the provider actually changed the password and the digest rollback succeeds, the old recovery code may remain valid for a password that may already have changed. The operation still rejects and never signs in or returns a replacement code; resolving this ambiguity needs provider-level idempotency or a dedicated recovery transaction design.
 - If compensation fails, the digest remains claimed and the service throws `RECOVERY_ROLLBACK_FAILED` with causal errors for operational handling. No retry loop is attempted because it could overwrite a newer recovery claim.
+
+## Independent Review Fixes (2026-07-24)
+
+### Scope And Security Rationale
+
+- `server/rate-limit/service.ts` now imports `server-only`, establishing the same real production bundler boundary as the pepper-consuming admin path. Vitest maps only that bare import to the empty `tests/stubs/server-only.ts` stub; this test-only alias does not alter production bundler protection. `npm test` built every application environment with the real boundary intact.
+- `consume_auth_rate_limit` validates all arguments before its conflict-safe insert or row lock. A bucket must be a non-null 32-byte HMAC digest, and the action/attempt/window tuple must exactly be `register/5/3600`, `login/10/900`, `recover/5/1800`, or `rotate/5/3600`. Invalid values, including non-positive attempts or windows, raise the stable `22023` error `invalid auth rate limit parameters` without creating or changing a bucket row. The existing `SECURITY DEFINER`, empty `search_path`, exact revokes, service-role grant, and conflict-safe acquisition remain unchanged.
+- The rate-limit client now fails closed for malformed RPC error/data shapes rather than consuming arbitrary values. New unit coverage confirms missing browser/admin/pepper configuration fails before client/RPC use. The proxy test directly exercises request-cookie mutation, response cookie options, supplied cache headers, and `getClaims()` refresh using a small module-level Next/Supabase seam; a full middleware harness was not needed.
+
+### TDD Evidence
+
+**RED:** Added the invalid-parameter pgTAP cases and malformed RPC/client/proxy unit cases before changing production code. `npm run test:unit -- tests/unit/rate-limit/service.test.ts` produced the expected malformed-data and malformed-error failures: the old code dereferenced `null` and threw a string error. During initial test scaffolding, Vitest also showed that bare `server-only` is not resolved outside Next and required a test-only alias; the proxy/client mock factories were then hoisted to satisfy Vitest's module-mock lifecycle. `NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase test db` against the old migration rejected a null bucket with `23502` and allowed every other invalid tuple to insert a row; 13 behavioral assertions failed (plus the initially corrected pgTAP plan count).
+
+**GREEN:** `npx vitest run tests/unit/rate-limit/service.test.ts tests/unit/supabase-clients.test.ts tests/unit/proxy.test.ts` passed 3 files and 8 tests. After reset, pgTAP passed all 4 files and 92 tests, including 24 rate-limit assertions. The complete unit suite passed 6 files and 17 tests.
+
+### Verification
+
+| Command | Result |
+| --- | --- |
+| `NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase db reset` | PASS; migrations through `202607230003` applied. |
+| `NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase test db` | PASS; 4 files, 92 tests. |
+| `npm run test:unit` | PASS; 6 files, 17 tests. |
+| `npm run lint` | PASS. |
+| `npm test` | PASS; Vinext build plus 7 rendered tests. |
+| `git diff --check` | PASS. |
+
+### Files Changed
+
+- `server/rate-limit/service.ts`
+- `supabase/migrations/202607230003_rate_limit_function.sql`
+- `supabase/tests/database/rate-limit.test.sql`
+- `tests/unit/rate-limit/service.test.ts`
+- `tests/unit/supabase-clients.test.ts`
+- `tests/unit/proxy.test.ts`
+- `tests/stubs/server-only.ts`
+- `vitest.config.ts`
+- `.superpowers/sdd/task-4-report.md`
+
+### Self-Review And Residual Concerns
+
+- This section supersedes the earlier report's stale assertions that password changes before recovery-code CAS and that the first-use rate-limit race remains. Commit `276295d` already claims the digest before password mutation and uses conflict-safe first-use acquisition; these review fixes preserve both behaviors.
+- The invalid-input tests use approved 32-byte fixture digests, reject every requested invalid class, and verify that each rejected request leaves no targeted private row (or, for the null bucket, leaves the private bucket count unchanged). Validation occurs before the function's first data-access statement.
+- The existing global `npm run typecheck` limitation remains confined to the known legacy Cloudflare type paths reported above; this pass did not modify them and it was outside the requested verification list.

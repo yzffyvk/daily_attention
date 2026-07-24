@@ -22,4 +22,30 @@ describe("consumeRateLimit", () => {
       }),
     );
   });
+
+  it("fails closed when the RPC returns malformed data", async () => {
+    vi.stubEnv("AUTH_RATE_LIMIT_PEPPER", "test-rate-limit-pepper");
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: null });
+
+    await expect(consumeRateLimit("login", "203.0.113.1", { rpc })).rejects.toThrow(
+      "Malformed rate-limit RPC response",
+    );
+  });
+
+  it("fails closed when the RPC returns a malformed error", async () => {
+    vi.stubEnv("AUTH_RATE_LIMIT_PEPPER", "test-rate-limit-pepper");
+    const rpc = vi.fn().mockResolvedValue({ data: [], error: "upstream unavailable" });
+
+    await expect(consumeRateLimit("login", "203.0.113.1", { rpc })).rejects.toThrow(
+      "Rate-limit RPC failed",
+    );
+  });
+
+  it("fails closed when the pepper is missing", async () => {
+    vi.stubEnv("AUTH_RATE_LIMIT_PEPPER", "");
+
+    await expect(
+      consumeRateLimit("login", "203.0.113.1", { rpc: vi.fn() }),
+    ).rejects.toThrow("Missing AUTH_RATE_LIMIT_PEPPER");
+  });
 });

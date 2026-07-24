@@ -14,6 +14,24 @@ declare
   request_time timestamptz := now();
   window_end timestamptz;
 begin
+  if target_bucket is null
+    or octet_length(target_bucket) <> 32
+    or target_action is null
+    or target_max_attempts is null
+    or target_window_seconds is null
+    or target_max_attempts <= 0
+    or target_window_seconds <= 0
+    or not (
+      (target_action = 'register' and target_max_attempts = 5 and target_window_seconds = 3600)
+      or (target_action = 'login' and target_max_attempts = 10 and target_window_seconds = 900)
+      or (target_action = 'recover' and target_max_attempts = 5 and target_window_seconds = 1800)
+      or (target_action = 'rotate' and target_max_attempts = 5 and target_window_seconds = 3600)
+    ) then
+    raise exception using
+      errcode = '22023',
+      message = 'invalid auth rate limit parameters';
+  end if;
+
   insert into private.auth_rate_limits (
     bucket_digest, action, window_started_at, attempt_count
   )
