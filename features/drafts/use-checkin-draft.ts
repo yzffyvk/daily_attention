@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CheckInDraft } from "@/features/checkins/checkin-editor";
 import type { CheckInRecord } from "@/features/checkins/types";
 import {
@@ -15,6 +15,12 @@ type DraftStorageState = "loading" | "ready" | "unavailable";
 type ActiveWrite = {
   controller: AbortController;
   promise: Promise<void>;
+};
+
+type EditTokenState = {
+  draft: CheckInDraft;
+  isDirty: boolean;
+  token: number;
 };
 
 type UseCheckInDraftOptions = {
@@ -38,6 +44,18 @@ function isAbortError(error: unknown) {
 
 function abortActiveWrites(activeWrites: Set<ActiveWrite>) {
   for (const write of activeWrites) write.controller.abort();
+}
+
+function editorDraftsMatch(left: CheckInDraft, right: CheckInDraft) {
+  return (
+    left.attention === right.attention
+    && left.sourceUrl === right.sourceUrl
+    && left.summary === right.summary
+    && left.inspiration === right.inspiration
+    && left.imageFile === right.imageFile
+    && left.removeImage === right.removeImage
+    && left.uploadedImagePath === right.uploadedImagePath
+  );
 }
 
 function editorDraftFromStored(stored: StoredDraft): CheckInDraft {
@@ -94,7 +112,6 @@ export function useCheckInDraft({
     typeof navigator !== "undefined" && !navigator.onLine,
   );
   const loadGenerationRef = useRef(0);
-  const editGenerationRef = useRef(0);
   const writeGenerationRef = useRef(0);
   const writeTimerRef = useRef<number | null>(null);
   const activeWritesRef = useRef(new Set<ActiveWrite>());
@@ -103,6 +120,39 @@ export function useCheckInDraft({
   const cloudUpdatedAt = cloudRecord
     ? Date.parse(cloudRecord.updatedAt)
     : Number.NEGATIVE_INFINITY;
+  const [editTokenState, setEditTokenState] = useState<EditTokenState>(() => ({
+    draft,
+    isDirty,
+    token: 0,
+  }));
+  let editToken = editTokenState.token;
+  const draftChanged = !editorDraftsMatch(draft, editTokenState.draft);
+  if (draftChanged || isDirty !== editTokenState.isDirty) {
+    if (isDirty && (!editTokenState.isDirty || draftChanged)) {
+      editToken += 1;
+    }
+    setEditTokenState({ draft, isDirty, token: editToken });
+  }
+  const editGenerationRef = useRef(editToken);
+
+  useLayoutEffect(() => {
+    editGenerationRef.current = editToken;
+  }, [editToken]);
+
+  const cancelPendingWrites = useCallback(() => {
+    writeGenerationRef.current += 1;
+    if (writeTimerRef.current !== null) {
+      window.clearTimeout(writeTimerRef.current);
+      writeTimerRef.current = null;
+    }
+    const activeWrites = [...activeWritesRef.current];
+    abortActiveWrites(activeWritesRef.current);
+    return activeWrites;
+  }, []);
+
+  useLayoutEffect(() => () => {
+    cancelPendingWrites();
+  }, [cancelPendingWrites, date, userId]);
 
   useEffect(() => {
     onRestoreRef.current = onRestore;
@@ -117,10 +167,6 @@ export function useCheckInDraft({
       window.removeEventListener("offline", updateNetworkState);
     };
   }, []);
-
-  useEffect(() => {
-    if (isDirty) editGenerationRef.current += 1;
-  }, [draft, isDirty]);
 
   useEffect(() => {
     const generation = loadGenerationRef.current + 1;
@@ -198,13 +244,7 @@ export function useCheckInDraft({
 
   async function deleteAfterCloudSave() {
     if (!userId) return;
-    writeGenerationRef.current += 1;
-    if (writeTimerRef.current !== null) {
-      window.clearTimeout(writeTimerRef.current);
-      writeTimerRef.current = null;
-    }
-    const activeWrites = [...activeWritesRef.current];
-    abortActiveWrites(activeWritesRef.current);
+    const activeWrites = cancelPendingWrites();
     await Promise.allSettled(activeWrites.map((write) => write.promise));
     const generation = loadGenerationRef.current;
     try {

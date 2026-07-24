@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { StrictMode, useLayoutEffect } from "react";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CheckInDraft } from "@/features/checkins/checkin-editor";
@@ -66,6 +66,17 @@ function deferred<T>() {
     reject = nextReject;
   });
   return { promise, reject, resolve };
+}
+
+function layoutDeferred<T>() {
+  let fulfill!: (value: T) => void;
+  const promise = {
+    then(onFulfilled: (value: T) => void) {
+      fulfill = onFulfilled;
+      return { catch: () => undefined };
+    },
+  } as unknown as Promise<T>;
+  return { promise, resolve: (value: T) => fulfill(value) };
 }
 
 function useDraft(options?: Partial<Parameters<typeof useCheckInDraft>[0]>) {
@@ -212,6 +223,37 @@ describe("useCheckInDraft", () => {
     expect(onRestore).not.toHaveBeenCalled();
   });
 
+  it("suppresses restore when a load resolves after an edit commit before passive effects", async () => {
+    const localLoad = layoutDeferred<ReturnType<typeof storedDraft> | undefined>();
+    const onRestore = vi.fn();
+    draftStore.loadDraft.mockReturnValue(localLoad.promise);
+    const { rerender } = renderHook(
+      ({ currentDraft, dirty, resolveInLayout }) => {
+        const value = useDraft({ draft: currentDraft, isDirty: dirty, onRestore });
+        useLayoutEffect(() => {
+          if (resolveInLayout) localLoad.resolve(storedDraft());
+        }, [resolveInLayout]);
+        return value;
+      },
+      {
+        initialProps: {
+          currentDraft: emptyDraft,
+          dirty: false,
+          resolveInLayout: false,
+        },
+      },
+    );
+
+    await flushDraftEffects();
+    rerender({
+      currentDraft: { ...emptyDraft, attention: "committed edit" },
+      dirty: true,
+      resolveInLayout: true,
+    });
+
+    expect(onRestore).not.toHaveBeenCalled();
+  });
+
   it("debounces dirty writes and cancels the old date when selection changes", async () => {
     const { rerender } = renderHook(
       ({ selectedDate }) => useDraft({ date: selectedDate, cloudRecord: null }),
@@ -283,14 +325,21 @@ describe("useCheckInDraft", () => {
       };
     }));
     const { rerender } = renderHook(
-      ({ currentUserId, selectedDate }) => useDraft({
-        userId: currentUserId,
-        date: selectedDate,
-        cloudRecord: null,
-      }),
+      ({ currentUserId, selectedDate, finishInLayout }) => {
+        const value = useDraft({
+          userId: currentUserId,
+          date: selectedDate,
+          cloudRecord: null,
+        });
+        useLayoutEffect(() => {
+          if (finishInLayout) finishWrite();
+        }, [finishInLayout]);
+        return value;
+      },
       {
         initialProps: {
           currentUserId: "auth-user-1",
+          finishInLayout: false,
           selectedDate: date,
         },
       },
@@ -302,14 +351,12 @@ describe("useCheckInDraft", () => {
     });
     expect(writeSignal).toBeDefined();
 
-    rerender({ currentUserId: nextUserId, selectedDate: nextDate });
-    await flushDraftEffects();
-    expect(writeSignal?.aborted).toBe(true);
-    await act(async () => {
-      finishWrite();
-      await Promise.resolve();
+    rerender({
+      currentUserId: nextUserId,
+      finishInLayout: true,
+      selectedDate: nextDate,
     });
-
+    expect(writeSignal?.aborted).toBe(true);
     expect(writtenKeys).not.toContain(`auth-user-1:${date}`);
   });
 
@@ -327,7 +374,11 @@ describe("useCheckInDraft", () => {
         resolve();
       };
     }));
-    const { unmount } = renderHook(() => useDraft({ cloudRecord: null }));
+    const { unmount } = renderHook(() => {
+      const value = useDraft({ cloudRecord: null });
+      useLayoutEffect(() => () => finishWrite(), []);
+      return value;
+    });
 
     await flushDraftEffects();
     await act(async () => {
@@ -337,8 +388,6 @@ describe("useCheckInDraft", () => {
 
     unmount();
     expect(writeSignal?.aborted).toBe(true);
-    finishWrite();
-    await Promise.resolve();
     expect(writtenKeys).toHaveLength(0);
   });
 

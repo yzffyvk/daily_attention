@@ -12,6 +12,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await deleteAttentionDraftDatabase();
 });
 
@@ -111,5 +112,42 @@ describe("draft storage", () => {
     }, { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
 
     expect(await loadDraft("user-1", date)).toBeUndefined();
+  });
+
+  it("reports success when an abort arrives after the transaction already committed", async () => {
+    await loadDraft("open-database", date);
+    const controller = new AbortController();
+    const originalTransaction = IDBDatabase.prototype.transaction;
+    vi.spyOn(IDBDatabase.prototype, "transaction").mockImplementation(function (
+      this: IDBDatabase,
+      storeNames: string | Iterable<string>,
+      mode?: IDBTransactionMode,
+      options?: IDBTransactionOptions,
+    ) {
+      const transaction = originalTransaction.call(this, storeNames, mode, options);
+      if (mode === "readwrite") {
+        vi.spyOn(transaction, "abort").mockImplementation(() => {
+          throw new DOMException("The transaction is already inactive.", "InvalidStateError");
+        });
+        queueMicrotask(() => controller.abort());
+      }
+      return transaction;
+    });
+
+    await expect(saveDraft({
+      userId: "user-1",
+      date,
+      attention: "committed",
+      sourceUrl: "",
+      summary: "",
+      inspiration: "",
+      imageBlob: null,
+      imageName: "",
+      removeImage: false,
+      baseVersion: null,
+      updatedAt: "2026-07-23T10:00:00.000Z",
+    }, { signal: controller.signal })).resolves.toBeUndefined();
+
+    expect(await loadDraft("user-1", date)).toMatchObject({ attention: "committed" });
   });
 });

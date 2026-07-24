@@ -52,3 +52,26 @@ Follow-up verification on 2026-07-25:
 - Rendered-output tests were not rerun because no markup changed.
 - Typecheck reported only the same six accepted legacy Cloudflare declaration
   errors and no Task 9 errors.
+
+## Re-review Follow-up
+
+The remaining commit-phase windows were fixed on top of `12eb753`:
+
+- Dirty-edit tokens now advance during render from semantic draft changes and
+  are synchronized in layout, so clean cloud hydration does not count as an
+  edit while a committed dirty edit immediately invalidates a pending restore.
+- Date changes, user changes, and unmounts now cancel timers and active writes
+  in layout cleanup, before later layout work or IndexedDB task completion.
+- `saveDraft` now reports `AbortError` only when `tx.abort()` was accepted.
+  If abort is too late because the transaction already settled, the actual
+  committed or failed transaction outcome is preserved.
+
+Re-review verification on 2026-07-25:
+
+- Focused draft/workspace tests: 3 files, 71 tests passed in 6.93 s.
+- Full unit suite: 24 files, 156 tests passed in 9.31 s.
+- Lint: passed without errors or warnings.
+- Production build: passed after the runtime changes.
+- Typecheck reported only the same six accepted legacy Cloudflare declaration
+  errors and no Task 9 errors.
+- `git diff --check`: passed.

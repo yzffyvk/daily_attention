@@ -61,13 +61,13 @@ export async function saveDraft(
   if (signal?.aborted) throw abortError();
 
   const transaction = database.transaction("drafts", "readwrite");
-  let abortRequested = false;
+  let transactionAborted = false;
   const abortTransaction = () => {
-    abortRequested = true;
     try {
       transaction.abort();
+      transactionAborted = true;
     } catch {
-      // The transaction may already have settled; the caller still observes abort.
+      // The transaction already settled, so its committed/failed outcome wins.
     }
   };
   signal?.addEventListener("abort", abortTransaction, { once: true });
@@ -78,9 +78,8 @@ export async function saveDraft(
       transaction.store.put(draft),
       transaction.done,
     ]);
-    if (abortRequested) throw abortError();
   } catch (error) {
-    if (abortRequested || signal?.aborted) throw abortError();
+    if (transactionAborted) throw abortError();
     throw error;
   } finally {
     signal?.removeEventListener("abort", abortTransaction);
