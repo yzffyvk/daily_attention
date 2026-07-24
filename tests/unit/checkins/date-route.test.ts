@@ -188,4 +188,28 @@ describe("check-in image replacement cleanup", () => {
     });
     expect(mocks.save).not.toHaveBeenCalled();
   });
+
+  it("rejects an empty image path as validation error before attempting a save", async () => {
+    mocks.context.mockResolvedValue({
+      userId: "user-1",
+      supabase: {},
+      repository: { findByDate: vi.fn() },
+    });
+
+    const response = await PUT(
+      new Request("https://example.test/api/checkins/2026-07-23", {
+        method: "PUT",
+        body: JSON.stringify({ ...input, imagePath: "" }),
+        headers: { "Content-Type": "application/json" },
+      }),
+      routeContext(),
+    );
+
+    expect(response?.status).toBe(422);
+    await expect(response?.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "VALIDATION_ERROR", details: { field: "imagePath" } },
+    });
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
 });

@@ -112,7 +112,7 @@ export async function PUT(request: Request, routeContext: RouteContext) {
         { field: issue.path[0]?.toString() },
       );
     }
-    if (parsedInput.data.imagePath) {
+    if (parsedInput.data.imagePath !== null) {
       try {
         assertOwnedImagePath(context.userId, parsedInput.data.imagePath);
       } catch (error) {

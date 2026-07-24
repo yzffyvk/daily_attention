@@ -30,4 +30,18 @@ describe("check-in contracts", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("rejects an empty image path", () => {
+    expect(
+      checkInInputSchema.safeParse({
+        attention: "x",
+        sourceUrl: "",
+        summary: "",
+        inspiration: "",
+        imagePath: "",
+        imageName: "",
+        version: null,
+      }).success,
+    ).toBe(false);
+  });
 });

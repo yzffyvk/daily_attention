@@ -95,3 +95,18 @@ Status: RESOLVED
    - PASS.
 6. `npx supabase test db`
    - Not run: this review fix changes no database schema, migration, query, or Storage RLS policy.
+
+## Focused Task 7 Fix Verification
+
+- Added domain and route regression coverage for `imagePath: ""`. The route test asserts `422 VALIDATION_ERROR` with `imagePath` as the field and verifies `saveCheckIn` is not called.
+- Changed `checkInInputSchema.imagePath` to `z.string().min(1).max(1024).nullable()`. Valid signed paths and `null` remain accepted.
+- Changed PUT ownership validation to run for every non-null `imagePath` with an explicit `!== null` check.
+- TDD RED: `npm run test:unit -- tests/unit/domain/checkin.test.ts tests/unit/checkins/date-route.test.ts`
+  - 2 failed files, 13 passed files; 2 failed tests, 52 passed tests. The domain test received `true` instead of `false`; the route test received status `200` instead of `422`.
+- TDD GREEN and covering unit tests: `npm run test:unit -- tests/unit/domain/checkin.test.ts tests/unit/checkins/date-route.test.ts tests/unit/storage/service.test.ts`
+  - PASS: 15 test files, 54 tests.
+- `npm run lint`
+  - PASS: exit code 0, no diagnostics.
+- `git diff --check`
+  - PASS: exit code 0, no output.
+- Integration tests were not run because this fix changes only domain validation and route branching; no database, Storage API, migration, or integration contract changed.
