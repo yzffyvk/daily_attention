@@ -2,6 +2,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CheckInWorkspace } from "@/features/checkins/checkin-workspace";
+import { deleteCheckInImage, uploadCheckInImage } from "@/features/checkins/api";
 import {
   formatCalendarDate,
   formatMonth,
@@ -14,6 +15,49 @@ import type { CheckInRecord } from "@/features/checkins/types";
 import { TestQueryProvider } from "@/tests/helpers/test-query-provider";
 
 vi.mock("canvas-confetti", () => ({ default: vi.fn() }));
+vi.mock("@/features/checkins/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/features/checkins/api")>();
+  return {
+    ...actual,
+    deleteCheckInImage: vi.fn(),
+    uploadCheckInImage: vi.fn(),
+  };
+});
+vi.mock("@/features/checkins/image-note-uploader", () => ({
+  ImageNoteUploader: ({
+    disabled = false,
+    file,
+    onChange,
+    removeImage,
+  }: {
+    disabled?: boolean;
+    file: File | null;
+    onChange: (selection: { file: File | null; removeImage: boolean }) => void | Promise<void>;
+    removeImage: boolean;
+  }) => (
+    <div>
+      <input aria-label="添加图片笔记" disabled={disabled} type="file" />
+      <button
+        disabled={disabled}
+        onClick={() => void onChange({
+          file: new File(["replacement"], "replacement.png", { type: "image/png" }),
+          removeImage: false,
+        })}
+        type="button"
+      >
+        替换测试图片
+      </button>
+      <button
+        disabled={disabled}
+        onClick={() => void onChange({ file: null, removeImage: true })}
+        type="button"
+      >
+        测试移除图片
+      </button>
+      <output aria-label="图片草稿状态">{file?.name ?? "none"}:{String(removeImage)}</output>
+    </div>
+  ),
+}));
 
 function response(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -49,6 +93,15 @@ function record(date: string, attention: string, version = 1): CheckInRecord {
   };
 }
 
+function recordWithImage(date: string, attention: string, version = 1): CheckInRecord {
+  return {
+    ...record(date, attention, version),
+    imagePath: `checkin-images/user/${date}/existing.png`,
+    imageName: "existing.png",
+    imageUrl: "https://example.com/existing.png",
+  };
+}
+
 function missingCheckIn() {
   return response(
     {
@@ -76,6 +129,10 @@ function field<T extends HTMLInputElement | HTMLTextAreaElement>(id: string) {
   return element as T;
 }
 
+async function waitForEditorReady() {
+  await waitFor(() => expect(screen.getByLabelText("attention")).toBeEnabled());
+}
+
 beforeEach(() => {
   vi.stubGlobal(
     "matchMedia",
@@ -89,6 +146,8 @@ beforeEach(() => {
     configurable: true,
     value: vi.fn(),
   });
+  vi.mocked(deleteCheckInImage).mockReset();
+  vi.mocked(uploadCheckInImage).mockReset();
 });
 
 afterEach(() => {
@@ -97,6 +156,48 @@ afterEach(() => {
 });
 
 describe("CheckInWorkspace", () => {
+  it("locks date, editor, save, and image actions until the selected record hydrates", async () => {
+    const date = "2026-07-23";
+    const selected = deferred<Response>();
+    const cloudRecord = {
+      ...record(date, "云端 attention"),
+      sourceUrl: "https://example.com/cloud-source",
+      summary: "云端小结",
+      inspiration: "云端灵感",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        if (path.endsWith(`/${date}`)) return selected.promise;
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    renderWorkspace(date);
+
+    const attention = screen.getByLabelText("attention");
+    expect(attention).toBeDisabled();
+    expect(field<HTMLInputElement>("source-url")).toBeDisabled();
+    expect(field<HTMLTextAreaElement>("summary")).toBeDisabled();
+    expect(field<HTMLTextAreaElement>("inspiration")).toBeDisabled();
+    expect(screen.getByLabelText("添加图片笔记")).toBeDisabled();
+    expect(screen.getByRole("button", { name: /完成打卡/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /今日/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /7月24日/ })).toBeDisabled();
+
+    selected.resolve(response({ ok: true, data: cloudRecord, requestId: "date-request" }));
+
+    await waitFor(() => expect(attention).toBeEnabled());
+    expect(attention).toHaveValue("云端 attention");
+    expect(field<HTMLInputElement>("source-url")).toHaveValue("https://example.com/cloud-source");
+    expect(field<HTMLTextAreaElement>("summary")).toHaveValue("云端小结");
+    expect(field<HTMLTextAreaElement>("inspiration")).toHaveValue("云端灵感");
+  });
+
   it("opens the unsaved switch dialog before changing dates", async () => {
     vi.stubGlobal(
       "fetch",
@@ -122,6 +223,7 @@ describe("CheckInWorkspace", () => {
       </TestQueryProvider>,
     );
 
+    await waitForEditorReady();
     await userEvent.type(screen.getByLabelText("attention"), "今天学习了 RAG");
     await userEvent.click(screen.getByRole("button", { name: /7月24日/ }));
 
@@ -152,6 +254,7 @@ describe("CheckInWorkspace", () => {
     const summary = field<HTMLTextAreaElement>("summary");
     const inspiration = field<HTMLTextAreaElement>("inspiration");
 
+    await waitForEditorReady();
     await user.type(attention, "先保存这一版");
     await user.click(screen.getByRole("button", { name: /完成打卡/ }));
 
@@ -198,6 +301,7 @@ describe("CheckInWorkspace", () => {
 
     renderWorkspace(initialDate);
     const user = userEvent.setup();
+    await waitForEditorReady();
     await user.type(screen.getByLabelText("attention"), "还没保存的内容");
     await user.click(screen.getByRole("button", { name: /今日/ }));
 
@@ -213,6 +317,70 @@ describe("CheckInWorkspace", () => {
         name: new RegExp(`${formatCalendarDate(initialDate)}.*当前选中`),
       }),
     ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("does not navigate for a pending Today action and leaves the view unchanged on cancel", async () => {
+    const today = getTodayKey();
+    const initialMonth = shiftMonth(monthKeyForDate(today), -1);
+    const initialDate = `${initialMonth}-15`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    renderWorkspace(initialDate);
+    const user = userEvent.setup();
+    await waitForEditorReady();
+    await user.type(screen.getByLabelText("attention"), "等待确认的 Today 切换");
+    await user.click(screen.getByRole("button", { name: /今日/ }));
+
+    expect(screen.getByRole("dialog", { name: "尚未保存" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: formatMonth(initialMonth) })).toBeVisible();
+    expect(screen.getByRole("heading", { name: formatDate(initialDate) })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "取消" }));
+
+    expect(screen.getByRole("heading", { name: formatMonth(initialMonth) })).toBeVisible();
+    expect(screen.getByRole("heading", { name: formatDate(initialDate) })).toBeVisible();
+  });
+
+  it("preserves an intentionally browsed month when a dirty date selection is cancelled", async () => {
+    const initialMonth = "2026-06";
+    const initialDate = `${initialMonth}-15`;
+    const browsedMonth = shiftMonth(initialMonth, 1);
+    const targetDate = `${browsedMonth}-10`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    renderWorkspace(initialDate);
+    const user = userEvent.setup();
+    await waitForEditorReady();
+    await user.type(screen.getByLabelText("attention"), "浏览后仍未保存");
+    await user.click(screen.getByRole("button", { name: "下个月" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: formatMonth(browsedMonth) })).toBeVisible());
+    await user.click(screen.getByRole("button", { name: new RegExp(formatCalendarDate(targetDate)) }));
+
+    expect(screen.getByRole("dialog", { name: "尚未保存" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: formatMonth(browsedMonth) })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "取消" }));
+
+    expect(screen.getByRole("heading", { name: formatMonth(browsedMonth) })).toBeVisible();
+    expect(screen.getByRole("heading", { name: formatDate(initialDate) })).toBeVisible();
   });
 
   it("switches to the target month only after saving a dirty cross-month entry", async () => {
@@ -237,6 +405,7 @@ describe("CheckInWorkspace", () => {
 
     renderWorkspace(initialDate);
     const user = userEvent.setup();
+    await waitForEditorReady();
     await user.type(screen.getByLabelText("attention"), "保存后切换");
     await user.click(screen.getByRole("button", { name: /今日/ }));
     await user.click(screen.getByRole("button", { name: "保存并切换" }));
@@ -265,6 +434,7 @@ describe("CheckInWorkspace", () => {
 
     renderWorkspace(initialDate);
     const user = userEvent.setup();
+    await waitForEditorReady();
     await user.type(screen.getByLabelText("attention"), "放弃后切换");
     await user.click(screen.getByRole("button", { name: /今日/ }));
     await user.click(screen.getByRole("button", { name: "放弃修改" }));
@@ -288,6 +458,7 @@ describe("CheckInWorkspace", () => {
 
     renderWorkspace("2026-07-23");
     const user = userEvent.setup();
+    await waitForEditorReady();
     await user.type(field<HTMLInputElement>("source-url"), "https://example.com");
     const target = screen.getByRole("button", { name: /7月24日/ });
     await user.click(target);
@@ -319,6 +490,7 @@ describe("CheckInWorkspace", () => {
 
     renderWorkspace("2026-07-23");
     const user = userEvent.setup();
+    await waitForEditorReady();
     await user.type(screen.getByLabelText("attention"), "待保存内容");
     await user.click(screen.getByRole("button", { name: /7月24日/ }));
 
@@ -341,6 +513,57 @@ describe("CheckInWorkspace", () => {
     expect(close).toHaveFocus();
     await user.tab({ shift: true });
     expect(cancel).toHaveFocus();
+  });
+
+  it("keeps a later image removal when an earlier replacement cleanup resolves late", async () => {
+    const date = "2026-07-23";
+    const cloudRecord = recordWithImage(date, "云端初版");
+    const cleanup = deferred<void>();
+    vi.mocked(uploadCheckInImage).mockResolvedValue("checkin-images/user/pending.png");
+    vi.mocked(deleteCheckInImage)
+      .mockReturnValueOnce(cleanup.promise)
+      .mockResolvedValue(undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        if (init?.method === "PUT") {
+          return Promise.resolve(response({
+            ok: false,
+            error: {
+              code: "VERSION_CONFLICT",
+              message: "云端记录已更新，请确认后重试",
+              details: { current: cloudRecord },
+            },
+            requestId: "conflict-request",
+          }, 409));
+        }
+        if (path.endsWith(`/${date}`)) {
+          return Promise.resolve(response({ ok: true, data: cloudRecord, requestId: "date-request" }));
+        }
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    renderWorkspace(date);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByLabelText("attention")).toHaveValue("云端初版"));
+    await user.click(screen.getByRole("button", { name: "替换测试图片" }));
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+    await user.click(await screen.findByRole("button", { name: "保留本地内容" }));
+
+    await user.click(screen.getByRole("button", { name: "替换测试图片" }));
+    await waitFor(() => expect(deleteCheckInImage).toHaveBeenCalledWith("checkin-images/user/pending.png"));
+    await user.click(screen.getByRole("button", { name: "测试移除图片" }));
+
+    await waitFor(() => expect(screen.getByLabelText("图片草稿状态")).toHaveTextContent("none:true"));
+    cleanup.resolve();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    expect(screen.getByLabelText("图片草稿状态")).toHaveTextContent("none:true");
   });
 
   it("closes the profile dialog and keeps only the conflict dialog during a save conflict", async () => {

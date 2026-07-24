@@ -74,6 +74,7 @@ export function CheckInEditor({
 }: CheckInEditorProps) {
   const canSave = Boolean(draft.attention.trim());
   const state = isDirty ? "未保存" : record ? "已保存" : isLoading ? "正在读取" : "待填写";
+  const isDisabled = isLoading || isSaving;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -99,7 +100,7 @@ export function CheckInEditor({
         </div>
       </div>
 
-      <form aria-busy={isSaving} className="checkin-form" onSubmit={submit}>
+      <form aria-busy={isDisabled} className="checkin-form" onSubmit={submit}>
         <div className="form-grid">
           <label htmlFor="attention">
             <span className="label-row">
@@ -109,7 +110,7 @@ export function CheckInEditor({
             <span className="field-hint">用一句话总结当天学习的内容</span>
             <input
               aria-label="attention"
-              disabled={isSaving}
+              disabled={isDisabled}
               id="attention"
               maxLength={120}
               onChange={(event) => onDraftChange({ attention: event.target.value })}
@@ -126,7 +127,7 @@ export function CheckInEditor({
               id="source-url"
               inputMode="url"
               maxLength={2048}
-              disabled={isSaving}
+              disabled={isDisabled}
               onChange={(event) => onDraftChange({ sourceUrl: event.target.value })}
               placeholder="https://"
               type="url"
@@ -142,7 +143,7 @@ export function CheckInEditor({
             <textarea
               id="summary"
               maxLength={5000}
-              disabled={isSaving}
+              disabled={isDisabled}
               onChange={(event) => onDraftChange({ summary: event.target.value })}
               placeholder="今天真正理解了什么？试着用自己的话讲一遍。"
               value={draft.summary}
@@ -152,7 +153,7 @@ export function CheckInEditor({
 
           <div className="secondary-fields">
             <ImageNoteUploader
-              disabled={isSaving}
+              disabled={isDisabled}
               existingImage={record ? { imageName: record.imageName, imageUrl: record.imageUrl } : null}
               file={draft.imageFile}
               identity={date}
@@ -165,7 +166,7 @@ export function CheckInEditor({
               <span className="label-row"><b>灵感记录</b></span>
               <span className="field-hint">它让你联想到了什么？接下来想试试什么？</span>
               <textarea
-                disabled={isSaving}
+                disabled={isDisabled}
                 id="inspiration"
                 maxLength={2000}
                 onChange={(event) => onDraftChange({ inspiration: event.target.value })}
@@ -179,13 +180,13 @@ export function CheckInEditor({
 
         <div className="form-actions">
           <div className="action-buttons">
-            <button className="primary-button" disabled={isSaving || !canSave} type="submit">
+            <button className="primary-button" disabled={isDisabled || !canSave} type="submit">
               {isSaving ? "正在保存…" : record ? "保存修改" : <><span aria-hidden="true">叮</span>一下，完成打卡</>}
             </button>
             <button
               aria-label="还原未保存的修改"
               className="icon-button reset-button"
-              disabled={!isDirty || isSaving}
+              disabled={!isDirty || isDisabled}
               onClick={() => void onReset()}
               title="还原未保存的修改"
               type="button"

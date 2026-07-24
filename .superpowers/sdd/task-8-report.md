@@ -140,3 +140,35 @@ COMPLETE
 ## Concerns
 
 - None for these interaction fixes. The existing Task 11-owned Cloudflare typecheck gap remains outside this scope.
+
+---
+
+# Task 8 Race And Cancellation Follow-up Report
+
+## Status
+
+COMPLETE_WITH_TYPECHECK_CONCERN
+
+## Commit Range
+
+- Base: `79f3fda`
+- Follow-up commit: `7ec1415`
+
+## Implementation
+
+- The workspace now keeps the editor, save/reset, image, Today, calendar navigation, and date controls disabled until the selected-date query has hydrated the matching draft. Loading and saving remain distinct editor states.
+- Image callbacks receive monotonic workspace operation tokens. A callback that resumes after replacement cleanup only changes the draft when it is still the newest image operation for the selected date.
+- Added cancellation coverage for a pending Today action and for selecting a date after deliberately browsing to another calendar month. Cancel keeps the old selected date and preserves that browsed month.
+
+## TDD Evidence
+
+1. RED: deferred selected-date query left the attention field editable before hydration; the new lock regression failed as expected.
+2. RED: with the image token guard temporarily removed, the deferred-cleanup regression failed with `replacement.png:false` after the later removal had committed.
+3. GREEN: restored the token guard and the full unit suite passed: 19 files, 78 tests.
+4. Rendered checks passed: 4 tests.
+5. Integration checks passed: 3 files, 9 tests.
+6. Production build, lint, and `git diff --check` passed.
+
+## Concerns
+
+- `npm run typecheck` still reports the known Cloudflare globals/modules plus an existing `features/checkins/api.ts` narrowing diagnostic. This follow-up does not modify those paths.

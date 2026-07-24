@@ -148,13 +148,15 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
   const draftRef = useRef(draft);
   const editorLockedRef = useRef(false);
   const saveInFlightRef = useRef(false);
+  const imageOperationRef = useRef(0);
 
   const monthQuery = useMonthCheckIns(month);
   const currentMonth = monthKeyForDate(today);
   const currentMonthQuery = useMonthCheckIns(currentMonth);
   const checkInQuery = useCheckIn(selectedDate);
   const saveMutation = useSaveCheckIn();
-  const isEditorLocked = isSaving || saveMutation.isPending;
+  const isAwaitingSelectedRecord = hydratedDate !== selectedDate;
+  const isEditorLocked = isSaving || saveMutation.isPending || isAwaitingSelectedRecord;
   const selectedRecord = checkInQuery.data ?? null;
   const monthSummaries = monthQuery.data ?? [];
   const todaySummaries = useMemo(
@@ -228,6 +230,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
   function openDate(date: string) {
     if (editorLockedRef.current) return;
     const cached = queryClient.getQueryData<CheckInRecord | null>(checkInKeys.date(date));
+    imageOperationRef.current += 1;
     selectedDateRef.current = date;
     setMonth(monthKeyForDate(date));
     setSelectedDate(date);
@@ -279,14 +282,22 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
   }
 
   async function handleImageChange(selection: ImageSelection, identity: string) {
-    if (identity !== selectedDateRef.current || editorLockedRef.current) return;
+    const operation = imageOperationRef.current + 1;
+    imageOperationRef.current = operation;
+    const isCurrentOperation = () => (
+      operation === imageOperationRef.current &&
+      identity === selectedDateRef.current &&
+      !editorLockedRef.current
+    );
+
+    if (!isCurrentOperation()) return;
     const uploadedImagePath = draftRef.current.uploadedImagePath;
     if (uploadedImagePath) {
       await cleanupPendingImage(uploadedImagePath);
     }
-    if (identity !== selectedDateRef.current || editorLockedRef.current) return;
+    if (!isCurrentOperation()) return;
     setDraft((current) => {
-      if (identity !== selectedDateRef.current || editorLockedRef.current) return current;
+      if (!isCurrentOperation()) return current;
       return {
         ...current,
         imageFile: selection.file,
@@ -294,7 +305,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
         uploadedImagePath: null,
       };
     });
-    if (identity !== selectedDateRef.current || editorLockedRef.current) return;
+    if (!isCurrentOperation()) return;
     setStatus(selection.file ? "图片笔记已加入，记得完成保存" : "图片将在保存后移除");
   }
 
@@ -484,8 +495,8 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
           date={selectedDate}
           draft={draft}
           isDirty={isDirty}
-          isLoading={checkInQuery.isLoading}
-          isSaving={isEditorLocked}
+          isLoading={isAwaitingSelectedRecord}
+          isSaving={isSaving || saveMutation.isPending}
           message={message || (monthQuery.error ? messageForError(monthQuery.error) : "")}
           messageTone={message ? messageTone : monthQuery.error ? "error" : messageTone}
           onDraftChange={(change) => {
