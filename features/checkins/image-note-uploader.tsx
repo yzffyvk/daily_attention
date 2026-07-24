@@ -19,6 +19,8 @@ type ImageNoteUploaderProps = {
   removeImage: boolean;
   onChange: (selection: ImageSelection) => void | Promise<void>;
   onError: (message: string) => void;
+  onPreparationChange?: (isPreparing: boolean) => void;
+  isPreparing?: boolean;
   disabled?: boolean;
   compressImage?: ImageCompressor;
 };
@@ -81,19 +83,34 @@ function ImageNoteUploaderSession({
   removeImage,
   onChange,
   onError,
+  onPreparationChange,
+  isPreparing: isPreparingFromParent = false,
   disabled = false,
   compressImage: compress = compressImage,
 }: ImageNoteUploaderSessionProps) {
   const [isDragging, setIsDragging] = useState(false);
-  const [isPreparing, setIsPreparing] = useState(false);
+  const [isPreparingLocally, setIsPreparingLocally] = useState(false);
   const [filePreview, setFilePreview] = useState<{ file: File; url: string } | null>(null);
   const filePreviewRef = useRef<{ file: File; url: string } | null>(null);
+  const isPreparingRef = useRef(false);
+  const onPreparationChangeRef = useRef(onPreparationChange);
   const lifecycleRef = useRef({
     disabled,
     generation: 0,
     mounted: false,
   });
   const lastDisabledRef = useRef(disabled);
+
+  useEffect(() => {
+    onPreparationChangeRef.current = onPreparationChange;
+  }, [onPreparationChange]);
+
+  function setPreparation(nextPreparing: boolean) {
+    if (isPreparingRef.current === nextPreparing) return;
+    isPreparingRef.current = nextPreparing;
+    if (lifecycleRef.current.mounted) setIsPreparingLocally(nextPreparing);
+    onPreparationChangeRef.current?.(nextPreparing);
+  }
 
   function revokeFilePreview() {
     if (!filePreviewRef.current) return;
@@ -107,6 +124,7 @@ function ImageNoteUploaderSession({
     return () => {
       lifecycle.mounted = false;
       lifecycle.generation += 1;
+      setPreparation(false);
       revokeFilePreview();
     };
   }, []);
@@ -126,7 +144,7 @@ function ImageNoteUploaderSession({
     lastDisabledRef.current = disabled;
     const timer = window.setTimeout(() => {
       setIsDragging(false);
-      setIsPreparing(false);
+      if (disabled) setPreparation(false);
     }, 0);
     return () => window.clearTimeout(timer);
   }, [disabled]);
@@ -139,7 +157,7 @@ function ImageNoteUploaderSession({
         : null;
   const imageName = file?.name ?? (!removeImage ? existingImage?.imageName ?? "" : "");
   const isActiveDrag = isDragging && !disabled;
-  const isActivePreparation = isPreparing && !disabled;
+  const isActivePreparation = (isPreparingFromParent || isPreparingLocally) && !disabled;
 
   function isCurrent(generation: number) {
     const lifecycle = lifecycleRef.current;
@@ -159,7 +177,7 @@ function ImageNoteUploaderSession({
 
     const generation = lifecycleRef.current.generation + 1;
     lifecycleRef.current.generation = generation;
-    setIsPreparing(true);
+    setPreparation(true);
     try {
       const compressed = await compress(nextFile);
       const preview = {
@@ -184,7 +202,7 @@ function ImageNoteUploaderSession({
       setFilePreview(null);
       onError("图片读取失败，请换一张重试");
     } finally {
-      if (isCurrent(generation)) setIsPreparing(false);
+      if (isCurrent(generation)) setPreparation(false);
     }
   }
 
@@ -193,7 +211,7 @@ function ImageNoteUploaderSession({
     revokeFilePreview();
     setFilePreview(null);
     setIsDragging(false);
-    setIsPreparing(false);
+    setPreparation(false);
     void onChange({ file: null, removeImage: true });
   }
 
@@ -266,7 +284,9 @@ function ImageNoteUploaderSession({
           <span className="upload-icon" aria-hidden="true">
             {isActiveDrag || isActivePreparation ? <Upload size={22} /> : <ImagePlus size={22} />}
           </span>
-          <b>{isActivePreparation ? "正在整理图片" : isActiveDrag ? "松手添加图片" : "添加图片笔记"}</b>
+          <b aria-live={isActivePreparation ? "polite" : undefined} role={isActivePreparation ? "status" : undefined}>
+            {isActivePreparation ? "正在整理图片，请稍候" : isActiveDrag ? "松手添加图片" : "添加图片笔记"}
+          </b>
           <small>点击或拖入脑图、手写笔记、截图 · JPEG、PNG、WebP，最大 10MB</small>
         </label>
       )}

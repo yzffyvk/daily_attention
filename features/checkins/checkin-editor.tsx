@@ -49,6 +49,7 @@ type CheckInEditorProps = {
   isLoading: boolean;
   isSaving: boolean;
   isCleaningUpImage: boolean;
+  isPreparingImage: boolean;
   isRetryingRecord: boolean;
   loadError: string;
   message: string;
@@ -56,6 +57,7 @@ type CheckInEditorProps = {
   onDraftChange: (change: Partial<CheckInDraft>) => void;
   onImageChange: (selection: ImageSelection, date: string) => void | Promise<void>;
   onImageError: (message: string) => void;
+  onImagePreparationChange: (isPreparing: boolean, date: string) => void;
   onReset: () => void | Promise<void>;
   onRetryRecord: () => void;
   onSubmit: () => void | Promise<unknown>;
@@ -69,6 +71,7 @@ export function CheckInEditor({
   isLoading,
   isSaving,
   isCleaningUpImage,
+  isPreparingImage,
   isRetryingRecord,
   loadError,
   message,
@@ -76,13 +79,15 @@ export function CheckInEditor({
   onDraftChange,
   onImageChange,
   onImageError,
+  onImagePreparationChange,
   onReset,
   onRetryRecord,
   onSubmit,
 }: CheckInEditorProps) {
   const canSave = Boolean(draft.attention.trim());
-  const state = isDirty ? "未保存" : record ? "已保存" : isLoading ? "正在读取" : "待填写";
-  const isDisabled = isLoading || isSaving || isCleaningUpImage;
+  const state = isPreparingImage ? "正在整理图片" : isDirty ? "未保存" : record ? "已保存" : isLoading ? "正在读取" : "待填写";
+  const isDisabled = isLoading || isSaving || isCleaningUpImage || isPreparingImage;
+  const isUploaderDisabled = isLoading || isSaving || isCleaningUpImage;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -170,12 +175,14 @@ export function CheckInEditor({
 
           <div className="secondary-fields">
             <ImageNoteUploader
-              disabled={isDisabled}
+              disabled={isUploaderDisabled}
               existingImage={record ? { imageName: record.imageName, imageUrl: record.imageUrl } : null}
               file={draft.imageFile}
               identity={date}
               onChange={(selection) => onImageChange(selection, date)}
               onError={onImageError}
+              onPreparationChange={(isPreparing) => onImagePreparationChange(isPreparing, date)}
+              isPreparing={isPreparingImage}
               removeImage={draft.removeImage}
             />
 
@@ -213,7 +220,7 @@ export function CheckInEditor({
           </div>
           <div className="save-status">
             <span aria-live="polite" className={`save-message ${messageTone}`} role="status">
-              {message || (isDirty ? "有修改尚未保存" : "已同步到云端")}
+              {isPreparingImage ? "正在整理图片，请稍候" : message || (isDirty ? "有修改尚未保存" : "已同步到云端")}
             </span>
             <small>云端记录</small>
           </div>

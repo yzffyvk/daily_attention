@@ -10,6 +10,7 @@ type ApiErrorOptions = {
   status: number;
   code: string;
   requestId: string;
+  details?: Record<string, unknown>;
   current?: CheckInRecord | null;
   field?: string;
 };
@@ -18,6 +19,7 @@ export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
   readonly requestId: string;
+  readonly details?: Record<string, unknown>;
   readonly current?: CheckInRecord | null;
   readonly field?: string;
 
@@ -27,6 +29,7 @@ export class ApiError extends Error {
     this.status = options.status;
     this.code = options.code;
     this.requestId = options.requestId;
+    this.details = options.details;
     this.current = options.current;
     this.field = options.field;
   }
@@ -138,9 +141,10 @@ export async function requestApi<T>(
 
   if (payload.ok) return payload.data as T;
 
-  const details = payload.error.details;
-  const current = response.status === 409 ? currentRecord(details?.current) : undefined;
-  if (response.status === 409 && current === undefined) {
+  const details = isObject(payload.error.details) ? payload.error.details : undefined;
+  const isVersionConflict = response.status === 409 && payload.error.code === "VERSION_CONFLICT";
+  const current = isVersionConflict ? currentRecord(details?.current) : undefined;
+  if (isVersionConflict && current === undefined) {
     throw new ApiError("服务返回内容不正确，请稍后再试", {
       status: response.status,
       code: "MALFORMED_RESPONSE",
@@ -151,8 +155,9 @@ export async function requestApi<T>(
     status: response.status,
     code: payload.error.code,
     requestId: payload.requestId,
+    details,
     current,
-    field: details?.field,
+    field: typeof details?.field === "string" ? details.field : undefined,
   });
 }
 

@@ -3,7 +3,7 @@
 import confetti from "canvas-confetti";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MonthCalendar } from "@/features/calendar/month-calendar";
 import { AppHeader } from "@/features/profile/app-header";
 import type { AccountProfile } from "@/server/auth/ports";
@@ -129,12 +129,18 @@ function messageForError(error: unknown) {
   return "保存失败，请稍后再试";
 }
 
+function recordSnapshot(record: CheckInRecord | null) {
+  return record ? { ...record } : null;
+}
+
 export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckInWorkspaceProps) {
   const queryClient = useQueryClient();
   const [today] = useState(getTodayKey);
   const [selectedDate, setSelectedDate] = useState(initialDate);
   const [month, setMonth] = useState(() => monthKeyForDate(initialDate));
   const [draft, setDraft] = useState<CheckInDraft>(() => draftFromRecord(null));
+  const [draftBaseRecord, setDraftBaseRecord] = useState<CheckInRecord | null>(null);
+  const [baseVersion, setBaseVersion] = useState<number | null>(null);
   const [hydratedDate, setHydratedDate] = useState<string | null>(null);
   const [pendingDate, setPendingDate] = useState<string | null>(null);
   const [logoutPending, setLogoutPending] = useState(false);
@@ -146,29 +152,32 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
   const [isCelebrating, setIsCelebrating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isCleaningUpImage, setIsCleaningUpImage] = useState(false);
+  const [isPreparingImage, setIsPreparingImage] = useState(false);
   const toastTimerRef = useRef<number | null>(null);
   const selectedDateRef = useRef(initialDate);
   const draftRef = useRef(draft);
+  const draftBaseRecordRef = useRef<CheckInRecord | null>(null);
   const editorLockedRef = useRef(false);
   const saveInFlightRef = useRef(false);
   const imageOperationRef = useRef(0);
   const imageCleanupInFlightRef = useRef(false);
+  const imagePreparationInFlightRef = useRef(false);
 
   const monthQuery = useMonthCheckIns(month);
   const currentMonth = monthKeyForDate(today);
   const currentMonthQuery = useMonthCheckIns(currentMonth);
   const checkInQuery = useCheckIn(selectedDate);
   const saveMutation = useSaveCheckIn();
-  const isAwaitingSelectedRecord = hydratedDate !== selectedDate;
+  const isAwaitingSelectedRecord = hydratedDate !== selectedDate || checkInQuery.isFetching;
   const hasSelectedRecordError = checkInQuery.isError;
-  const isEditorLocked = isSaving || saveMutation.isPending || isAwaitingSelectedRecord || hasSelectedRecordError || isCleaningUpImage;
+  const isEditorLocked = isSaving || saveMutation.isPending || isAwaitingSelectedRecord || hasSelectedRecordError || isCleaningUpImage || isPreparingImage;
   const selectedRecord = checkInQuery.data ?? null;
   const monthSummaries = monthQuery.data ?? [];
   const todaySummaries = useMemo(
     () => (currentMonth === month ? monthQuery.data ?? [] : currentMonthQuery.data ?? []),
     [currentMonth, currentMonthQuery.data, month, monthQuery.data],
   );
-  const isDirty = isDraftDirty(draft, selectedRecord);
+  const isDirty = isDraftDirty(draft, draftBaseRecord);
   const canSave = Boolean(draft.attention.trim());
   const hasTodayRecord = todaySummaries.some((summary) => summary.date === today);
   const streak = useMemo(
@@ -192,22 +201,46 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
   }, [draft]);
 
   useEffect(() => {
+    draftBaseRecordRef.current = draftBaseRecord;
+  }, [draftBaseRecord]);
+
+  useEffect(() => {
     editorLockedRef.current = isEditorLocked;
   }, [isEditorLocked]);
 
+  const hydrateDraft = useCallback((record: CheckInRecord | null, date: string | null) => {
+    const snapshot = recordSnapshot(record);
+    const nextDraft = draftFromRecord(snapshot);
+    draftRef.current = nextDraft;
+    draftBaseRecordRef.current = snapshot;
+    setDraft(nextDraft);
+    setDraftBaseRecord(snapshot);
+    setBaseVersion(snapshot?.version ?? null);
+    setHydratedDate(date);
+  }, []);
+
   useEffect(() => {
-    if (!checkInQuery.isSuccess || hydratedDate === selectedDate) return;
+    if (!checkInQuery.isSuccess) return;
+    const needsInitialHydration = hydratedDate !== selectedDate;
+    const isClean = !isDraftDirty(draftRef.current, draftBaseRecordRef.current);
+    if (!needsInitialHydration && (checkInQuery.isFetching || !isClean)) return;
+    const record = checkInQuery.data ?? null;
     const timer = window.setTimeout(() => {
-      setDraft((current) =>
-        isDraftDirty(current, null) ? current : draftFromRecord(selectedRecord),
-      );
-      setHydratedDate(selectedDate);
+      if (selectedDateRef.current !== selectedDate) return;
+      if (hydratedDate !== selectedDate && checkInQuery.isFetching) {
+        hydrateDraft(record, selectedDate);
+        return;
+      }
+      if (!checkInQuery.isFetching && !isDraftDirty(draftRef.current, draftBaseRecordRef.current)) {
+        hydrateDraft(record, selectedDate);
+      }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [checkInQuery.isSuccess, hydratedDate, selectedDate, selectedRecord]);
+  }, [checkInQuery.data, checkInQuery.isFetching, checkInQuery.isSuccess, hydrateDraft, hydratedDate, selectedDate]);
 
   useEffect(() => () => {
     if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
+    imagePreparationInFlightRef.current = false;
   }, []);
 
   function setStatus(nextMessage: string, tone: MessageTone = "neutral") {
@@ -236,11 +269,12 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
     if (editorLockedRef.current || imageCleanupInFlightRef.current) return;
     const cached = queryClient.getQueryData<CheckInRecord | null>(checkInKeys.date(date));
     imageOperationRef.current += 1;
+    imagePreparationInFlightRef.current = false;
+    setIsPreparingImage(false);
     selectedDateRef.current = date;
     setMonth(monthKeyForDate(date));
     setSelectedDate(date);
-    setDraft(draftFromRecord(cached));
-    setHydratedDate(cached === undefined ? null : date);
+    hydrateDraft(cached ?? null, cached === undefined ? null : date);
     setPendingDate(null);
     setStatus(cached ? `已打开${formatDate(date)}的学习记录` : `${formatDate(date)}还没有记录`);
     scrollToEditor();
@@ -266,7 +300,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
       return false;
     } finally {
       imageCleanupInFlightRef.current = false;
-      editorLockedRef.current = saveInFlightRef.current;
+      editorLockedRef.current = saveInFlightRef.current || imagePreparationInFlightRef.current;
       setIsCleaningUpImage(false);
     }
   }
@@ -277,7 +311,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
       await cleanupPendingImage(uploadedImagePath, false, operation);
     }
     if (!isCurrentImageOperation(operation)) return false;
-    setDraft(draftFromRecord(record));
+    hydrateDraft(record, selectedDateRef.current);
     return true;
   }
 
@@ -310,7 +344,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
     const isCurrentOperation = () => (
       operation === imageOperationRef.current &&
       identity === selectedDateRef.current &&
-      !editorLockedRef.current &&
+      !saveInFlightRef.current &&
       !imageCleanupInFlightRef.current
     );
 
@@ -334,9 +368,9 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
   }
 
   async function saveCurrentRecord() {
-    if (saveInFlightRef.current || imageCleanupInFlightRef.current || editorLockedRef.current) return false;
+    if (saveInFlightRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current || editorLockedRef.current) return false;
     const activeDraft = draft;
-    const activeRecord = selectedRecord;
+    const activeRecord = draftBaseRecord;
     const activeDate = selectedDate;
     const attention = activeDraft.attention.trim();
     if (!attention) {
@@ -373,12 +407,11 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
           imageName: activeDraft.removeImage
             ? ""
             : activeDraft.imageFile?.name ?? activeRecord?.imageName ?? "",
-          version: activeRecord?.version ?? null,
+          version: baseVersion,
         },
       });
 
-      setDraft(draftFromRecord(record));
-      setHydratedDate(activeDate);
+      hydrateDraft(record, activeDate);
       setStatus(
         activeRecord
           ? `${formatDate(activeDate)}的修改已保存`
@@ -440,6 +473,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
   }
 
   async function discardAndSwitch() {
+    if (editorLockedRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current) return;
     const targetDate = pendingDate;
     const operation = imageOperationRef.current + 1;
     imageOperationRef.current = operation;
@@ -449,7 +483,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
   }
 
   async function logout() {
-    if (imageCleanupInFlightRef.current || saveInFlightRef.current) return;
+    if (imageCleanupInFlightRef.current || imagePreparationInFlightRef.current || saveInFlightRef.current) return;
     editorLockedRef.current = true;
     setIsSaving(true);
     try {
@@ -471,13 +505,14 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
   }
 
   async function discardAndLogout() {
+    if (editorLockedRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current) return;
     const operation = imageOperationRef.current + 1;
     imageOperationRef.current = operation;
     if (await abandonLocalDraft(selectedRecord, operation)) await logout();
   }
 
   async function loadCloudVersion() {
-    if (!conflict || imageCleanupInFlightRef.current || editorLockedRef.current) return;
+    if (!conflict || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current || editorLockedRef.current) return;
     const operation = imageOperationRef.current + 1;
     imageOperationRef.current = operation;
     const cloudRecord = conflict.current;
@@ -488,8 +523,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
     if (!isCurrentImageOperation(operation, conflict.date)) return;
     queryClient.setQueryData(checkInKeys.date(conflict.date), cloudRecord);
     setMonthRecord(queryClient, cloudRecord, conflict.date);
-    setDraft(draftFromRecord(cloudRecord));
-    setHydratedDate(conflict.date);
+    hydrateDraft(cloudRecord, conflict.date);
     setConflict(null);
     setStatus(cloudRecord ? "已载入云端版本" : "云端记录已不存在", "neutral");
     void queryClient.invalidateQueries({ queryKey: checkInKeys.date(conflict.date) });
@@ -506,13 +540,13 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
           isCelebrating={isCelebrating}
           isMuted={isMuted}
           onRequestLogout={() => {
-            if (editorLockedRef.current || imageCleanupInFlightRef.current) return;
+            if (editorLockedRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current) return;
             if (isDirty) setLogoutPending(true);
             else void logout();
           }}
           onSelectToday={selectToday}
           onToggleMuted={() => {
-            if (editorLockedRef.current || imageCleanupInFlightRef.current) return;
+            if (editorLockedRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current) return;
             const nextMuted = !isMuted;
             setIsMuted(nextMuted);
             window.localStorage.setItem(muteStorageKey, String(nextMuted));
@@ -540,6 +574,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
           isLoading={isAwaitingSelectedRecord || hasSelectedRecordError}
           isSaving={isSaving || saveMutation.isPending}
           isCleaningUpImage={isCleaningUpImage}
+          isPreparingImage={isPreparingImage}
           isRetryingRecord={checkInQuery.isFetching}
           loadError={hasSelectedRecordError ? messageForError(checkInQuery.error) : ""}
           message={message || (monthQuery.error ? messageForError(monthQuery.error) : "")}
@@ -551,8 +586,14 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
           }}
           onImageChange={handleImageChange}
           onImageError={(nextMessage) => setStatus(nextMessage, "error")}
+          onImagePreparationChange={(isPreparing, identity) => {
+            if (identity !== selectedDateRef.current) return;
+            imagePreparationInFlightRef.current = isPreparing;
+            if (isPreparing) editorLockedRef.current = true;
+            setIsPreparingImage(isPreparing);
+          }}
           onReset={async () => {
-            if (editorLockedRef.current || imageCleanupInFlightRef.current) return;
+            if (editorLockedRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current) return;
             const operation = imageOperationRef.current + 1;
             imageOperationRef.current = operation;
             if (await abandonLocalDraft(selectedRecord, operation)) {
@@ -560,10 +601,12 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
             }
           }}
           onRetryRecord={() => {
-            if (!imageCleanupInFlightRef.current) void checkInQuery.refetch();
+            if (!imageCleanupInFlightRef.current && !imagePreparationInFlightRef.current) {
+              void checkInQuery.refetch();
+            }
           }}
           onSubmit={saveCurrentRecord}
-          record={selectedRecord}
+          record={draftBaseRecord}
         />
       </section>
 
@@ -584,7 +627,9 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
           }
           discardLabel="放弃修改"
           onCancel={() => {
-            if (!imageCleanupInFlightRef.current) setPendingDate(null);
+            if (!editorLockedRef.current && !imageCleanupInFlightRef.current && !imagePreparationInFlightRef.current) {
+              setPendingDate(null);
+            }
           }}
           onDiscard={discardAndSwitch}
           onSave={saveAndSwitch}
@@ -604,7 +649,9 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
           }
           discardLabel="放弃修改并退出"
           onCancel={() => {
-            if (!imageCleanupInFlightRef.current) setLogoutPending(false);
+            if (!editorLockedRef.current && !imageCleanupInFlightRef.current && !imagePreparationInFlightRef.current) {
+              setLogoutPending(false);
+            }
           }}
           onDiscard={discardAndLogout}
           onSave={saveAndLogout}
@@ -618,9 +665,9 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
       {conflict ? (
         <ConflictDialog
           conflict={conflict}
-          isBusy={isCleaningUpImage}
+          isBusy={isCleaningUpImage || isPreparingImage}
           onClose={() => {
-            if (!imageCleanupInFlightRef.current) setConflict(null);
+            if (!imageCleanupInFlightRef.current && !imagePreparationInFlightRef.current) setConflict(null);
           }}
           onLoadCloudVersion={loadCloudVersion}
         />

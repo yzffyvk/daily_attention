@@ -12,7 +12,11 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function renderUploader(compressImage: ImageCompressor, identity = "2026-07-23") {
+function renderUploader(
+  compressImage: ImageCompressor,
+  identity = "2026-07-23",
+  onPreparationChange = vi.fn(),
+) {
   const onChange = vi.fn();
   const onError = vi.fn();
   const result = render(
@@ -23,10 +27,11 @@ function renderUploader(compressImage: ImageCompressor, identity = "2026-07-23")
       identity={identity}
       onChange={onChange}
       onError={onError}
+      onPreparationChange={onPreparationChange}
       removeImage={false}
     />,
   );
-  return { ...result, onChange, onError };
+  return { ...result, onChange, onError, onPreparationChange };
 }
 
 afterEach(() => {
@@ -42,13 +47,14 @@ describe("ImageNoteUploader", () => {
     const revokeObjectURL = vi.fn();
     vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
 
-    const { onChange, rerender } = renderUploader(compressor);
+    const { onChange, onPreparationChange, rerender } = renderUploader(compressor);
     const source = new File(["image"], "source.png", { type: "image/png" });
     const output = new File(["compressed"], "compressed.jpg", { type: "image/jpeg" });
     fireEvent.change(screen.getByLabelText("添加图片笔记"), {
       target: { files: [source] },
     });
     await waitFor(() => expect(compressor).toHaveBeenCalledWith(source));
+    expect(onPreparationChange).toHaveBeenLastCalledWith(true);
 
     rerender(
       <ImageNoteUploader
@@ -58,9 +64,11 @@ describe("ImageNoteUploader", () => {
         identity="2026-07-24"
         onChange={onChange}
         onError={vi.fn()}
+        onPreparationChange={onPreparationChange}
         removeImage={false}
       />,
     );
+    expect(onPreparationChange).toHaveBeenLastCalledWith(false);
     compressed.resolve(output);
 
     await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:stale-preview"));
@@ -74,15 +82,17 @@ describe("ImageNoteUploader", () => {
     const revokeObjectURL = vi.fn();
     vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
 
-    const { onChange, unmount } = renderUploader(compressor);
+    const { onChange, onPreparationChange, unmount } = renderUploader(compressor);
     const source = new File(["image"], "source.png", { type: "image/png" });
     const output = new File(["compressed"], "compressed.jpg", { type: "image/jpeg" });
     fireEvent.change(screen.getByLabelText("添加图片笔记"), {
       target: { files: [source] },
     });
     await waitFor(() => expect(compressor).toHaveBeenCalledWith(source));
+    expect(onPreparationChange).toHaveBeenLastCalledWith(true);
 
     unmount();
+    expect(onPreparationChange).toHaveBeenLastCalledWith(false);
     compressed.resolve(output);
 
     await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:unmounted-preview"));
@@ -134,5 +144,19 @@ describe("ImageNoteUploader", () => {
     await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:removed-preview"));
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(screen.queryByAltText("compressed.jpg")).not.toBeInTheDocument();
+  });
+
+  it("reports that preparation has settled after compression fails", async () => {
+    const compressor = vi.fn().mockRejectedValue(new Error("broken image"));
+    const { onError, onPreparationChange } = renderUploader(compressor);
+    const source = new File(["image"], "source.png", { type: "image/png" });
+
+    fireEvent.change(screen.getByLabelText("添加图片笔记"), {
+      target: { files: [source] },
+    });
+
+    await waitFor(() => expect(onError).toHaveBeenCalledWith("图片读取失败，请换一张重试"));
+    expect(onPreparationChange).toHaveBeenNthCalledWith(1, true);
+    expect(onPreparationChange).toHaveBeenLastCalledWith(false);
   });
 });

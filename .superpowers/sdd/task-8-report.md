@@ -229,3 +229,47 @@ COMPLETE_WITH_TYPECHECK_CONCERN
 ## Concerns
 
 - The existing Task 11-owned Cloudflare typecheck gap remains. This final gate change does not modify or mask those diagnostics.
+
+---
+
+# Task 8 Version, Cache, And Compression Follow-up
+
+## Status
+
+COMPLETE_WITH_TYPECHECK_CONCERN
+
+## Commit Range
+
+- Base: `68ca080`
+- Follow-up commit: `HEAD` after this report is committed
+
+## Implementation
+
+- The editor now owns an immutable draft base record and captured `baseVersion`, separate from live selected-date query data. A save always uses that captured version. Clean cached drafts are rehydrated after revalidation; dirty drafts retain their local content and prior version until explicitly reset or rehydrated.
+- Selected-date revalidation keeps the workspace locked while a cached record is fetching. Existing query-error retry behavior remains available, and reset/load-cloud paths intentionally adopt a fresh base record.
+- Image preparation state now flows from `ImageNoteUploader` through `CheckInEditor` to the workspace. Preparation locks save, reset, date/calendar/header, and dialog actions; the accessible editor status announces that the image is being prepared. Identity changes, unmounts, and compression failures clear the state.
+- `requestApi` validates `details.current` only for an expected `409 VERSION_CONFLICT`. Other typed failures, including `409 NAME_TAKEN`, retain their code, message, request metadata, and details.
+
+## TDD And Verification
+
+1. RED: focused tests failed as expected for ordinary 409 handling, uploader preparation lifecycle reporting, cached revalidation locking, dirty draft version retention, deferred preparation/save behavior, and profile rename errors.
+2. Focused unit: `npx vitest run tests/unit/checkins/api.test.ts tests/unit/checkins/image-note-uploader.test.tsx tests/unit/checkins/workspace.test.tsx tests/unit/profile/app-header.test.tsx`
+   - PASS: 4 files, 30 tests.
+3. Full unit: `npm run test:unit`
+   - PASS: 20 files, 89 tests.
+4. Rendered: `npm run test:rendered`
+   - PASS: 4 tests.
+5. Integration: `npm run test:integration`
+   - PASS: 3 files, 9 tests.
+6. Build: `npm run build`
+   - PASS.
+7. Lint: `npm run lint`
+   - PASS.
+8. Typecheck: `npm run typecheck -- --incremental false`
+   - Expected repository-wide failure only in the six known Task 11-owned Cloudflare diagnostics: missing `cloudflare:workers` in `app/api/auth/wechat/callback/route.ts`, `app/api/auth/wechat/start/route.ts`, and `db/index.ts`; missing `Fetcher`, `D1Database`, and `R2Bucket` in `worker/index.ts`. No modified Task 8 file is reported.
+9. Diff check: `git diff --check`
+   - PASS.
+
+## Concerns
+
+- The existing Task 11-owned Cloudflare typecheck gap remains; this follow-up does not modify or mask it.

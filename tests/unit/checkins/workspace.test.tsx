@@ -1,4 +1,5 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CheckInWorkspace } from "@/features/checkins/checkin-workspace";
@@ -12,7 +13,35 @@ import {
   shiftMonth,
 } from "@/features/checkins/dates";
 import type { CheckInRecord } from "@/features/checkins/types";
+import { checkInKeys } from "@/features/checkins/queries";
 import { TestQueryProvider } from "@/tests/helpers/test-query-provider";
+
+const imagePreparation = vi.hoisted(() => {
+  let complete: (() => void) | null = null;
+  return {
+    begin(
+      onChange: (selection: { file: File | null; removeImage: boolean }) => void | Promise<void>,
+      onPreparationChange?: (isPreparing: boolean) => void,
+    ) {
+      onPreparationChange?.(true);
+      complete = () => {
+        void Promise.resolve(
+          onChange({
+            file: new File(["replacement"], "replacement.png", { type: "image/png" }),
+            removeImage: false,
+          }),
+        ).finally(() => onPreparationChange?.(false));
+      };
+    },
+    complete() {
+      if (!complete) throw new Error("No image preparation is pending");
+      complete();
+    },
+    reset() {
+      complete = null;
+    },
+  };
+});
 
 vi.mock("canvas-confetti", () => ({ default: vi.fn() }));
 vi.mock("@/features/checkins/api", async (importOriginal) => {
@@ -28,17 +57,28 @@ vi.mock("@/features/checkins/image-note-uploader", () => ({
     disabled = false,
     file,
     onChange,
+    onPreparationChange,
     removeImage,
+    isPreparing = false,
   }: {
     disabled?: boolean;
     file: File | null;
     onChange: (selection: { file: File | null; removeImage: boolean }) => void | Promise<void>;
+    onPreparationChange?: (isPreparing: boolean) => void;
     removeImage: boolean;
+    isPreparing?: boolean;
   }) => (
     <div>
-      <input aria-label="添加图片笔记" disabled={disabled} type="file" />
+      <input aria-label="添加图片笔记" disabled={disabled || isPreparing} type="file" />
       <button
-        disabled={disabled}
+        disabled={disabled || isPreparing}
+        onClick={() => imagePreparation.begin(onChange, onPreparationChange)}
+        type="button"
+      >
+        开始测试图片整理
+      </button>
+      <button
+        disabled={disabled || isPreparing}
         onClick={() => void onChange({
           file: new File(["replacement"], "replacement.png", { type: "image/png" }),
           removeImage: false,
@@ -48,7 +88,7 @@ vi.mock("@/features/checkins/image-note-uploader", () => ({
         替换测试图片
       </button>
       <button
-        disabled={disabled}
+        disabled={disabled || isPreparing}
         onClick={() => void onChange({ file: null, removeImage: true })}
         type="button"
       >
@@ -121,6 +161,22 @@ function renderWorkspace(initialDate: string) {
   );
 }
 
+function renderWorkspaceWithCachedRecord(initialDate: string, cachedRecord: CheckInRecord | null) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  queryClient.setQueryData(checkInKeys.date(initialDate), cachedRecord);
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <CheckInWorkspace initialDate={initialDate} />
+    </QueryClientProvider>,
+  );
+  return { ...view, queryClient };
+}
+
 function field<T extends HTMLInputElement | HTMLTextAreaElement>(id: string) {
   const element = document.getElementById(id);
   if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
@@ -148,6 +204,7 @@ beforeEach(() => {
   });
   vi.mocked(deleteCheckInImage).mockReset();
   vi.mocked(uploadCheckInImage).mockReset();
+  imagePreparation.reset();
 });
 
 afterEach(() => {
@@ -281,6 +338,160 @@ describe("CheckInWorkspace", () => {
     await waitFor(() => expect(attention).toBeEnabled());
     expect(attention).toHaveValue("先保存这一版");
     expect(container.querySelector(".checkin-form")).toHaveAttribute("aria-busy", "false");
+  });
+
+  it("locks a cached record while it revalidates and then hydrates the fresh version", async () => {
+    const date = "2026-07-23";
+    const cached = record(date, "缓存初版", 1);
+    const fresh = record(date, "云端新版本", 2);
+    const refresh = deferred<Response>();
+    const saveBodies: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        if (init?.method === "PUT") {
+          saveBodies.push(JSON.parse(String(init.body)));
+          return Promise.resolve(response({ ok: true, data: fresh, requestId: "save-request" }));
+        }
+        if (path.endsWith(`/${date}`)) return refresh.promise;
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    renderWorkspaceWithCachedRecord(date, cached);
+    const user = userEvent.setup();
+    const attention = screen.getByLabelText("attention");
+    await waitFor(() => expect(attention).toHaveValue("缓存初版"));
+    expect(attention).toBeDisabled();
+    expect(screen.getByRole("button", { name: "保存修改" })).toBeDisabled();
+
+    refresh.resolve(response({ ok: true, data: fresh, requestId: "refresh-request" }));
+
+    await waitFor(() => expect(attention).toHaveValue("云端新版本"));
+    expect(attention).toBeEnabled();
+    await user.type(attention, "，本地补充");
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+
+    await waitFor(() => expect(saveBodies).toHaveLength(1));
+    expect(saveBodies[0]).toMatchObject({ version: 2, attention: "云端新版本，本地补充" });
+  });
+
+  it("keeps a dirty cached draft on its captured version after a background refresh", async () => {
+    const date = "2026-07-23";
+    const cached = record(date, "缓存初版", 1);
+    const fresh = record(date, "云端新版本", 2);
+    const refresh = deferred<Response>();
+    const saveBodies: unknown[] = [];
+    let reads = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        if (init?.method === "PUT") {
+          saveBodies.push(JSON.parse(String(init.body)));
+          return Promise.resolve(response({
+            ok: false,
+            error: {
+              code: "VERSION_CONFLICT",
+              message: "云端记录已更新，请确认后重试",
+              details: { current: fresh },
+            },
+            requestId: "conflict-request",
+          }, 409));
+        }
+        if (path.endsWith(`/${date}`)) {
+          reads += 1;
+          return reads === 1
+            ? Promise.resolve(response({ ok: true, data: cached, requestId: "initial-request" }))
+            : refresh.promise;
+        }
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    const { queryClient } = renderWorkspaceWithCachedRecord(date, cached);
+    const user = userEvent.setup();
+    const attention = screen.getByLabelText("attention");
+    await waitFor(() => expect(attention).toBeEnabled());
+    await user.type(attention, "，本地补充");
+
+    act(() => {
+      void queryClient.invalidateQueries({ queryKey: checkInKeys.date(date) });
+    });
+    await waitFor(() => expect(reads).toBe(2));
+    expect(attention).toBeDisabled();
+
+    refresh.resolve(response({ ok: true, data: fresh, requestId: "refresh-request" }));
+
+    await waitFor(() => expect(attention).toBeEnabled());
+    expect(attention).toHaveValue("缓存初版，本地补充");
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+
+    await waitFor(() => expect(saveBodies).toHaveLength(1));
+    expect(saveBodies[0]).toMatchObject({ version: 1, attention: "缓存初版，本地补充" });
+    expect(await screen.findByRole("dialog", { name: "云端记录已更新" })).toBeVisible();
+  });
+
+  it("does not save while image preparation is pending and resumes after it commits", async () => {
+    const date = "2026-07-23";
+    const saveBodies: unknown[] = [];
+    vi.mocked(uploadCheckInImage).mockResolvedValue("checkin-images/user/prepared.png");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path.includes("/api/checkins?month=")) {
+          return Promise.resolve(response({ ok: true, data: [], requestId: "month-request" }));
+        }
+        if (init?.method === "PUT") {
+          saveBodies.push(JSON.parse(String(init.body)));
+          return Promise.resolve(response({
+            ok: true,
+            data: {
+              ...record(date, "正在整理的内容"),
+              imagePath: "checkin-images/user/prepared.png",
+              imageName: "replacement.png",
+            },
+            requestId: "save-request",
+          }));
+        }
+        return Promise.resolve(missingCheckIn());
+      }),
+    );
+
+    renderWorkspace(date);
+    const user = userEvent.setup();
+    const attention = screen.getByLabelText("attention");
+    await waitForEditorReady();
+    await user.type(attention, "正在整理的内容");
+    await user.click(screen.getByRole("button", { name: "开始测试图片整理" }));
+
+    await waitFor(() => expect(screen.getByText("正在整理图片，请稍候")).toBeVisible());
+    expect(attention).toBeDisabled();
+    expect(screen.getByRole("button", { name: /完成打卡/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "还原未保存的修改" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /今日/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /7月24日/ })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /完成打卡/ }));
+    expect(saveBodies).toHaveLength(0);
+
+    act(() => {
+      imagePreparation.complete();
+    });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /完成打卡/ })).toBeEnabled());
+    expect(screen.getByLabelText("图片草稿状态")).toHaveTextContent("replacement.png:false");
+    await user.click(screen.getByRole("button", { name: /完成打卡/ }));
+
+    await waitFor(() => expect(saveBodies).toHaveLength(1));
+    expect(saveBodies[0]).toMatchObject({ imageName: "replacement.png" });
   });
 
   it("treats unrelated and malformed 409 responses as ordinary errors without mutating cloud caches", async () => {
@@ -887,7 +1098,7 @@ describe("CheckInWorkspace", () => {
     expect(screen.getByRole("button", { name: /今日/ })).toBeDisabled();
   });
 
-  it("suspends the dirty dialog for a version conflict and retries with the cloud version", async () => {
+  it("suspends the dirty dialog for a version conflict and keeps its captured version after dismissal", async () => {
     const date = "2026-07-23";
     const cloud = record(date, "云端的新版本", 2);
     const saved = record(date, "云端初版，本地补充", 3);
@@ -920,7 +1131,11 @@ describe("CheckInWorkspace", () => {
           return Promise.resolve(response({ ok: true, data: saved, requestId: "retry-request" }));
         }
         if (path.endsWith(`/${date}`)) {
-          return Promise.resolve(response({ ok: true, data: record(date, "云端初版"), requestId: "date-request" }));
+          return Promise.resolve(response({
+            ok: true,
+            data: saveBodies.length > 1 ? saved : record(date, "云端初版"),
+            requestId: "date-request",
+          }));
         }
         return Promise.resolve(missingCheckIn());
       }),
@@ -953,7 +1168,7 @@ describe("CheckInWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "保存修改" }));
     await waitFor(() => expect(saveBodies).toHaveLength(2));
-    expect(saveBodies[1]).toMatchObject({ version: 2, attention: "云端初版，本地补充" });
+    expect(saveBodies[1]).toMatchObject({ version: 1, attention: "云端初版，本地补充" });
     await waitFor(() => expect(attention).toHaveValue("云端初版，本地补充"));
   });
 });

@@ -70,6 +70,37 @@ describe("check-in API client", () => {
     } satisfies Partial<ApiError>);
   });
 
+  it("preserves ordinary 409 errors and their details without requiring a cloud record", async () => {
+    const details = { field: "name" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            ok: false,
+            error: {
+              code: "NAME_TAKEN",
+              message: "这个名称已经被使用",
+              details,
+            },
+            requestId: "request-name-taken",
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    await expect(requestApi("/api/me")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 409,
+      code: "NAME_TAKEN",
+      message: "这个名称已经被使用",
+      requestId: "request-name-taken",
+      details,
+      field: "name",
+    } satisfies Partial<ApiError>);
+  });
+
   it("rejects a malformed cloud record in a version conflict", async () => {
     vi.stubGlobal(
       "fetch",
