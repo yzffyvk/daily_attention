@@ -21,7 +21,7 @@ import {
   type MessageTone,
 } from "./checkin-editor";
 import { formatDate, getTodayKey, monthKeyForDate, calculateStreak } from "./dates";
-import { DirtySwitchDialog } from "./dirty-switch-dialog";
+import { DirtySwitchDialog, useDialogFocus } from "./dirty-switch-dialog";
 import type { ImageSelection } from "./image-note-uploader";
 import { checkInKeys, setMonthRecord, useCheckIn, useMonthCheckIns, useSaveCheckIn } from "./queries";
 import type { CheckInRecord } from "./types";
@@ -37,6 +37,47 @@ type ConflictState = {
   current: CheckInRecord | null;
   date: string;
 };
+
+function ConflictDialog({
+  conflict,
+  onClose,
+  onLoadCloudVersion,
+}: {
+  conflict: ConflictState;
+  onClose: () => void;
+  onLoadCloudVersion: () => void | Promise<void>;
+}) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const keepLocalButtonRef = useRef<HTMLButtonElement>(null);
+  useDialogFocus({
+    dialogRef,
+    initialFocusRef: keepLocalButtonRef,
+    onClose,
+  });
+
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <section aria-labelledby="conflict-title" aria-modal="true" className="switch-dialog conflict-dialog" ref={dialogRef} role="dialog">
+        <p className="eyebrow">CLOUD VERSION</p>
+        <h2 id="conflict-title">云端记录已更新</h2>
+        <p>请先查看云端版本，再决定是否保留当前本地内容。</p>
+        {conflict.current ? (
+          <div className="cloud-record" aria-label="云端记录">
+            <strong>{conflict.current.attention}</strong>
+            <span>版本 {conflict.current.version} · {formatDate(conflict.current.date)}</span>
+            {conflict.current.summary ? <p>{conflict.current.summary}</p> : null}
+          </div>
+        ) : (
+          <p className="cloud-record-empty">云端的这条记录已被删除。</p>
+        )}
+        <div className="dialog-actions">
+          <button className="primary-button" onClick={onClose} ref={keepLocalButtonRef} type="button">保留本地内容</button>
+          <button className="secondary-button" onClick={() => void onLoadCloudVersion()} type="button">载入云端版本</button>
+        </div>
+      </section>
+    </div>
+  );
+}
 
 function playCheckInChime() {
   if (typeof window === "undefined" || !window.AudioContext) return;
@@ -103,12 +144,17 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
   const [isCelebrating, setIsCelebrating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const toastTimerRef = useRef<number | null>(null);
+  const selectedDateRef = useRef(initialDate);
+  const draftRef = useRef(draft);
+  const editorLockedRef = useRef(false);
+  const saveInFlightRef = useRef(false);
 
   const monthQuery = useMonthCheckIns(month);
   const currentMonth = monthKeyForDate(today);
   const currentMonthQuery = useMonthCheckIns(currentMonth);
   const checkInQuery = useCheckIn(selectedDate);
   const saveMutation = useSaveCheckIn();
+  const isEditorLocked = isSaving || saveMutation.isPending;
   const selectedRecord = checkInQuery.data ?? null;
   const monthSummaries = monthQuery.data ?? [];
   const todaySummaries = useMemo(
@@ -129,6 +175,18 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    selectedDateRef.current = selectedDate;
+  }, [selectedDate]);
+
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
+  useEffect(() => {
+    editorLockedRef.current = isEditorLocked;
+  }, [isEditorLocked]);
 
   useEffect(() => {
     if (!checkInQuery.isSuccess || hydratedDate === selectedDate) return;
@@ -168,7 +226,10 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
   }
 
   function openDate(date: string) {
+    if (editorLockedRef.current) return;
     const cached = queryClient.getQueryData<CheckInRecord | null>(checkInKeys.date(date));
+    selectedDateRef.current = date;
+    setMonth(monthKeyForDate(date));
     setSelectedDate(date);
     setDraft(draftFromRecord(cached));
     setHydratedDate(cached === undefined ? null : date);
@@ -195,6 +256,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
   }
 
   function requestDateChange(date: string) {
+    if (editorLockedRef.current) return;
     if (date === selectedDate) {
       scrollToEditor();
       return;
@@ -207,26 +269,40 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
   }
 
   function selectToday() {
-    setMonth(currentMonth);
+    if (editorLockedRef.current) return;
+    if (today === selectedDate) {
+      setMonth(currentMonth);
+      scrollToEditor();
+      return;
+    }
     requestDateChange(today);
   }
 
-  async function handleImageChange(selection: ImageSelection) {
-    if (draft.uploadedImagePath) {
-      await cleanupPendingImage(draft.uploadedImagePath);
+  async function handleImageChange(selection: ImageSelection, identity: string) {
+    if (identity !== selectedDateRef.current || editorLockedRef.current) return;
+    const uploadedImagePath = draftRef.current.uploadedImagePath;
+    if (uploadedImagePath) {
+      await cleanupPendingImage(uploadedImagePath);
     }
-    setDraft((current) => ({
-      ...current,
-      imageFile: selection.file,
-      removeImage: selection.removeImage,
-      uploadedImagePath: null,
-    }));
+    if (identity !== selectedDateRef.current || editorLockedRef.current) return;
+    setDraft((current) => {
+      if (identity !== selectedDateRef.current || editorLockedRef.current) return current;
+      return {
+        ...current,
+        imageFile: selection.file,
+        removeImage: selection.removeImage,
+        uploadedImagePath: null,
+      };
+    });
+    if (identity !== selectedDateRef.current || editorLockedRef.current) return;
     setStatus(selection.file ? "图片笔记已加入，记得完成保存" : "图片将在保存后移除");
   }
 
   async function saveCurrentRecord() {
+    if (saveInFlightRef.current) return false;
     const activeDraft = draft;
     const activeRecord = selectedRecord;
+    const activeDate = selectedDate;
     const attention = activeDraft.attention.trim();
     if (!attention) {
       setStatus("请先填写今日 attention", "error");
@@ -234,11 +310,13 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
     }
 
     let pendingImagePath = activeDraft.uploadedImagePath;
+    saveInFlightRef.current = true;
+    editorLockedRef.current = true;
     setIsSaving(true);
     setStatus("正在写入这一天…");
     try {
       if (activeDraft.imageFile && !pendingImagePath) {
-        pendingImagePath = await uploadCheckInImage(selectedDate, activeDraft.imageFile);
+        pendingImagePath = await uploadCheckInImage(activeDate, activeDraft.imageFile);
         const uploadedPath = pendingImagePath;
         setDraft((current) =>
           current.imageFile === activeDraft.imageFile
@@ -248,7 +326,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
       }
 
       const record = await saveMutation.mutateAsync({
-        date: selectedDate,
+        date: activeDate,
         input: {
           attention,
           sourceUrl: activeDraft.sourceUrl.trim(),
@@ -265,14 +343,14 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
       });
 
       setDraft(draftFromRecord(record));
-      setHydratedDate(selectedDate);
+      setHydratedDate(activeDate);
       setStatus(
         activeRecord
-          ? `${formatDate(selectedDate)}的修改已保存`
-          : `${formatDate(selectedDate)}打卡完成`,
+          ? `${formatDate(activeDate)}的修改已保存`
+          : `${formatDate(activeDate)}打卡完成`,
         "success",
       );
-      void queryClient.invalidateQueries({ queryKey: checkInKeys.date(selectedDate) });
+      void queryClient.invalidateQueries({ queryKey: checkInKeys.date(activeDate) });
 
       if (!activeRecord) {
         if (!isMuted) playCheckInChime();
@@ -293,9 +371,11 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
               : current,
           );
         }
-        setConflict({ current: error.current ?? null, date: selectedDate });
-        queryClient.setQueryData(checkInKeys.date(selectedDate), error.current ?? null);
-        setMonthRecord(queryClient, error.current ?? null, selectedDate);
+        setPendingDate(null);
+        setLogoutPending(false);
+        setConflict({ current: error.current ?? null, date: activeDate });
+        queryClient.setQueryData(checkInKeys.date(activeDate), error.current ?? null);
+        setMonthRecord(queryClient, error.current ?? null, activeDate);
         setStatus(error.message, "error");
         return false;
       }
@@ -311,6 +391,8 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
       setStatus(messageForError(error), "error");
       return false;
     } finally {
+      saveInFlightRef.current = false;
+      editorLockedRef.current = false;
       setIsSaving(false);
     }
   }
@@ -329,6 +411,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
   }
 
   async function logout() {
+    editorLockedRef.current = true;
     setIsSaving(true);
     try {
       await requestApi<Record<string, never>>("/api/auth/logout", {
@@ -339,6 +422,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
     } catch (error) {
       setStatus(messageForError(error), "error");
     } finally {
+      editorLockedRef.current = false;
       setIsSaving(false);
     }
   }
@@ -368,6 +452,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
         <AppHeader
           hasTodayRecord={hasTodayRecord}
           initialProfile={initialProfile}
+          isDateSelectionDisabled={isEditorLocked}
           isCelebrating={isCelebrating}
           isMuted={isMuted}
           onRequestLogout={() => {
@@ -387,6 +472,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
         />
         <MonthCalendar
           month={month}
+          disabled={isEditorLocked}
           onMonthChange={setMonth}
           onSelectDate={requestDateChange}
           selectedDate={selectedDate}
@@ -398,13 +484,18 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
           draft={draft}
           isDirty={isDirty}
           isLoading={checkInQuery.isLoading}
-          isSaving={isSaving || saveMutation.isPending}
+          isSaving={isEditorLocked}
           message={message || (monthQuery.error ? messageForError(monthQuery.error) : "")}
           messageTone={message ? messageTone : monthQuery.error ? "error" : messageTone}
-          onDraftChange={(change) => setDraft((current) => ({ ...current, ...change }))}
+          onDraftChange={(change) => {
+            if (!editorLockedRef.current) {
+              setDraft((current) => ({ ...current, ...change }));
+            }
+          }}
           onImageChange={handleImageChange}
           onImageError={(nextMessage) => setStatus(nextMessage, "error")}
           onReset={async () => {
+            if (editorLockedRef.current) return;
             await abandonLocalDraft();
             setStatus("已还原未保存的修改");
           }}
@@ -421,7 +512,7 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
         </div>
       ) : null}
 
-      {pendingDate ? (
+      {pendingDate && !conflict ? (
         <DirtySwitchDialog
           description={
             canSave
@@ -432,13 +523,14 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
           onCancel={() => setPendingDate(null)}
           onDiscard={discardAndSwitch}
           onSave={saveAndSwitch}
-          saveDisabled={isSaving || !canSave}
+          isBusy={isEditorLocked}
+          saveDisabled={!canSave}
           saveLabel="保存并切换"
           title="尚未保存"
         />
       ) : null}
 
-      {logoutPending ? (
+      {logoutPending && !conflict ? (
         <DirtySwitchDialog
           description={
             canSave
@@ -452,34 +544,14 @@ export function CheckInWorkspace({ initialDate, initialProfile = null }: CheckIn
             await logout();
           }}
           onSave={saveAndLogout}
-          saveDisabled={isSaving || !canSave}
+          isBusy={isEditorLocked}
+          saveDisabled={!canSave}
           saveLabel="保存并退出"
           title="退出前还有修改没有保存"
         />
       ) : null}
 
-      {conflict ? (
-        <div className="dialog-backdrop" role="presentation">
-          <section aria-labelledby="conflict-title" aria-modal="true" className="switch-dialog conflict-dialog" role="dialog">
-            <p className="eyebrow">CLOUD VERSION</p>
-            <h2 id="conflict-title">云端记录已更新</h2>
-            <p>请先查看云端版本，再决定是否保留当前本地内容。</p>
-            {conflict.current ? (
-              <div className="cloud-record" aria-label="云端记录">
-                <strong>{conflict.current.attention}</strong>
-                <span>版本 {conflict.current.version} · {formatDate(conflict.current.date)}</span>
-                {conflict.current.summary ? <p>{conflict.current.summary}</p> : null}
-              </div>
-            ) : (
-              <p className="cloud-record-empty">云端的这条记录已被删除。</p>
-            )}
-            <div className="dialog-actions">
-              <button className="primary-button" onClick={() => setConflict(null)} type="button">保留本地内容</button>
-              <button className="secondary-button" onClick={() => void loadCloudVersion()} type="button">载入云端版本</button>
-            </div>
-          </section>
-        </div>
-      ) : null}
+      {conflict ? <ConflictDialog conflict={conflict} onClose={() => setConflict(null)} onLoadCloudVersion={loadCloudVersion} /> : null}
     </main>
   );
 }

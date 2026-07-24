@@ -47,4 +47,26 @@ describe("check-in API client", () => {
       current,
     } satisfies Partial<ApiError>);
   });
+
+  it("turns malformed failure envelopes into typed API errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            ok: false,
+            requestId: "request-malformed",
+          }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    await expect(requestApi("/api/checkins/2026-07-24")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 500,
+      code: "MALFORMED_RESPONSE",
+      requestId: "",
+    } satisfies Partial<ApiError>);
+  });
 });

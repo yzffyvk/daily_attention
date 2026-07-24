@@ -52,3 +52,49 @@ DONE_WITH_CONCERN
 ## Concerns
 
 - Repository-wide typechecking remains blocked by the six known legacy Cloudflare diagnostics above. Task 11 owns their removal; no Task 8 code was changed to mask or repair them.
+
+---
+
+# Task 8 Review-Fix Report
+
+## Status
+
+DONE_WITH_CONCERN
+
+## Commit Range
+
+- Base: `db102dc`
+- Review-fix commit: `HEAD` after this report is committed
+
+## Review Findings Addressed
+
+- Saving now locks all editor fields, reset/save actions, image inputs/actions/drop handling, calendar navigation/date controls, and the header's today action. The editor exposes `aria-busy` while saving, and the workspace also rejects stale change callbacks during the lock.
+- Dirty and conflict dialogs now share mount-scoped focus management: an enabled action is focused, Tab and Shift+Tab stay inside, Escape closes, and the prior trigger regains focus. A 409 clears/suspends the dirty decision before the conflict dialog mounts.
+- Image compression now runs in a keyed date-identity session with a generation guard. Date changes, disabled saving, and unmounts invalidate pending work; stale completions revoke newly created URLs and cannot call back into a different date's draft.
+- Month changes are committed by `openDate`, not before a dirty cross-month switch is confirmed. Cancel retains the original selected date/month; save and discard switch both date and displayed month.
+- Malformed API failure envelopes are rejected as `ApiError` values instead of dereferencing an unchecked `error` object.
+- Added behavioral coverage for deferred saves, save-and-switch, discard/cancel, conflict retry/version handling, focus trap/Escape/restore behavior, and image compression races. No Task 9 drafts or progress-ledger changes were added.
+
+## TDD And Verification
+
+1. RED: `npm run test:unit -- tests/unit/checkins/api.test.ts tests/unit/checkins/workspace.test.tsx tests/unit/checkins/image-note-uploader.test.tsx`
+   - Failed as expected on the unchecked malformed envelope, editable in-flight state, early month mutation, overlapping dialogs, missing conflict focus behavior, and stale image work.
+2. Focused GREEN: the same command passed: 19 files, 70 tests.
+3. Full unit: `npm run test:unit`
+   - PASS: 19 files, 70 tests.
+4. Rendered: `npm run test:rendered`
+   - PASS: 4 tests.
+5. Integration: `npm run test:integration`
+   - PASS: 3 files, 9 tests, including profile behavior.
+6. Build: `npm run build`
+   - PASS.
+7. Lint: `npm run lint`
+   - PASS.
+8. Typecheck: `npm run typecheck`
+   - Expected repository-wide FAIL only in the six existing Cloudflare global/module diagnostics under Task 11 ownership; no Task 8 files are named.
+9. Final `git diff --check`
+   - PASS.
+
+## Concerns
+
+- The pre-existing Cloudflare typecheck gap remains: `cloudflare:workers`, `Fetcher`, `D1Database`, and `R2Bucket` are unavailable to the repository-wide TypeScript configuration. This change does not alter those Task 11-owned paths.

@@ -20,6 +20,7 @@ type AppHeaderProps = {
   hasTodayRecord: boolean;
   streak: number;
   totalRecords: number;
+  isDateSelectionDisabled?: boolean;
   onSelectToday: () => void;
   onToggleMuted: () => void;
   onRequestLogout: () => void;
@@ -202,6 +203,7 @@ export function AppHeader({
   hasTodayRecord,
   streak,
   totalRecords,
+  isDateSelectionDisabled = false,
   onSelectToday,
   onToggleMuted,
   onRequestLogout,
@@ -299,7 +301,7 @@ export function AppHeader({
               <strong>{totalRecords}<small>篇</small></strong>
             </div>
           </div>
-          <button className="today-button" onClick={onSelectToday} type="button">
+          <button className="today-button" disabled={isDateSelectionDisabled} onClick={onSelectToday} type="button">
             <CalendarDays aria-hidden="true" size={18} />
             {hasTodayRecord ? "回看今日记录" : "开始今日打卡"}
           </button>

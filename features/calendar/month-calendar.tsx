@@ -9,6 +9,7 @@ type MonthCalendarProps = {
   selectedDate: string;
   summaries: CheckInSummary[];
   today: string;
+  disabled?: boolean;
   onMonthChange: (month: string) => void;
   onSelectDate: (date: string) => void;
 };
@@ -33,6 +34,7 @@ export function MonthCalendar({
   selectedDate,
   summaries,
   today,
+  disabled = false,
   onMonthChange,
   onSelectDate,
 }: MonthCalendarProps) {
@@ -56,6 +58,7 @@ export function MonthCalendar({
           <button
             aria-label="上个月"
             className="icon-button"
+            disabled={disabled}
             onClick={() => onMonthChange(shiftMonth(month, -1))}
             title="上个月"
             type="button"
@@ -65,6 +68,7 @@ export function MonthCalendar({
           {!isCurrentMonth ? (
             <button
               className="month-reset"
+              disabled={disabled}
               onClick={() => onMonthChange(monthKeyForDate(today))}
               type="button"
             >
@@ -74,6 +78,7 @@ export function MonthCalendar({
           <button
             aria-label="下个月"
             className="icon-button"
+            disabled={disabled}
             onClick={() => onMonthChange(shiftMonth(month, 1))}
             title="下个月"
             type="button"
@@ -103,6 +108,7 @@ export function MonthCalendar({
               aria-label={calendarLabel(date, summary, selected, isToday)}
               aria-pressed={selected}
               className={`calendar-cell${summary ? " recorded" : ""}${isToday ? " today" : ""}${selected ? " selected" : ""}`}
+              disabled={disabled}
               key={date}
               onClick={() => onSelectDate(date)}
               type="button"

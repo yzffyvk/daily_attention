@@ -32,15 +32,30 @@ export class ApiError extends Error {
   }
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 function isEnvelope(value: unknown): value is ApiEnvelope<unknown> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "ok" in value &&
-    typeof value.ok === "boolean" &&
-    "requestId" in value &&
-    typeof value.requestId === "string"
-  );
+  if (
+    !isObject(value) ||
+    typeof value.ok !== "boolean" ||
+    typeof value.requestId !== "string"
+  ) {
+    return false;
+  }
+
+  if (value.ok) return "data" in value;
+
+  if (!isObject(value.error)) return false;
+  if (
+    typeof value.error.code !== "string" ||
+    typeof value.error.message !== "string"
+  ) {
+    return false;
+  }
+
+  return value.error.details === undefined || isObject(value.error.details);
 }
 
 function currentRecord(value: unknown) {

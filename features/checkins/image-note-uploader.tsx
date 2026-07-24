@@ -3,25 +3,30 @@
 /* eslint-disable @next/next/no-img-element */
 import { ImagePlus, Trash2, Upload } from "lucide-react";
 import type { ChangeEvent, DragEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export type ImageSelection = {
   file: File | null;
   removeImage: boolean;
 };
 
+export type ImageCompressor = (file: File) => Promise<File>;
+
 type ImageNoteUploaderProps = {
+  identity: string;
   existingImage: { imageName: string; imageUrl: string | null } | null;
   file: File | null;
   removeImage: boolean;
   onChange: (selection: ImageSelection) => void | Promise<void>;
   onError: (message: string) => void;
+  disabled?: boolean;
+  compressImage?: ImageCompressor;
 };
 
 const acceptedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const maxImageBytes = 10 * 1024 * 1024;
 
-async function compressImage(file: File) {
+export async function compressImage(file: File) {
   if (
     typeof Image === "undefined" ||
     typeof URL.createObjectURL !== "function" ||
@@ -64,17 +69,31 @@ async function compressImage(file: File) {
   }
 }
 
-export function ImageNoteUploader({
+type ImageNoteUploaderSessionProps = Omit<ImageNoteUploaderProps, "identity">;
+
+export function ImageNoteUploader({ identity, ...props }: ImageNoteUploaderProps) {
+  return <ImageNoteUploaderSession key={identity} {...props} />;
+}
+
+function ImageNoteUploaderSession({
   existingImage,
   file,
   removeImage,
   onChange,
   onError,
-}: ImageNoteUploaderProps) {
+  disabled = false,
+  compressImage: compress = compressImage,
+}: ImageNoteUploaderSessionProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
   const [filePreview, setFilePreview] = useState<{ file: File; url: string } | null>(null);
   const filePreviewRef = useRef<{ file: File; url: string } | null>(null);
+  const lifecycleRef = useRef({
+    disabled,
+    generation: 0,
+    mounted: false,
+  });
+  const lastDisabledRef = useRef(disabled);
 
   function revokeFilePreview() {
     if (!filePreviewRef.current) return;
@@ -83,12 +102,34 @@ export function ImageNoteUploader({
   }
 
   useEffect(() => {
-    return () => revokeFilePreview();
+    const lifecycle = lifecycleRef.current;
+    lifecycle.mounted = true;
+    return () => {
+      lifecycle.mounted = false;
+      lifecycle.generation += 1;
+      revokeFilePreview();
+    };
   }, []);
 
   useEffect(() => {
     if (!file) revokeFilePreview();
   }, [file]);
+
+  useLayoutEffect(() => {
+    const lifecycle = lifecycleRef.current;
+    lifecycle.disabled = disabled;
+    lifecycle.generation += 1;
+  }, [disabled]);
+
+  useEffect(() => {
+    if (lastDisabledRef.current === disabled) return;
+    lastDisabledRef.current = disabled;
+    const timer = window.setTimeout(() => {
+      setIsDragging(false);
+      setIsPreparing(false);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [disabled]);
 
   const previewUrl =
     file && filePreview?.file === file
@@ -97,54 +138,78 @@ export function ImageNoteUploader({
         ? existingImage?.imageUrl ?? null
         : null;
   const imageName = file?.name ?? (!removeImage ? existingImage?.imageName ?? "" : "");
+  const isActiveDrag = isDragging && !disabled;
+  const isActivePreparation = isPreparing && !disabled;
+
+  function isCurrent(generation: number) {
+    const lifecycle = lifecycleRef.current;
+    return (
+      lifecycle.mounted &&
+      !lifecycle.disabled &&
+      lifecycle.generation === generation
+    );
+  }
 
   async function processImage(nextFile?: File) {
-    if (!nextFile) return;
+    if (!nextFile || disabled) return;
     if (!acceptedTypes.has(nextFile.type) || nextFile.size > maxImageBytes) {
       onError("请选择 10MB 以内的 JPEG、PNG 或 WebP 图片");
       return;
     }
 
+    const generation = lifecycleRef.current.generation + 1;
+    lifecycleRef.current.generation = generation;
     setIsPreparing(true);
     try {
-      const compressed = await compressImage(nextFile);
-      revokeFilePreview();
+      const compressed = await compress(nextFile);
       const preview = {
         file: compressed,
         url: URL.createObjectURL(compressed),
       };
+      if (!isCurrent(generation)) {
+        URL.revokeObjectURL(preview.url);
+        return;
+      }
+      revokeFilePreview();
       filePreviewRef.current = preview;
       setFilePreview(preview);
       await onChange({ file: compressed, removeImage: false });
+      if (!isCurrent(generation) && filePreviewRef.current === preview) {
+        revokeFilePreview();
+        setFilePreview(null);
+      }
     } catch {
+      if (!isCurrent(generation)) return;
       revokeFilePreview();
       setFilePreview(null);
       onError("图片读取失败，请换一张重试");
     } finally {
-      setIsPreparing(false);
+      if (isCurrent(generation)) setIsPreparing(false);
     }
   }
 
   function handleInput(event: ChangeEvent<HTMLInputElement>) {
-    void processImage(event.target.files?.[0]);
+    if (!disabled) void processImage(event.target.files?.[0]);
     event.target.value = "";
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setIsDragging(false);
-    void processImage(event.dataTransfer.files?.[0]);
+    if (!disabled) void processImage(event.dataTransfer.files?.[0]);
   }
 
   return (
     <div
-      className={`upload-field${isDragging ? " dragging" : ""}${previewUrl ? " has-image" : ""}`}
+      className={`upload-field${isActiveDrag ? " dragging" : ""}${previewUrl ? " has-image" : ""}`}
+      aria-busy={isActivePreparation}
+      aria-disabled={disabled}
       onDragEnter={(event) => {
         event.preventDefault();
-        setIsDragging(true);
+        if (!disabled) setIsDragging(true);
       }}
       onDragLeave={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+        if (!disabled && !event.currentTarget.contains(event.relatedTarget as Node)) {
           setIsDragging(false);
         }
       }}
@@ -161,6 +226,7 @@ export function ImageNoteUploader({
                 <input
                   accept="image/jpeg,image/png,image/webp"
                   aria-label="替换图片"
+                  disabled={disabled}
                   onChange={handleInput}
                   type="file"
                 />
@@ -169,6 +235,7 @@ export function ImageNoteUploader({
               <button
                 aria-label="移除图片"
                 className="small-icon-button danger"
+                disabled={disabled}
                 onClick={() => void onChange({ file: null, removeImage: true })}
                 title="移除图片"
                 type="button"
@@ -183,13 +250,14 @@ export function ImageNoteUploader({
           <input
             accept="image/jpeg,image/png,image/webp"
             aria-label="添加图片笔记"
+            disabled={disabled}
             onChange={handleInput}
             type="file"
           />
           <span className="upload-icon" aria-hidden="true">
-            {isDragging || isPreparing ? <Upload size={22} /> : <ImagePlus size={22} />}
+            {isActiveDrag || isActivePreparation ? <Upload size={22} /> : <ImagePlus size={22} />}
           </span>
-          <b>{isPreparing ? "正在整理图片" : isDragging ? "松手添加图片" : "添加图片笔记"}</b>
+          <b>{isActivePreparation ? "正在整理图片" : isActiveDrag ? "松手添加图片" : "添加图片笔记"}</b>
           <small>点击或拖入脑图、手写笔记、截图 · JPEG、PNG、WebP，最大 10MB</small>
         </label>
       )}

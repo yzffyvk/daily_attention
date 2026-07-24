@@ -3,6 +3,87 @@
 import { X } from "lucide-react";
 import { useEffect, useRef } from "react";
 
+type DialogFocusProps = {
+  dialogRef: React.RefObject<HTMLElement | null>;
+  initialFocusRef?: React.RefObject<HTMLElement | null>;
+  onClose: () => void;
+};
+
+function focusableElements(dialog: HTMLElement) {
+  return Array.from(
+    dialog.querySelectorAll<HTMLElement>(
+      'button, [href], input, textarea, select, [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((element) => !element.matches(":disabled") && element.tabIndex >= 0);
+}
+
+function focusIfEnabled(element: HTMLElement | null | undefined) {
+  if (!element || element.matches(":disabled") || element.tabIndex < 0) return false;
+  element.focus();
+  return document.activeElement === element;
+}
+
+export function useDialogFocus({
+  dialogRef,
+  initialFocusRef,
+  onClose,
+}: DialogFocusProps) {
+  const dialogRefRef = useRef(dialogRef);
+  const initialFocusRefRef = useRef(initialFocusRef);
+  const priorFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    priorFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const focusTimer = window.setTimeout(() => {
+      const dialog = dialogRefRef.current.current;
+      if (!dialog) return;
+      if (focusIfEnabled(initialFocusRefRef.current?.current)) return;
+      focusableElements(dialog)[0]?.focus();
+    }, 0);
+
+    function handleKeyDown(event: KeyboardEvent) {
+      const dialog = dialogRefRef.current.current;
+      if (!dialog) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = focusableElements(dialog);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const activeElement = document.activeElement;
+      if (!dialog.contains(activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener("keydown", handleKeyDown);
+      focusIfEnabled(priorFocusRef.current);
+    };
+  }, []);
+}
+
 type DirtySwitchDialogProps = {
   title: string;
   eyebrow?: string;
@@ -10,6 +91,7 @@ type DirtySwitchDialogProps = {
   saveLabel: string;
   discardLabel: string;
   saveDisabled?: boolean;
+  isBusy?: boolean;
   onSave: () => void | Promise<void>;
   onDiscard: () => void | Promise<void>;
   onCancel: () => void;
@@ -22,53 +104,19 @@ export function DirtySwitchDialog({
   saveLabel,
   discardLabel,
   saveDisabled = false,
+  isBusy = false,
   onSave,
   onDiscard,
   onCancel,
 }: DirtySwitchDialogProps) {
   const dialogRef = useRef<HTMLElement>(null);
-  const priorFocusRef = useRef<HTMLElement | null>(null);
   const saveButtonRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    priorFocusRef.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    const focusTimer = window.setTimeout(() => {
-      saveButtonRef.current?.focus();
-    }, 0);
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onCancel();
-        return;
-      }
-      if (event.key !== "Tab" || !dialogRef.current) return;
-      const focusable = Array.from(
-        dialogRef.current.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled])',
-        ),
-      );
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.clearTimeout(focusTimer);
-      document.removeEventListener("keydown", handleKeyDown);
-      priorFocusRef.current?.focus();
-    };
-  }, [onCancel]);
+  const discardButtonRef = useRef<HTMLButtonElement>(null);
+  useDialogFocus({
+    dialogRef,
+    initialFocusRef: saveDisabled || isBusy ? discardButtonRef : saveButtonRef,
+    onClose: onCancel,
+  });
 
   return (
     <div className="dialog-backdrop" role="presentation">
@@ -82,6 +130,7 @@ export function DirtySwitchDialog({
         <button
           aria-label="关闭"
           className="dialog-close icon-button"
+          disabled={isBusy}
           onClick={onCancel}
           type="button"
         >
@@ -93,7 +142,7 @@ export function DirtySwitchDialog({
         <div className="dialog-actions">
           <button
             className="primary-button"
-            disabled={saveDisabled}
+            disabled={saveDisabled || isBusy}
             onClick={() => void onSave()}
             ref={saveButtonRef}
             type="button"
@@ -102,12 +151,14 @@ export function DirtySwitchDialog({
           </button>
           <button
             className="secondary-button"
+            disabled={isBusy}
             onClick={() => void onDiscard()}
+            ref={discardButtonRef}
             type="button"
           >
             {discardLabel}
           </button>
-          <button className="text-button" onClick={onCancel} type="button">
+          <button className="text-button" disabled={isBusy} onClick={onCancel} type="button">
             取消
           </button>
         </div>

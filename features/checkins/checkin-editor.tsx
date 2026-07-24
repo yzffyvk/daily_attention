@@ -51,7 +51,7 @@ type CheckInEditorProps = {
   message: string;
   messageTone: MessageTone;
   onDraftChange: (change: Partial<CheckInDraft>) => void;
-  onImageChange: (selection: ImageSelection) => void | Promise<void>;
+  onImageChange: (selection: ImageSelection, date: string) => void | Promise<void>;
   onImageError: (message: string) => void;
   onReset: () => void | Promise<void>;
   onSubmit: () => void | Promise<unknown>;
@@ -99,7 +99,7 @@ export function CheckInEditor({
         </div>
       </div>
 
-      <form className="checkin-form" onSubmit={submit}>
+      <form aria-busy={isSaving} className="checkin-form" onSubmit={submit}>
         <div className="form-grid">
           <label htmlFor="attention">
             <span className="label-row">
@@ -109,6 +109,7 @@ export function CheckInEditor({
             <span className="field-hint">用一句话总结当天学习的内容</span>
             <input
               aria-label="attention"
+              disabled={isSaving}
               id="attention"
               maxLength={120}
               onChange={(event) => onDraftChange({ attention: event.target.value })}
@@ -125,6 +126,7 @@ export function CheckInEditor({
               id="source-url"
               inputMode="url"
               maxLength={2048}
+              disabled={isSaving}
               onChange={(event) => onDraftChange({ sourceUrl: event.target.value })}
               placeholder="https://"
               type="url"
@@ -140,6 +142,7 @@ export function CheckInEditor({
             <textarea
               id="summary"
               maxLength={5000}
+              disabled={isSaving}
               onChange={(event) => onDraftChange({ summary: event.target.value })}
               placeholder="今天真正理解了什么？试着用自己的话讲一遍。"
               value={draft.summary}
@@ -149,9 +152,11 @@ export function CheckInEditor({
 
           <div className="secondary-fields">
             <ImageNoteUploader
+              disabled={isSaving}
               existingImage={record ? { imageName: record.imageName, imageUrl: record.imageUrl } : null}
               file={draft.imageFile}
-              onChange={onImageChange}
+              identity={date}
+              onChange={(selection) => onImageChange(selection, date)}
               onError={onImageError}
               removeImage={draft.removeImage}
             />
@@ -160,6 +165,7 @@ export function CheckInEditor({
               <span className="label-row"><b>灵感记录</b></span>
               <span className="field-hint">它让你联想到了什么？接下来想试试什么？</span>
               <textarea
+                disabled={isSaving}
                 id="inspiration"
                 maxLength={2000}
                 onChange={(event) => onDraftChange({ inspiration: event.target.value })}
