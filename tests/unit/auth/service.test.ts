@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { recoverAccount, registerAccount } from "@/server/auth/service";
+import { recoverAccount, registerAccount, updateProfile } from "@/server/auth/service";
 import type { AuthPorts } from "@/server/auth/ports";
 
 function ports(): AuthPorts {
@@ -102,5 +102,55 @@ describe("auth service", () => {
 
     expect(adapter.replaceRecoveryDigest).toHaveBeenCalledTimes(2);
     expect(adapter.signIn).not.toHaveBeenCalled();
+  });
+
+  it("restores the previous recovery digest when sign-in after recovery fails", async () => {
+    const adapter = ports();
+    const expected = await recoveryDigest();
+    const signInFailure = new Error("INVALID_CREDENTIALS");
+    vi.mocked(adapter.readRecoveryDigest).mockResolvedValue(expected);
+    vi.mocked(adapter.signIn).mockRejectedValue(signInFailure);
+    vi.mocked(adapter.replaceRecoveryDigest).mockResolvedValueOnce(true).mockResolvedValueOnce(true);
+
+    await expect(recoverAccount(recoveryInput(), adapter)).rejects.toThrow(signInFailure);
+
+    const replaceRecoveryDigest = vi.mocked(adapter.replaceRecoveryDigest);
+    const [, claimedDigest] = replaceRecoveryDigest.mock.calls[0].slice(1);
+    expect(replaceRecoveryDigest.mock.calls[1]).toEqual(["user-1", claimedDigest, expected]);
+    expect(adapter.signIn).toHaveBeenCalledOnce();
+  });
+
+  it("reports rollback failure when sign-in after recovery fails", async () => {
+    const adapter = ports();
+    vi.mocked(adapter.readRecoveryDigest).mockResolvedValue(await recoveryDigest());
+    vi.mocked(adapter.signIn).mockRejectedValue(new Error("INVALID_CREDENTIALS"));
+    vi.mocked(adapter.replaceRecoveryDigest).mockResolvedValueOnce(true).mockRejectedValue(new Error("rollback failed"));
+
+    await expect(recoverAccount(recoveryInput(), adapter)).rejects.toMatchObject({
+      name: "AggregateError",
+      message: "RECOVERY_ROLLBACK_FAILED",
+    });
+  });
+
+  it("requires the current password before applying an avatar-only profile update", async () => {
+    const adapter = ports();
+
+    await updateProfile(
+      {
+        userId: "user-1",
+        currentName: "学习者",
+        nextName: "学习者",
+        nextAvatarKey: 5,
+        currentPassword: "password123",
+      },
+      adapter,
+    );
+
+    expect(adapter.signIn).toHaveBeenCalledWith("internal@internal.invalid", "password123");
+    expect(adapter.updateProfileIdentity).toHaveBeenCalledWith({
+      userId: "user-1",
+      loginName: "学习者",
+      avatarKey: 5,
+    });
   });
 });

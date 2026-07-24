@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Copy, Download, X } from "lucide-react";
-import { useState } from "react";
+import { KeyboardEvent, useEffect, useRef, useState } from "react";
 
 export function RecoveryCodeDialog({
   open,
@@ -15,7 +15,42 @@ export function RecoveryCodeDialog({
   onClose: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const dialogRef = useRef<HTMLElement>(null);
+  const primaryActionRef = useRef<HTMLButtonElement>(null);
+  const priorFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    priorFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    primaryActionRef.current?.focus();
+    return () => {
+      priorFocusRef.current?.focus();
+    };
+  }, [open]);
+
   if (!open) return null;
+
+  function trapFocus(event: KeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    if (!focusable?.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
 
   async function copyCode() {
     await navigator.clipboard?.writeText(recoveryCode);
@@ -37,7 +72,7 @@ export function RecoveryCodeDialog({
 
   return (
     <div className="auth-dialog-backdrop" role="presentation">
-      <section className="auth-dialog" aria-labelledby="recovery-code-title" aria-modal="true" role="dialog">
+      <section className="auth-dialog" aria-labelledby="recovery-code-title" aria-modal="true" onKeyDown={trapFocus} ref={dialogRef} role="dialog">
         <div className="auth-dialog-heading">
           <div>
             <p className="eyebrow">KEEP IT SAFE</p>
@@ -58,7 +93,7 @@ export function RecoveryCodeDialog({
             <Download aria-hidden="true" size={16} />
             下载文本
           </button>
-          <button className="primary-button" onClick={onClose} type="button">我已保存</button>
+          <button className="primary-button" onClick={onClose} ref={primaryActionRef} type="button">我已保存</button>
         </div>
       </section>
     </div>

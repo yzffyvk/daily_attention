@@ -24,7 +24,8 @@ export async function parseRequest<T extends z.ZodType>(
 }
 
 export function requestIp(request: Request) {
-  return request.headers.get("x-forwarded-for")?.split(",", 1)[0]?.trim() || "unknown";
+  const cloudflareIp = request.headers.get("cf-connecting-ip")?.trim();
+  return cloudflareIp || "local";
 }
 
 export function nameRateBucket(request: Request, name: string) {

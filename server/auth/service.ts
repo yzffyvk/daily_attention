@@ -26,6 +26,22 @@ function sameDigest(left: Uint8Array, right: Uint8Array) {
   return left.byteLength === right.byteLength && timingSafeEqual(left, right);
 }
 
+async function restoreRecoveryDigest(
+  ports: AuthPorts,
+  userId: string,
+  next: Uint8Array,
+  expected: Uint8Array,
+  cause: unknown,
+): Promise<never> {
+  try {
+    if (await ports.replaceRecoveryDigest(userId, next, expected)) throw cause;
+    throw new Error("Conditional recovery digest rollback did not apply");
+  } catch (rollbackError) {
+    if (rollbackError === cause) throw cause;
+    throw new AggregateError([cause, rollbackError], "RECOVERY_ROLLBACK_FAILED");
+  }
+}
+
 export async function registerAccount(
   input: { name: string; password: string; avatarKey: number; bucket: string },
   ports: AuthPorts,
@@ -80,18 +96,14 @@ export async function recoverAccount(
   try {
     await ports.updatePassword(account.userId, input.newPassword);
   } catch (passwordError) {
-    try {
-      if (await ports.replaceRecoveryDigest(account.userId, next, expected)) {
-        throw passwordError;
-      }
-    } catch (rollbackError) {
-      if (rollbackError === passwordError) throw passwordError;
-      throw new AggregateError([passwordError, rollbackError], "RECOVERY_ROLLBACK_FAILED");
-    }
-    throw new AggregateError([passwordError], "RECOVERY_ROLLBACK_FAILED");
+    await restoreRecoveryDigest(ports, account.userId, next, expected, passwordError);
   }
 
-  await ports.signIn(account.authEmail, input.newPassword);
+  try {
+    await ports.signIn(account.authEmail, input.newPassword);
+  } catch (signInError) {
+    await restoreRecoveryDigest(ports, account.userId, next, expected, signInError);
+  }
   return { recoveryCode };
 }
 

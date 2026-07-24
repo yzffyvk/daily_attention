@@ -47,7 +47,19 @@ export async function postAuth<T>(path: string, body: unknown): Promise<ApiResul
     body: JSON.stringify(body),
   });
   try {
-    return (await response.json()) as ApiResult<T>;
+    const result = await response.json() as ApiResult<T> & {
+      error?: { message?: string; details?: { field?: string } };
+    };
+    if (!result.ok) {
+      return {
+        ok: false,
+        error: {
+          message: result.error?.message || "服务暂时不可用，请稍后再试",
+          field: result.error?.details?.field,
+        },
+      };
+    }
+    return result;
   } catch {
     return { ok: false, error: { message: "服务暂时不可用，请稍后再试" } };
   }

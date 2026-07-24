@@ -27,26 +27,16 @@ export async function PATCH(request: Request) {
     const currentProfile = await adapter.currentProfile(user.id);
     const nextName = parsed.data.name ?? currentProfile.displayName;
     const nextAvatarKey = parsed.data.avatarKey ?? currentProfile.avatarKey;
-
-    if (parsed.data.name) {
-      const updated = await updateProfile(
-        {
-          userId: user.id,
-          currentName: currentProfile.displayName,
-          nextName,
-          nextAvatarKey,
-          currentPassword: parsed.data.currentPassword!,
-        },
-        adapter.ports,
-      );
-      return authSuccess({ profile: updated }, requestId);
-    }
-
-    const updated = await adapter.ports.updateProfileIdentity({
-      userId: user.id,
-      loginName: nextName,
-      avatarKey: nextAvatarKey,
-    });
+    const updated = await updateProfile(
+      {
+        userId: user.id,
+        currentName: currentProfile.displayName,
+        nextName,
+        nextAvatarKey,
+        currentPassword: parsed.data.currentPassword!,
+      },
+      adapter.ports,
+    );
     return authSuccess({ profile: updated }, requestId);
   } catch (error) {
     return authFailure(error, requestId);

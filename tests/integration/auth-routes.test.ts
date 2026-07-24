@@ -78,4 +78,87 @@ describe("authentication routes", () => {
     expect(response.body.error.code).toBe("VALIDATION_ERROR");
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
   });
+
+  it("returns meaningful no-store failures without leaking sensitive profile fields", async () => {
+    const session = new ApiSession();
+    const unauthenticatedProfile = await session.request("/api/me");
+    expect(unauthenticatedProfile.status).toBe(401);
+    expect(unauthenticatedProfile.body.error.code).toBe("UNAUTHORIZED");
+    expect(unauthenticatedProfile.headers.get("Cache-Control")).toBe("private, no-store");
+
+    const unauthenticatedRotation = await session.post("/api/auth/recovery-code/rotate", { currentPassword: "password123" });
+    expect(unauthenticatedRotation.status).toBe(401);
+    expect(unauthenticatedRotation.body.error.code).toBe("UNAUTHORIZED");
+    expect(unauthenticatedRotation.headers.get("Cache-Control")).toBe("private, no-store");
+
+    const malformed = await session.request("/api/auth/register", { method: "POST", body: "{" });
+    expect(malformed.status).toBe(422);
+    expect(malformed.body.error).toMatchObject({ code: "VALIDATION_ERROR", details: {} });
+    expect(malformed.headers.get("Cache-Control")).toBe("private, no-store");
+
+    const name = `私密-${crypto.randomUUID().slice(0, 12)}`;
+    const registered = await session.post("/api/auth/register", { name, password: "password123", avatarKey: 2 });
+    expect(registered.status).toBe(201);
+    const profile = await session.request("/api/me");
+    expect(profile.status).toBe(200);
+    expect(profile.body.data.profile).toEqual(expect.objectContaining({ displayName: name, avatarKey: 2 }));
+    expect(JSON.stringify(profile.body)).not.toMatch(/auth_email|internal\.invalid|recovery_digest/i);
+
+    const missingPassword = await session.request("/api/me", {
+      method: "PATCH",
+      body: JSON.stringify({ avatarKey: 3 }),
+    });
+    expect(missingPassword.status).toBe(422);
+    expect(missingPassword.body.error).toMatchObject({
+      code: "VALIDATION_ERROR",
+      details: { field: "currentPassword" },
+    });
+
+    const wrongPassword = await session.request("/api/me", {
+      method: "PATCH",
+      body: JSON.stringify({ avatarKey: 3, currentPassword: "wrong-password" }),
+    });
+    expect(wrongPassword.status).toBe(401);
+    expect(wrongPassword.body.error.code).toBe("INVALID_CREDENTIALS");
+
+    const changedAvatar = await session.request("/api/me", {
+      method: "PATCH",
+      body: JSON.stringify({ avatarKey: 3, currentPassword: "password123" }),
+    });
+    expect(changedAvatar.status).toBe(200);
+    expect(changedAvatar.body.data.profile).toMatchObject({ id: profile.body.data.profile.id, displayName: name, avatarKey: 3 });
+  });
+
+  it("rate-limits by verified Cloudflare identity rather than spoofed X-Forwarded-For", async () => {
+    const session = new ApiSession();
+    const cloudflareIp = `cf-${crypto.randomUUID()}`;
+    const headers = { "CF-Connecting-IP": cloudflareIp };
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const response = await session.request("/api/auth/register", {
+        method: "POST",
+        headers: { ...headers, "X-Forwarded-For": `198.51.100.${attempt}` },
+        body: JSON.stringify({
+          name: `限流-${crypto.randomUUID().slice(0, 12)}`,
+          password: "password123",
+          avatarKey: 1,
+        }),
+      });
+      expect(response.status).toBe(201);
+    }
+
+    const spoofedXff = await session.request("/api/auth/register", {
+      method: "POST",
+      headers: { ...headers, "X-Forwarded-For": "203.0.113.99" },
+      body: JSON.stringify({ name: `限流-${crypto.randomUUID().slice(0, 12)}`, password: "password123", avatarKey: 1 }),
+    });
+    expect(spoofedXff.status).toBe(429);
+    expect(spoofedXff.body.error.code).toBe("RATE_LIMITED");
+
+    const differentVerifiedIp = await session.request("/api/auth/register", {
+      method: "POST",
+      headers: { "CF-Connecting-IP": `${cloudflareIp}-different`, "X-Forwarded-For": "203.0.113.99" },
+      body: JSON.stringify({ name: `限流-${crypto.randomUUID().slice(0, 12)}`, password: "password123", avatarKey: 1 }),
+    });
+    expect(differentVerifiedIp.status).toBe(201);
+  });
 });

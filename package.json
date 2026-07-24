@@ -11,7 +11,7 @@
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
     "test:unit": "vitest run tests/unit",
-    "test:integration": "start-server-and-test 'npm run dev -- --hostname 127.0.0.1 --port 3100' http://127.0.0.1:3100 'vitest run tests/integration'",
+    "test:integration": "sh -c 'set -e; backup=$(mktemp); cp .dev.vars \"$backup\"; cleanup() { mv \"$backup\" .dev.vars; npx supabase db reset >/dev/null; }; trap cleanup EXIT; npx supabase db reset; npx supabase status -o env | sed -n -e s/^API_URL=/NEXT_PUBLIC_SUPABASE_URL=/p -e s/^PUBLISHABLE_KEY=/NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=/p -e s/^SECRET_KEY=/SUPABASE_SECRET_KEY=/p > .dev.vars; echo AUTH_RATE_LIMIT_PEPPER=integration-test-rate-limit-pepper >> .dev.vars; npx start-server-and-test \"npm run dev -- --hostname 127.0.0.1 --port 3100\" http://127.0.0.1:3100 \"vitest run tests/integration\"'",
     "test:e2e": "playwright test",
     "test:rendered": "node --test tests/rendered-html.test.mjs",
     "typecheck": "tsc --noEmit",

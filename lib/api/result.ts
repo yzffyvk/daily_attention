@@ -4,8 +4,10 @@ export type ApiFailure = {
   error: {
     code: string;
     message: string;
-    field?: string;
-    retryAfterSeconds?: number;
+    details?: {
+      field?: string;
+      retryAfterSeconds?: number;
+    };
   };
   requestId: string;
 };
@@ -20,5 +22,5 @@ export const apiFailure = (
   code: string,
   message: string,
   requestId = crypto.randomUUID(),
-  details: Pick<ApiFailure["error"], "field" | "retryAfterSeconds"> = {},
-): ApiFailure => ({ ok: false, error: { code, message, ...details }, requestId });
+  details: NonNullable<ApiFailure["error"]["details"]> = {},
+): ApiFailure => ({ ok: false, error: { code, message, details }, requestId });
