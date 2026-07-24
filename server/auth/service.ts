@@ -73,9 +73,24 @@ export async function recoverAccount(
   if (!sameDigest(expected, supplied)) throw new Error("INVALID_RECOVERY");
 
   const recoveryCode = randomRecoveryCode();
-  await ports.updatePassword(account.userId, input.newPassword);
-  const replaced = await ports.replaceRecoveryDigest(account.userId, expected, await digest(recoveryCode));
+  const next = await digest(recoveryCode);
+  const replaced = await ports.replaceRecoveryDigest(account.userId, expected, next);
   if (!replaced) throw new Error("RECOVERY_ALREADY_USED");
+
+  try {
+    await ports.updatePassword(account.userId, input.newPassword);
+  } catch (passwordError) {
+    try {
+      if (await ports.replaceRecoveryDigest(account.userId, next, expected)) {
+        throw passwordError;
+      }
+    } catch (rollbackError) {
+      if (rollbackError === passwordError) throw passwordError;
+      throw new AggregateError([passwordError, rollbackError], "RECOVERY_ROLLBACK_FAILED");
+    }
+    throw new AggregateError([passwordError], "RECOVERY_ROLLBACK_FAILED");
+  }
+
   await ports.signIn(account.authEmail, input.newPassword);
   return { recoveryCode };
 }

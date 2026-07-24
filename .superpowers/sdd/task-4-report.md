@@ -80,3 +80,54 @@ Result: PASS, 4 test files and 7 tests.
 1. Global `npm run typecheck` remains blocked by the pre-existing legacy Cloudflare type setup. It reproduced unchanged before and after Task 4 and is outside this task's permitted scope.
 2. The exact prescribed rate-limit migration locks an existing bucket row, but two first-use requests for the same absent `(bucket_digest, action)` can race to insert and one can receive a unique-key error. A follow-up should use an `INSERT ... ON CONFLICT` acquisition step before row locking; existing database tests do not exercise this concurrency case.
 3. Auth tests cover the requested compensation and successful recovery rotation paths. Invalid-recovery, stale-replacement, and cookie-client behavior remain appropriate integration coverage for Task 5 rather than duplicate unit coverage here.
+
+## Concurrency-Fix Follow-Up
+
+### Scope And Rationale
+
+- `recoverAccount` now generates and digests the next code, then compare-and-swaps the old digest to the next digest before calling `updatePassword`. A concurrent loser receives `RECOVERY_ALREADY_USED` before changing the password or signing in.
+- If `updatePassword` rejects after the successful claim, the service compensates with a compare-and-swap from the claimed next digest back to the old digest. A successful compensation rethrows the password error. A rejected or false compensation result throws `RECOVERY_ROLLBACK_FAILED` as an `AggregateError`, containing the password failure and, where present, the rollback failure. It never signs in or returns a recovery code on either failure path.
+- `consume_auth_rate_limit` now first inserts attempt one with `on conflict do nothing`; an insert winner returns immediately. A conflict loser then locks the existing row before applying the prior window/count/block logic. PostgreSQL waits on an uncommitted unique-key conflict, so simultaneous first-use calls serialize instead of leaking a unique-key error.
+
+### RED Evidence
+
+Auth regressions were added before the service edit and run with:
+
+```bash
+npm run test:unit -- tests/unit/auth/service.test.ts
+```
+
+Result: expected RED, 4 failed auth tests (10 unit tests total). The failures proved the old implementation called `updatePassword` before `replaceRecoveryDigest`, changed the password after a CAS loser, performed no rollback after a password failure, and surfaced the original password error when rollback failure needed an explicit recovery state.
+
+Rate-limit database behavior coverage was added before the migration edit and run after a local reset with:
+
+```bash
+NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase test db
+```
+
+Result: expected RED, 4 failing rate-limit assertions. The first call failed with `window_started_at is of type timestamp with time zone but expression is of type time with time zone`: `current_time` resolved to PostgreSQL's special time keyword rather than the intended PL/pgSQL value. This prevented a first request from recording attempt one. A single-connection pgTAP transaction cannot deterministically reproduce the absent-row insert race, so no SQL-text assertion was used as a stand-in for concurrency.
+
+### GREEN Evidence And Tests
+
+- `npx vitest run tests/unit/auth/service.test.ts tests/unit/rate-limit/service.test.ts`: PASS, 2 files and 6 tests. Auth coverage proves CAS-before-password call order, loser no-password-change behavior, successful rollback, and explicit rollback failure handling.
+- `NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase db reset`: PASS after applying migrations through `202607230003`.
+- `NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase test db`: PASS, 4 files and 78 pgTAP assertions. `supabase/tests/database/rate-limit.test.sql` covers first attempt, within-window increments, threshold blocking with a positive retry interval, and window reset.
+- A non-committed real two-session local probe held the first function call's transaction open for two seconds while the second first-use call started. The second call returned `t|0` after `real 1.80` seconds, and the final bucket `attempt_count` was `2`; it did not raise a unique-key error. The probe row was deleted afterward.
+- `npm run test:unit`: PASS, 4 files and 10 tests.
+- `npm run lint`: PASS.
+- `npm test`: PASS; Vinext build completed and 7 rendered tests passed.
+- `git diff --check`: PASS.
+
+### Files Changed
+
+- `server/auth/service.ts`
+- `tests/unit/auth/service.test.ts`
+- `supabase/migrations/202607230003_rate_limit_function.sql`
+- `supabase/tests/database/rate-limit.test.sql`
+- `.superpowers/sdd/task-4-report.md`
+
+### Self-Review And Residual Concerns
+
+- The recovery digest is consumed before an external password change, so a CAS loser cannot change the password. The compensating CAS is conditional on the claimed digest, so it cannot overwrite a later recovery result.
+- There is no cross-system transaction with Supabase Auth. If `updatePassword` rejects after the provider actually changed the password and the digest rollback succeeds, the old recovery code may remain valid for a password that may already have changed. The operation still rejects and never signs in or returns a replacement code; resolving this ambiguity needs provider-level idempotency or a dedicated recovery transaction design.
+- If compensation fails, the digest remains claimed and the service throws `RECOVERY_ROLLBACK_FAILED` with causal errors for operational handling. No retry loop is attempted because it could overwrite a newer recovery claim.

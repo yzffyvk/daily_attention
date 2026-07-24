@@ -17,6 +17,21 @@ function ports(): AuthPorts {
   };
 }
 
+async function recoveryDigest() {
+  return new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode("0123456789ABCDEFGHJKMNPQRS")),
+  );
+}
+
+function recoveryInput() {
+  return {
+    name: "学习者",
+    recoveryCode: "01234-56789-ABCDE-FGHJK-MNPQRS",
+    newPassword: "newpassword123",
+    bucket: "recover-key",
+  };
+}
+
 describe("auth service", () => {
   it("compensates when profile completion fails", async () => {
     const adapter = ports();
@@ -30,20 +45,59 @@ describe("auth service", () => {
     expect(adapter.deleteAuthUser).toHaveBeenCalledWith("user-1");
   });
 
-  it("rotates the recovery digest after changing the password", async () => {
+  it("claims the recovery digest before changing the password", async () => {
     const adapter = ports();
-    vi.mocked(adapter.readRecoveryDigest).mockResolvedValue(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("0123456789ABCDEFGHJKMNPQRS"))));
-    const result = await recoverAccount(
-      {
-        name: "学习者",
-        recoveryCode: "01234-56789-ABCDE-FGHJK-MNPQRS",
-        newPassword: "newpassword123",
-        bucket: "recover-key",
-      },
-      adapter,
+    vi.mocked(adapter.readRecoveryDigest).mockResolvedValue(await recoveryDigest());
+    const result = await recoverAccount(recoveryInput(), adapter);
+
+    expect(adapter.replaceRecoveryDigest.mock.invocationCallOrder[0]).toBeLessThan(
+      adapter.updatePassword.mock.invocationCallOrder[0],
     );
     expect(adapter.updatePassword).toHaveBeenCalledWith("user-1", "newpassword123");
     expect(adapter.replaceRecoveryDigest).toHaveBeenCalledOnce();
     expect(result.recoveryCode.replace(/-/g, "")).toHaveLength(26);
+  });
+
+  it("does not change the password when another recovery claims the digest", async () => {
+    const adapter = ports();
+    vi.mocked(adapter.readRecoveryDigest).mockResolvedValue(await recoveryDigest());
+    vi.mocked(adapter.replaceRecoveryDigest).mockResolvedValue(false);
+
+    await expect(recoverAccount(recoveryInput(), adapter)).rejects.toThrow("RECOVERY_ALREADY_USED");
+
+    expect(adapter.updatePassword).not.toHaveBeenCalled();
+    expect(adapter.signIn).not.toHaveBeenCalled();
+  });
+
+  it("restores the recovery digest when changing the password fails", async () => {
+    const adapter = ports();
+    const expected = await recoveryDigest();
+    const passwordFailure = new Error("password update failed");
+    vi.mocked(adapter.readRecoveryDigest).mockResolvedValue(expected);
+    vi.mocked(adapter.updatePassword).mockRejectedValue(passwordFailure);
+    vi.mocked(adapter.replaceRecoveryDigest).mockResolvedValueOnce(true).mockResolvedValueOnce(true);
+
+    await expect(recoverAccount(recoveryInput(), adapter)).rejects.toThrow(passwordFailure);
+
+    expect(adapter.replaceRecoveryDigest).toHaveBeenCalledTimes(2);
+    const [, claimedDigest] = vi.mocked(adapter.replaceRecoveryDigest).mock.calls[0].slice(1);
+    expect(vi.mocked(adapter.replaceRecoveryDigest).mock.calls[1]).toEqual([
+      "user-1",
+      claimedDigest,
+      expected,
+    ]);
+    expect(adapter.signIn).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed recovery rollback without signing in", async () => {
+    const adapter = ports();
+    vi.mocked(adapter.readRecoveryDigest).mockResolvedValue(await recoveryDigest());
+    vi.mocked(adapter.updatePassword).mockRejectedValue(new Error("password update failed"));
+    vi.mocked(adapter.replaceRecoveryDigest).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+    await expect(recoverAccount(recoveryInput(), adapter)).rejects.toThrow("RECOVERY_ROLLBACK_FAILED");
+
+    expect(adapter.replaceRecoveryDigest).toHaveBeenCalledTimes(2);
+    expect(adapter.signIn).not.toHaveBeenCalled();
   });
 });
