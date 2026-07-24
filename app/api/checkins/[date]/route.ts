@@ -6,6 +6,10 @@ import {
   createCheckInRequestContext,
 } from "@/server/checkins/http";
 import { saveCheckIn } from "@/server/checkins/service";
+import {
+  createCheckInImageUrl,
+  removeCheckInImage,
+} from "@/server/storage/service";
 
 type RouteContext = {
   params: Promise<{ date: string }>;
@@ -57,7 +61,10 @@ export async function GET(_request: Request, routeContext: RouteContext) {
         404,
       );
     }
-    return checkInSuccess(record, requestId);
+    const imageUrl = record.imagePath
+      ? await createCheckInImageUrl(record.imagePath, context.supabase)
+      : null;
+    return checkInSuccess({ ...record, imageUrl }, requestId);
   } catch (error) {
     return checkInServiceFailure(error, requestId);
   }
@@ -101,6 +108,10 @@ export async function PUT(request: Request, routeContext: RouteContext) {
       );
     }
 
+    const previous = await context.repository.findByDate(
+      context.userId,
+      parsedDate.date,
+    );
     const result = await saveCheckIn(
       context.userId,
       parsedDate.date,
@@ -114,6 +125,16 @@ export async function PUT(request: Request, routeContext: RouteContext) {
         requestId,
         409,
         { current: result.current },
+      );
+    }
+    if (
+      previous?.imagePath &&
+      previous.imagePath !== result.record.imagePath
+    ) {
+      await removeCheckInImage(
+        context.userId,
+        previous.imagePath,
+        context.supabase,
       );
     }
     return checkInSuccess(result.record, requestId);
