@@ -62,6 +62,7 @@ describe("check-in image paths", () => {
 
     await expect(
       createCheckInImageUrl(
+        "user-1",
         "user-1/2026-07-23/file.webp",
         supabaseStorage({ createSignedUrl }),
       ),
@@ -70,6 +71,19 @@ describe("check-in image paths", () => {
       "user-1/2026-07-23/file.webp",
       600,
     );
+  });
+
+  it("rejects a foreign read path before calling Storage", async () => {
+    const createSignedUrl = vi.fn();
+
+    await expect(
+      createCheckInImageUrl(
+        "user-1",
+        "user-2/2026-07-23/file.webp",
+        supabaseStorage({ createSignedUrl }),
+      ),
+    ).rejects.toThrow("FORBIDDEN_IMAGE_PATH");
+    expect(createSignedUrl).not.toHaveBeenCalled();
   });
 
   it("deletes only the authenticated user's object", async () => {

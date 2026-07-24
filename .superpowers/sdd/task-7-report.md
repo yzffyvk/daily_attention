@@ -71,3 +71,27 @@ The progress ledger and workspace `.dev.vars` were not modified.
 
 - Repository-wide typechecking remains blocked by the known legacy Cloudflare ambient declarations scheduled for Task 11; Task 7 files are type-clean.
 - If deletion of an old object fails after the database update has committed, the route returns the established sanitized `503`; this can leave a private orphaned old object. The task does not define a retry/reconciliation mechanism, so no unrelated background cleanup was added.
+
+## Review Fixes
+
+Status: RESOLVED
+
+- `PUT /api/checkins/[date]` now validates each non-null `imagePath` with exact first-segment ownership before repository lookup/save. A foreign path returns `403 FORBIDDEN_IMAGE_PATH` with `Cache-Control: private, no-store` and does not call `saveCheckIn`.
+- Old-image cleanup now catches a Storage deletion rejection after a committed save, logs `requestId`, user/path context, and the server error, then returns the saved record. No background cleanup mechanism was added.
+- `createCheckInImageUrl` now receives `userId` and asserts ownership before asking Supabase Storage for a signed read URL.
+- The prior cleanup `503` concern above is resolved for successful database saves; a failed cleanup may still leave a private orphaned object, by design, while the successful record is returned.
+
+## Review Fix Verification
+
+1. `npm run test:unit -- tests/unit/storage/service.test.ts tests/unit/checkins/date-route.test.ts`
+   - RED before implementation: 15 files, 52 tests; 4 failures covering signed-read ownership, best-effort cleanup, and foreign PUT rejection.
+2. `npm run test:unit -- tests/unit/storage/service.test.ts tests/unit/checkins/date-route.test.ts`
+   - PASS after implementation: 15 files, 52 tests.
+3. `npm run test:integration`
+   - PASS: 3 files, 9 tests. Includes user two attempting to persist user one's uploaded image path, receiving `403 FORBIDDEN_IMAGE_PATH`, and subsequently receiving an image-free check-in GET response.
+4. `npm run lint`
+   - PASS.
+5. `git diff --check`
+   - PASS.
+6. `npx supabase test db`
+   - Not run: this review fix changes no database schema, migration, query, or Storage RLS policy.

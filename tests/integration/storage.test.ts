@@ -72,6 +72,20 @@ describe("private check-in image storage", () => {
     expect(read.body.data.imageUrl).toEqual(expect.stringContaining("/storage/v1/object/sign/"));
     expect((await fetch(read.body.data.imageUrl)).status).toBe(200);
 
+    expect(
+      (await userTwo.session.put(`/api/checkins/${date}`, checkIn(null, null))).status,
+    ).toBe(200);
+    const foreignPersist = await userTwo.session.put(
+      `/api/checkins/${date}`,
+      checkIn(path, 1),
+    );
+    expect(foreignPersist.status).toBe(403);
+    expect(foreignPersist.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(foreignPersist.body.error.code).toBe("FORBIDDEN_IMAGE_PATH");
+    const userTwoRecord = await userTwo.session.get(`/api/checkins/${date}`);
+    expect(userTwoRecord.status).toBe(200);
+    expect(userTwoRecord.body.data).toMatchObject({ imagePath: null, imageUrl: null, version: 1 });
+
     const forbidden = await userTwo.session.request("/api/uploads/checkin-image", {
       method: "DELETE",
       body: JSON.stringify({ path }),

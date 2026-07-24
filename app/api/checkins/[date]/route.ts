@@ -7,6 +7,7 @@ import {
 } from "@/server/checkins/http";
 import { saveCheckIn } from "@/server/checkins/service";
 import {
+  assertOwnedImagePath,
   createCheckInImageUrl,
   removeCheckInImage,
 } from "@/server/storage/service";
@@ -62,7 +63,11 @@ export async function GET(_request: Request, routeContext: RouteContext) {
       );
     }
     const imageUrl = record.imagePath
-      ? await createCheckInImageUrl(record.imagePath, context.supabase)
+      ? await createCheckInImageUrl(
+          context.userId,
+          record.imagePath,
+          context.supabase,
+        )
       : null;
     return checkInSuccess({ ...record, imageUrl }, requestId);
   } catch (error) {
@@ -107,6 +112,24 @@ export async function PUT(request: Request, routeContext: RouteContext) {
         { field: issue.path[0]?.toString() },
       );
     }
+    if (parsedInput.data.imagePath) {
+      try {
+        assertOwnedImagePath(context.userId, parsedInput.data.imagePath);
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message === "FORBIDDEN_IMAGE_PATH"
+        ) {
+          return checkInFailure(
+            "FORBIDDEN_IMAGE_PATH",
+            "无权使用此图片",
+            requestId,
+            403,
+          );
+        }
+        throw error;
+      }
+    }
 
     const previous = await context.repository.findByDate(
       context.userId,
@@ -131,11 +154,21 @@ export async function PUT(request: Request, routeContext: RouteContext) {
       previous?.imagePath &&
       previous.imagePath !== result.record.imagePath
     ) {
-      await removeCheckInImage(
-        context.userId,
-        previous.imagePath,
-        context.supabase,
-      );
+      try {
+        await removeCheckInImage(
+          context.userId,
+          previous.imagePath,
+          context.supabase,
+        );
+      } catch (error) {
+        console.error("check-in image cleanup failed", {
+          requestId,
+          userId: context.userId,
+          previousImagePath: previous.imagePath,
+          savedImagePath: result.record.imagePath,
+          error,
+        });
+      }
     }
     return checkInSuccess(result.record, requestId);
   } catch (error) {

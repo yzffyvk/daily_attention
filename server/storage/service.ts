@@ -49,9 +49,11 @@ export async function createCheckInUpload(
 }
 
 export async function createCheckInImageUrl(
+  userId: string,
   path: string,
   supabase: SupabaseClient<Database>,
 ) {
+  assertOwnedImagePath(userId, path);
   const { data, error } = await supabase.storage
     .from(CHECK_IN_IMAGE_BUCKET)
     .createSignedUrl(path, SIGNED_READ_URL_SECONDS);

@@ -5,21 +5,33 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   remove: vi.fn(),
   createUrl: vi.fn(),
+  assertOwned: vi.fn((userId: string, path: string) => {
+    if (path.split("/", 1)[0] !== userId) {
+      throw new Error("FORBIDDEN_IMAGE_PATH");
+    }
+  }),
 }));
 
 vi.mock("@/server/checkins/http", () => ({
   checkInFailure: (code: string, message: string, requestId: string, status: number, details = {}) =>
-    Response.json({ ok: false, error: { code, message, details }, requestId }, { status }),
+    Response.json(
+      { ok: false, error: { code, message, details }, requestId },
+      { status, headers: { "Cache-Control": "private, no-store" } },
+    ),
   checkInServiceFailure: (error: unknown, requestId: string) =>
     Response.json({ ok: false, error: { error }, requestId }, { status: 503 }),
   checkInSuccess: (data: unknown, requestId: string) =>
-    Response.json({ ok: true, data, requestId }),
+    Response.json(
+      { ok: true, data, requestId },
+      { headers: { "Cache-Control": "private, no-store" } },
+    ),
   createCheckInRequestContext: mocks.context,
 }));
 
 vi.mock("@/server/checkins/service", () => ({ saveCheckIn: mocks.save }));
 
 vi.mock("@/server/storage/service", () => ({
+  assertOwnedImagePath: mocks.assertOwned,
   createCheckInImageUrl: mocks.createUrl,
   removeCheckInImage: mocks.remove,
 }));
@@ -123,5 +135,57 @@ describe("check-in image replacement cleanup", () => {
 
     expect(response?.status).toBe(200);
     expect(mocks.remove).not.toHaveBeenCalled();
+  });
+
+  it("returns the saved record when post-commit old-image cleanup fails", async () => {
+    const supabase = {};
+    const record = { imagePath: nextImagePath, version: 2 };
+    mocks.context.mockResolvedValue({
+      userId: "user-1",
+      supabase,
+      repository: { findByDate: vi.fn().mockResolvedValue({ imagePath: previousImagePath }) },
+    });
+    mocks.save.mockResolvedValue({ ok: true, record });
+    mocks.remove.mockRejectedValue(new Error("storage unavailable"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await PUT(request(), routeContext());
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toMatchObject({ ok: true, data: record });
+    expect(mocks.remove).toHaveBeenCalledWith("user-1", previousImagePath, supabase);
+    expect(consoleError).toHaveBeenCalledWith(
+      "check-in image cleanup failed",
+      expect.objectContaining({ previousImagePath, savedImagePath: nextImagePath }),
+    );
+    consoleError.mockRestore();
+  });
+
+  it("rejects a foreign image path before attempting a save", async () => {
+    mocks.context.mockResolvedValue({
+      userId: "user-1",
+      supabase: {},
+      repository: { findByDate: vi.fn() },
+    });
+
+    const response = await PUT(
+      new Request("https://example.test/api/checkins/2026-07-23", {
+        method: "PUT",
+        body: JSON.stringify({
+          ...input,
+          imagePath: "user-2/2026-07-23/foreign.png",
+        }),
+        headers: { "Content-Type": "application/json" },
+      }),
+      routeContext(),
+    );
+
+    expect(response?.status).toBe(403);
+    expect(response?.headers.get("Cache-Control")).toBe("private, no-store");
+    await expect(response?.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "FORBIDDEN_IMAGE_PATH" },
+    });
+    expect(mocks.save).not.toHaveBeenCalled();
   });
 });
