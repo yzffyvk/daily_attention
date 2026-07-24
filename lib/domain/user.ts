@@ -43,7 +43,7 @@ export const profilePatchSchema = z.object({
   name: normalizedNameSchema.optional(),
   currentPassword: z.string().optional(),
 }).superRefine((value, context) => {
-  if ((value.name !== undefined || value.avatarKey !== undefined) && !value.currentPassword) {
+  if (value.name !== undefined && !value.currentPassword) {
     context.addIssue({
       code: "custom",
       path: ["currentPassword"],

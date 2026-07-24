@@ -143,25 +143,26 @@ describe("authentication routes", () => {
       method: "PATCH",
       body: JSON.stringify({ avatarKey: 3 }),
     });
-    expect(missingPassword.status).toBe(422);
-    expect(missingPassword.body.error).toMatchObject({
-      code: "VALIDATION_ERROR",
-      details: { field: "currentPassword" },
+    expect(missingPassword.status).toBe(200);
+    expect(missingPassword.body.data.profile).toMatchObject({
+      id: profile.body.data.profile.id,
+      displayName: name,
+      avatarKey: 3,
     });
 
     const wrongPassword = await session.request("/api/me", {
       method: "PATCH",
-      body: JSON.stringify({ avatarKey: 3, currentPassword: "wrong-password" }),
+      body: JSON.stringify({ name: `${name}新`, avatarKey: 3, currentPassword: "wrong-password" }),
     });
     expect(wrongPassword.status).toBe(401);
     expect(wrongPassword.body.error.code).toBe("INVALID_CREDENTIALS");
 
     const changedAvatar = await session.request("/api/me", {
       method: "PATCH",
-      body: JSON.stringify({ avatarKey: 3, currentPassword: "password123" }),
+      body: JSON.stringify({ avatarKey: 4 }),
     });
     expect(changedAvatar.status).toBe(200);
-    expect(changedAvatar.body.data.profile).toMatchObject({ id: profile.body.data.profile.id, displayName: name, avatarKey: 3 });
+    expect(changedAvatar.body.data.profile).toMatchObject({ id: profile.body.data.profile.id, displayName: name, avatarKey: 4 });
   });
 
   it("rate-limits by verified Cloudflare identity rather than spoofed X-Forwarded-For", async () => {

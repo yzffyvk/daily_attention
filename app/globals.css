@@ -127,6 +127,13 @@ p {
   background: var(--paper-soft);
 }
 
+.current-account {
+  align-items: center;
+  color: var(--foreground);
+  cursor: pointer;
+  text-align: left;
+}
+
 .current-account img {
   width: 1.75rem;
   height: 1.75rem;
@@ -140,6 +147,46 @@ p {
   font-size: 0.7rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.account-menu-wrap {
+  position: relative;
+}
+
+.account-menu {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  z-index: 12;
+  display: grid;
+  width: 9.25rem;
+  gap: 0.2rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.3rem;
+  background: var(--paper);
+  box-shadow: 0 10px 26px rgba(23, 33, 29, 0.14);
+}
+
+.account-menu button {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  width: 100%;
+  min-height: 2.25rem;
+  border: 0;
+  border-radius: 5px;
+  padding: 0.45rem 0.55rem;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 0.74rem;
+  font-weight: 750;
+  text-align: left;
+}
+
+.account-menu button:hover {
+  background: var(--green-pale);
+  color: var(--green-dark);
 }
 
 .account-logout {
@@ -672,6 +719,7 @@ h2 {
 }
 
 .today-summary {
+  position: relative;
   display: flex;
   gap: 0.75rem;
   align-items: center;
@@ -1513,6 +1561,68 @@ button.calendar-cell:hover {
   gap: 0.55rem;
 }
 
+.profile-dialog {
+  width: min(100%, 34rem);
+}
+
+.profile-form {
+  display: grid;
+  gap: 1.15rem;
+}
+
+.profile-form .auth-field input {
+  min-height: 2.8rem;
+}
+
+.profile-form .avatar-fieldset {
+  margin: 0;
+}
+
+.conflict-dialog {
+  width: min(100%, 34rem);
+}
+
+.cloud-record {
+  display: grid;
+  gap: 0.35rem;
+  margin: 1rem 0 1.25rem;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 0.85rem 0;
+}
+
+.cloud-record strong {
+  font-size: 0.92rem;
+}
+
+.cloud-record span,
+.cloud-record p,
+.cloud-record-empty {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.74rem;
+  line-height: 1.55;
+}
+
+.cloud-record-empty {
+  margin: 1rem 0 1.25rem;
+}
+
+.light-toast {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 22;
+  border: 1px solid #abd4c7;
+  border-radius: 8px;
+  padding: 0.7rem 0.9rem;
+  background: var(--green-pale);
+  color: var(--green-dark);
+  font-size: 0.75rem;
+  font-weight: 800;
+  box-shadow: 0 10px 28px rgba(23, 33, 29, 0.14);
+}
+
 @keyframes celebration-in {
   from {
     opacity: 0;
@@ -1770,6 +1880,13 @@ button.calendar-cell:hover {
 
   .dialog-actions {
     display: grid;
+  }
+
+  .light-toast {
+    right: 0.7rem;
+    bottom: 0.7rem;
+    left: 0.7rem;
+    text-align: center;
   }
 }
 

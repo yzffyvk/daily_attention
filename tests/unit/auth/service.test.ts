@@ -132,14 +132,14 @@ describe("auth service", () => {
     });
   });
 
-  it("requires the current password before applying an avatar-only profile update", async () => {
+  it("requires the current password before applying a profile rename", async () => {
     const adapter = ports();
 
     await updateProfile(
       {
         userId: "user-1",
         currentName: "学习者",
-        nextName: "学习者",
+        nextName: "学习者新",
         nextAvatarKey: 5,
         currentPassword: "password123",
       },
@@ -149,7 +149,7 @@ describe("auth service", () => {
     expect(adapter.signIn).toHaveBeenCalledWith("internal@internal.invalid", "password123");
     expect(adapter.updateProfileIdentity).toHaveBeenCalledWith({
       userId: "user-1",
-      loginName: "学习者",
+      loginName: "学习者新",
       avatarKey: 5,
     });
   });
