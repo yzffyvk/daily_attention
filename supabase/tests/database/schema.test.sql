@@ -1,5 +1,5 @@
 begin;
-select plan(17);
+select plan(22);
 
 select has_schema('private', 'private schema exists');
 select has_table('public', 'profiles', 'profiles exists');
@@ -40,6 +40,20 @@ select ok(exists (
     and c.conname = 'check_ins_source_url_check'
     and c.contype = 'c'
 ), 'source URL is constrained');
+select is(
+  (
+    select pg_get_constraintdef(c.oid, true)
+    from pg_constraint c
+    join pg_class t on t.oid = c.conrelid
+    join pg_namespace n on n.oid = t.relnamespace
+    where n.nspname = 'public'
+      and t.relname = 'check_ins'
+      and c.conname = 'check_ins_image_path_check'
+      and c.contype = 'c'
+  ),
+  'CHECK (image_path IS NULL OR length(TRIM(BOTH FROM image_path)) > 0 AND length(image_path) <= 1024)',
+  'image paths allow NULL or non-blank trimmed paths up to 1024 characters'
+);
 
 insert into auth.users (id)
 values ('00000000-0000-0000-0000-000000000201');
@@ -78,6 +92,35 @@ select throws_ok(
   '23514',
   'new row for relation "check_ins" violates check constraint "check_ins_image_path_check"',
   'check-ins reject image paths longer than 1024 characters'
+);
+select throws_ok(
+  $$insert into public.check_ins (user_id, checkin_date, attention, image_path)
+    values ('00000000-0000-0000-0000-000000000201', '2026-07-27', 'Valid attention', '')$$,
+  '23514',
+  'new row for relation "check_ins" violates check constraint "check_ins_image_path_check"',
+  'check-ins reject empty image paths'
+);
+select throws_ok(
+  $$insert into public.check_ins (user_id, checkin_date, attention, image_path)
+    values ('00000000-0000-0000-0000-000000000201', '2026-07-28', 'Valid attention', '   ')$$,
+  '23514',
+  'new row for relation "check_ins" violates check constraint "check_ins_image_path_check"',
+  'check-ins reject whitespace-only image paths'
+);
+select lives_ok(
+  $$insert into public.check_ins (user_id, checkin_date, attention, image_path)
+    values ('00000000-0000-0000-0000-000000000201', '2026-07-29', 'Valid attention', null)$$,
+  'check-ins allow NULL image paths'
+);
+select lives_ok(
+  $$insert into public.check_ins (user_id, checkin_date, attention, image_path)
+    values (
+      '00000000-0000-0000-0000-000000000201',
+      '2026-07-30',
+      'Valid attention',
+      '00000000-0000-0000-0000-000000000201/2026-07-30/image.webp'
+    )$$,
+  'check-ins allow valid owner-style image paths'
 );
 
 select * from finish();

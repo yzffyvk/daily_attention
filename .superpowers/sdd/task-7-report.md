@@ -110,3 +110,30 @@ Status: RESOLVED
 - `git diff --check`
   - PASS: exit code 0, no output.
 - Integration tests were not run because this fix changes only domain validation and route branching; no database, Storage API, migration, or integration contract changed.
+
+## Focused Task 7 Database Integrity Fix
+
+### Status
+
+COMPLETE
+
+### Changes
+
+- Added forward-only migration `supabase/migrations/202607240001_checkin_image_path_constraint.sql`.
+- Replaced `check_ins_image_path_check` so `image_path` accepts `NULL` or a non-blank trimmed path, while retaining the 1024-character maximum.
+- Added an exact `pg_constraint` definition assertion and behavioral pgTAP coverage for empty, whitespace-only, `NULL`, valid owner-style, and overlong image paths.
+- The progress ledger was not modified.
+
+### TDD And Verification
+
+- RED: `NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase test db` against the pre-migration local schema failed only the new catalog assertion and empty/whitespace behavior cases; existing assertions passed.
+- `NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase migration up --local`: PASS; applied `202607240001_checkin_image_path_constraint.sql` without resetting fixtures.
+- `NPM_CONFIG_UPDATE_NOTIFIER=false npx supabase test db`: PASS; 4 files, 97 assertions.
+- `NPM_CONFIG_UPDATE_NOTIFIER=false npm run test:unit -- tests/unit/domain/checkin.test.ts tests/unit/checkins/date-route.test.ts`: PASS; 15 files, 54 tests.
+- `NPM_CONFIG_UPDATE_NOTIFIER=false npm run test:integration`: PASS; 3 files, 9 tests.
+- `NPM_CONFIG_UPDATE_NOTIFIER=false npm run lint`: PASS.
+- `git diff --check`: PASS.
+
+### Concerns
+
+None identified. The migration applied cleanly to the current local database, and all new database behavior tests run inside the existing rollback transaction.
