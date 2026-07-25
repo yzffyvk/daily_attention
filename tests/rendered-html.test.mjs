@@ -160,3 +160,32 @@ test("defines compact responsive calendar, sticky controls, and reduced-motion f
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);
   assert.doesNotMatch(styles, /border-radius:\s*(1[0-9]|[2-9][0-9])px/);
 });
+
+test("renders phone-oriented authentication forms", async () => {
+  const [loginForm, registerForm, recoverForm, loginPage, registerPage, recoverPage] = await Promise.all([
+    readFile(new URL("../features/auth/login-form.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../features/auth/register-form.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../features/auth/recover-form.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/(auth)/login/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/(auth)/register/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/(auth)/recover/page.tsx", import.meta.url), "utf8"),
+  ]);
+
+  for (const form of [loginForm, registerForm, recoverForm]) {
+    assert.match(form, /手机号/);
+    assert.match(form, /inputMode="numeric"/);
+    assert.match(form, /autoComplete="tel"/);
+    assert.match(form, /maxLength=\{11\}/);
+    assert.match(form, /replace\(\/\\D\/gu, ""\)/);
+    assert.doesNotMatch(form, /autoComplete="username"/);
+  }
+  assert.match(loginForm, /\{ phone, password \}/);
+  assert.match(registerForm, /\{ phone, password, avatarKey \}/);
+  assert.match(recoverForm, /\{ phone, recoveryCode, newPassword \}/);
+  assert.match(registerForm, /<Link className="secondary-button" href="\/login">返回登录<\/Link>/);
+  assert.doesNotMatch(registerForm, /name-field|setName|名称/);
+  assert.match(registerPage, /result\.profile\.displayName/);
+  for (const page of [loginPage, registerPage, recoverPage]) {
+    assert.match(page, /手机号/);
+  }
+});

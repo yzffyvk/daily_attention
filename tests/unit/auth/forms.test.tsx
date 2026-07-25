@@ -25,11 +25,61 @@ afterEach(() => {
 });
 
 describe("registration UI", () => {
-  it("requires a name, avatar, and matching password", async () => {
+  it("renders an accessible phone field, five avatars, and a return-login link", () => {
     render(<RegisterForm onRegistered={vi.fn()} />);
-    await userEvent.click(screen.getByRole("button", { name: "注册并进入" }));
-    expect(await screen.findByText("名称需要填写 1-20 个字符")).toBeVisible();
+    const phone = screen.getByLabelText("手机号");
+
+    expect(phone).toHaveAttribute("inputmode", "numeric");
+    expect(phone).toHaveAttribute("autocomplete", "tel");
+    expect(phone).toHaveAttribute("maxlength", "11");
+    expect(screen.queryByLabelText("名称")).not.toBeInTheDocument();
     expect(screen.getAllByRole("radio", { name: /头像/ })).toHaveLength(5);
+    expect(screen.getByRole("link", { name: "返回登录" })).toHaveAttribute("href", "/login");
+  });
+
+  it("submits a digit-only phone registration payload", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({
+      ok: true,
+      data: {
+        profile: { id: "profile-1", displayName: "Attention_001", avatarKey: 1 },
+        recoveryCode: "01234-56789-ABCDE-FGHJK-MNPQRS",
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<RegisterForm onRegistered={vi.fn()} />);
+
+    await user.type(screen.getByLabelText("手机号"), "138 0013 8000");
+    await user.click(screen.getByRole("radio", { name: "头像 1" }));
+    await user.type(screen.getByLabelText("密码"), "password123");
+    await user.type(screen.getByLabelText("确认密码"), "password123");
+    await user.click(screen.getByRole("button", { name: "注册并进入" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/auth/register",
+      expect.objectContaining({
+        body: JSON.stringify({ phone: "13800138000", password: "password123", avatarKey: 1 }),
+      }),
+    );
+  });
+
+  it("uses a phone field error ID and preserves the entered phone", async () => {
+    const user = userEvent.setup();
+    const phoneTakenResponse = authFailure({ code: "phone_exists" }, "request-id");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(phoneTakenResponse));
+    render(<RegisterForm onRegistered={vi.fn()} />);
+    const phone = screen.getByLabelText("手机号");
+    await user.type(phone, "13800138000");
+    await user.click(screen.getByRole("radio", { name: "头像 1" }));
+    await user.type(screen.getByLabelText("密码"), "password123");
+    await user.type(screen.getByLabelText("确认密码"), "password123");
+    await user.click(screen.getByRole("button", { name: "注册并进入" }));
+
+    const error = await screen.findByText("该手机号已注册");
+    expect(phone).toHaveValue("13800138000");
+    expect(phone).toHaveAttribute("aria-invalid", "true");
+    expect(error.id).toBe("register-phone-error");
+    expect(phone).toHaveAttribute("aria-describedby", error.id);
   });
 
   it("labels recovery code as one-time information", () => {
@@ -79,23 +129,6 @@ describe("registration UI", () => {
     priorFocus.remove();
   });
 
-  it("uses server field details for accessible field errors while retaining values", async () => {
-    const user = userEvent.setup();
-    const duplicateNameResponse = authFailure({ code: "23505" }, "request-id");
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(duplicateNameResponse));
-    render(<RegisterForm onRegistered={vi.fn()} />);
-    const name = screen.getByPlaceholderText("输入一个好记的名称");
-    await user.type(name, "学习者");
-    await user.click(screen.getByRole("radio", { name: "头像 1" }));
-    await user.type(screen.getByLabelText("密码"), "password123");
-    await user.type(screen.getByLabelText("确认密码"), "password123");
-    await user.click(screen.getByRole("button", { name: "注册并进入" }));
-
-    const error = await screen.findByText("这个名称已经被使用");
-    expect(name).toHaveValue("学习者");
-    expect(name).toHaveAttribute("aria-invalid", "true");
-    expect(name).toHaveAttribute("aria-describedby", error.id);
-  });
 });
 
 describe("authentication network failures", () => {
@@ -113,10 +146,14 @@ describe("authentication network failures", () => {
     const user = userEvent.setup();
     render(<LoginForm onLoggedIn={vi.fn()} />);
 
-    await user.type(screen.getByLabelText("名称"), "学习者");
+    const phone = screen.getByLabelText("手机号");
+    await user.type(phone, "13800138000");
     await user.type(screen.getByLabelText("密码"), "password123");
     await user.click(screen.getByRole("button", { name: "登录" }));
 
+    expect(phone).toHaveAttribute("inputmode", "numeric");
+    expect(phone).toHaveAttribute("autocomplete", "tel");
+    expect(phone).toHaveValue("13800138000");
     expect(await screen.findByRole("alert")).toHaveTextContent("网络连接失败，请检查网络后重试");
     expect(screen.getByRole("button", { name: "登录" })).toBeEnabled();
   });
@@ -126,7 +163,7 @@ describe("authentication network failures", () => {
     const user = userEvent.setup();
     render(<RegisterForm onRegistered={vi.fn()} />);
 
-    await user.type(screen.getByPlaceholderText("输入一个好记的名称"), "学习者");
+    await user.type(screen.getByLabelText("手机号"), "13800138000");
     await user.click(screen.getByRole("radio", { name: "头像 1" }));
     await user.type(screen.getByLabelText("密码"), "password123");
     await user.type(screen.getByLabelText("确认密码"), "password123");
@@ -141,12 +178,16 @@ describe("authentication network failures", () => {
     const user = userEvent.setup();
     render(<RecoverForm onRecovered={vi.fn()} />);
 
-    await user.type(screen.getByLabelText("名称"), "学习者");
+    const phone = screen.getByLabelText("手机号");
+    await user.type(phone, "13800138000");
     await user.type(screen.getByLabelText("恢复码"), "01234-56789-ABCDE-FGHJK-MNPQRS");
     await user.type(screen.getByLabelText("新密码"), "new-password123");
     await user.type(screen.getByLabelText("确认新密码"), "new-password123");
     await user.click(screen.getByRole("button", { name: "重设密码" }));
 
+    expect(phone).toHaveAttribute("inputmode", "numeric");
+    expect(phone).toHaveAttribute("autocomplete", "tel");
+    expect(phone).toHaveValue("13800138000");
     expect(await screen.findByRole("alert")).toHaveTextContent("网络连接失败，请检查网络后重试");
     expect(screen.getByRole("button", { name: "重设密码" })).toBeEnabled();
   });

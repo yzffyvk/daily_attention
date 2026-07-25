@@ -493,38 +493,6 @@ h2 {
   background: var(--green-pale);
 }
 
-.name-field {
-  position: relative;
-  display: grid;
-  gap: 0.45rem;
-  color: var(--foreground);
-  font-size: 0.82rem;
-  font-weight: 800;
-}
-
-.name-field input {
-  min-height: 3rem;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 0.75rem 3.2rem 0.75rem 0.9rem;
-  background: #fff;
-  outline: none;
-}
-
-.name-field input:focus {
-  border-color: var(--green);
-  box-shadow: 0 0 0 3px rgba(20, 117, 95, 0.12);
-}
-
-.name-field small {
-  position: absolute;
-  right: 0.8rem;
-  bottom: 0.95rem;
-  color: #969b97;
-  font-size: 0.64rem;
-  font-weight: 500;
-}
-
 .avatar-fieldset {
   min-width: 0;
   margin: 0;
@@ -1771,6 +1739,10 @@ button.calendar-cell:hover {
   }
 
   .register-actions .primary-button {
+    width: 100%;
+  }
+
+  .register-actions .secondary-button {
     width: 100%;
   }
 

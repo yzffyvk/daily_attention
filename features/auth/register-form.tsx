@@ -2,6 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 import { Check } from "lucide-react";
+import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { postAuth } from "./auth-card";
 
@@ -15,7 +16,7 @@ type Registered = {
 type FormError = { message: string; field?: string };
 
 export function RegisterForm({ onRegistered }: { onRegistered: (result: Registered) => void }) {
-  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
   const [avatarKey, setAvatarKey] = useState<number | null>(null);
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -24,14 +25,13 @@ export function RegisterForm({ onRegistered }: { onRegistered: (result: Register
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!name.trim()) return setError({ message: "名称需要填写 1-20 个字符" });
     if (!avatarKey) return setError({ message: "请选择头像" });
     if (password.length < 8) return setError({ message: "密码至少 8 个字符" });
     if (password !== confirmation) return setError({ message: "两次输入的密码不一致" });
     setError(null);
     setIsSubmitting(true);
     try {
-      const result = await postAuth<Registered>("/api/auth/register", { name, password, avatarKey });
+      const result = await postAuth<Registered>("/api/auth/register", { phone, password, avatarKey });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -46,10 +46,9 @@ export function RegisterForm({ onRegistered }: { onRegistered: (result: Register
 
   return (
     <form className="register-form auth-form" onSubmit={submit} noValidate>
-      <label className="name-field">
-        <span>名称</span>
-        <input aria-describedby={error?.field === "name" ? "register-name-error" : undefined} aria-invalid={error?.field === "name" || undefined} autoFocus maxLength={20} onChange={(event) => setName(event.target.value)} placeholder="输入一个好记的名称" value={name} />
-        <small>{Array.from(name).length}/20</small>
+      <label className="auth-field">
+        <span>手机号</span>
+        <input aria-describedby={error?.field === "phone" ? "register-phone-error" : undefined} aria-invalid={error?.field === "phone" || undefined} autoComplete="tel" autoFocus inputMode="numeric" maxLength={11} onChange={(event) => setPhone(event.target.value.replace(/\D/gu, ""))} value={phone} />
       </label>
       <fieldset aria-describedby={error?.field === "avatarKey" ? "register-avatarKey-error" : undefined} aria-invalid={error?.field === "avatarKey" || undefined} className="avatar-fieldset">
         <legend>选择头像</legend>
@@ -74,6 +73,7 @@ export function RegisterForm({ onRegistered }: { onRegistered: (result: Register
       {error ? <p className="login-error" id={error.field ? `register-${error.field}-error` : undefined} role="alert">{error.message}</p> : null}
       <div className="register-actions">
         <button className="primary-button" disabled={isSubmitting} type="submit">{isSubmitting ? "正在创建…" : "注册并进入"}</button>
+        <Link className="secondary-button" href="/login">返回登录</Link>
       </div>
     </form>
   );
