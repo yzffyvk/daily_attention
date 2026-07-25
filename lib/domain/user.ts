@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+export function normalizePhone(value: string) {
+  return value.normalize("NFKC").replace(/[\s-]+/gu, "");
+}
+
 export function normalizeLoginName(value: string) {
   return value.normalize("NFKC").trim().replace(/\s+/gu, " ");
 }
@@ -20,41 +24,40 @@ const recoveryCodeSchema = z
   .string()
   .transform((value) => value.replace(/-/g, "").toUpperCase())
   .pipe(z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/u, "恢复码格式不正确"));
+const phoneSchema = z
+  .string()
+  .transform(normalizePhone)
+  .pipe(z.string().regex(/^1[3-9][0-9]{9}$/u, "请输入正确的 11 位手机号"));
+
+export function toE164Phone(phone: string) {
+  return `+86${phone}`;
+}
 
 export const registerInputSchema = z.object({
-  name: normalizedNameSchema,
+  phone: phoneSchema,
   password: passwordSchema,
   avatarKey: z.number().int().min(1).max(5),
 });
 
 export const loginInputSchema = z.object({
-  name: normalizedNameSchema,
+  phone: phoneSchema,
   password: z.string(),
 });
 
 export const recoverInputSchema = z.object({
-  name: normalizedNameSchema,
+  phone: phoneSchema,
   recoveryCode: recoveryCodeSchema,
   newPassword: passwordSchema,
 });
 
 export const profilePatchSchema = z.object({
   avatarKey: z.number().int().min(1).max(5).optional(),
-  name: normalizedNameSchema.optional(),
-  currentPassword: z.string().optional(),
-}).superRefine((value, context) => {
-  if (value.name === undefined && value.avatarKey === undefined) {
+  displayName: normalizedNameSchema.optional(),
+}).strict().superRefine((value, context) => {
+  if (value.avatarKey === undefined && value.displayName === undefined) {
     context.addIssue({
       code: "custom",
-      path: [],
       message: "请至少修改名称或头像",
-    });
-  }
-  if (value.name !== undefined && !value.currentPassword) {
-    context.addIssue({
-      code: "custom",
-      path: ["currentPassword"],
-      message: "修改名称需要输入当前密码",
     });
   }
 });

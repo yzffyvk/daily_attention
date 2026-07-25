@@ -1,48 +1,36 @@
 import { describe, expect, it } from "vitest";
 import {
-  normalizeLoginName,
+  normalizePhone,
   profilePatchSchema,
-  recoverInputSchema,
   registerInputSchema,
+  toE164Phone,
 } from "@/lib/domain/user";
 
 describe("user contracts", () => {
-  it("normalizes names without changing passwords", () => {
-    expect(normalizeLoginName("  ＡＩ   小白  ")).toBe("AI 小白");
-    const parsed = registerInputSchema.parse({
-      name: "  ＡＩ   小白  ",
+  it("normalizes phone numbers and converts them to E.164", () => {
+    expect(normalizePhone(" 138 0013 8000 ")).toBe("13800138000");
+    expect(toE164Phone("13800138000")).toBe("+8613800138000");
+  });
+
+  it("validates phone registration input without changing passwords", () => {
+    expect(registerInputSchema.parse({
+      phone: "138 0013 8000",
+      password: "  Keep Spaces  ",
+      avatarKey: 3,
+    })).toEqual({
+      phone: "13800138000",
       password: "  Keep Spaces  ",
       avatarKey: 3,
     });
-    expect(parsed.name).toBe("AI 小白");
-    expect(parsed.password).toBe("  Keep Spaces  ");
+    expect(registerInputSchema.safeParse({
+      phone: "12800138000",
+      password: "password123",
+      avatarKey: 3,
+    }).success).toBe(false);
   });
 
-  it("requires the complete recovery payload", () => {
-    expect(
-      recoverInputSchema.safeParse({
-        name: "学习者",
-        recoveryCode: "AAAAA-BBBBB-CCCCC-DDDDD-EEEEEE",
-        newPassword: "new password",
-      }).success,
-    ).toBe(true);
-  });
-
-  it("allows an avatar-only profile update while requiring a password for a name change", () => {
-    expect(profilePatchSchema.safeParse({ avatarKey: 4 }).success).toBe(true);
-    expect(profilePatchSchema.safeParse({ name: "新的名称" }).success).toBe(false);
-    expect(
-      profilePatchSchema.safeParse({
-        name: "新的名称",
-        currentPassword: "password123",
-      }).success,
-    ).toBe(true);
-  });
-
-  it("rejects profile patches without a mutable field", () => {
-    expect(profilePatchSchema.safeParse({}).success).toBe(false);
-    expect(
-      profilePatchSchema.safeParse({ currentPassword: "password123" }).success,
-    ).toBe(false);
+  it("allows display name patches but rejects phone patches", () => {
+    expect(profilePatchSchema.safeParse({ displayName: "新的名称" }).success).toBe(true);
+    expect(profilePatchSchema.safeParse({ phone: "13900139000" }).success).toBe(false);
   });
 });

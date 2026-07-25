@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nameRateBucket, requestIp } from "@/server/auth/request";
+import { phoneRateBucket, requestIp } from "@/server/auth/request";
 
 describe("auth request identity", () => {
   it("ignores spoofed X-Forwarded-For values when no Cloudflare identity is present", () => {
@@ -7,7 +7,7 @@ describe("auth request identity", () => {
     const second = new Request("https://example.test", { headers: { "X-Forwarded-For": "203.0.113.9" } });
 
     expect(requestIp(first)).toBe("local");
-    expect(nameRateBucket(first, " 学习者 ")).toBe(nameRateBucket(second, "学习者"));
+    expect(phoneRateBucket(first, " 138 0013 8000 ")).toBe(phoneRateBucket(second, "13800138000"));
   });
 
   it("uses a strictly normalized CF-Connecting-IP value when Cloudflare provides one", () => {
@@ -16,6 +16,6 @@ describe("auth request identity", () => {
     });
 
     expect(requestIp(request)).toBe("203.0.113.7");
-    expect(nameRateBucket(request, "学习者")).toBe("203.0.113.7:学习者");
+    expect(phoneRateBucket(request, "13800138000")).toBe("203.0.113.7:13800138000");
   });
 });
