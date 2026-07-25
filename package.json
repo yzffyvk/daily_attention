@@ -19,6 +19,7 @@
     "supabase:start": "supabase start",
     "supabase:stop": "supabase stop",
     "supabase:reset": "supabase db reset",
+    "reset:legacy-accounts": "node --env-file=.env.production.local scripts/reset-legacy-accounts.mjs",
     "supabase:test": "supabase test db",
     "supabase:types": "supabase gen types typescript --local | perl -0pe 's/\\n+\\z/\\n/' > lib/supabase/database.types.ts"
   },

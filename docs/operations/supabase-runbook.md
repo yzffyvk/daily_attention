@@ -44,6 +44,24 @@ Read the dry-run output before applying it. Apply only the ordered migrations in
 
 In Supabase Auth settings, disable project sign-ups, keep email/password sign-in enabled for the application's internal account addresses, set the minimum password length to at least 8, and keep anonymous sign-ins disabled. Application registration uses the server-only Admin API so users cannot bypass the name, recovery-code, profile, and application rate-limit workflow by calling Supabase Auth directly. Verify these settings again after project cloning or restore.
 
+## Guarded Legacy Account Reset
+
+This one-time reset is locked to project `jhiybzdvxvlkbqvamynp`. Its project ref must be passed explicitly and must exactly match the hostname in `NEXT_PUBLIC_SUPABASE_URL`. The command reads `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SECRET_KEY` from `.env.production.local`; keep that file outside source control.
+
+Run the default dry-run first:
+
+```sh
+npm run reset:legacy-accounts -- --project-ref=jhiybzdvxvlkbqvamynp
+```
+
+The script prints only aggregate `users`, `profiles`, `check_ins`, and `images` counts. It does not empty Storage or delete Auth users without `--apply`. Review those counts and independently confirm the target before using the destructive form:
+
+```sh
+npm run reset:legacy-accounts -- --project-ref=jhiybzdvxvlkbqvamynp --apply
+```
+
+Apply empties the private `checkin-images` bucket before deleting the paginated Auth user snapshot. Auth deletion is expected to cascade to `profiles` and `check_ins`. The command then recounts all four resources and fails unless every final count is zero. Never record command output together with environment files or secret values.
+
 ## Sites Runtime Variables
 
 Set these runtime variables in the managed Sites project for the exact release environment:
