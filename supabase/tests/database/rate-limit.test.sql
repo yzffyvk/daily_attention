@@ -57,11 +57,21 @@ select is(
   'a window reset clears the previous block'
 );
 
+create temporary table rate_limit_test_state (
+  private_bucket_count bigint not null
+) on commit drop;
+insert into rate_limit_test_state (private_bucket_count)
+select count(*) from private.auth_rate_limits;
+
 select throws_ok(
   $$select * from public.consume_auth_rate_limit(null, 'login', 10, 900)$$,
   '22023', 'invalid auth rate limit parameters', 'a null bucket is rejected'
 );
-select ok((select count(*) = 2 from private.auth_rate_limits), 'a null bucket does not modify private buckets');
+select is(
+  (select count(*) from private.auth_rate_limits),
+  (select private_bucket_count from rate_limit_test_state),
+  'a null bucket does not modify private buckets'
+);
 
 select throws_ok(
   $$select * from public.consume_auth_rate_limit(decode('03', 'hex'), 'login', 10, 900)$$,
