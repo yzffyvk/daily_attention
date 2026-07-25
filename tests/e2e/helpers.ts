@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 export const password = "password123";
 export const appHeading = /今天你\s*attention\s*了吗？/;
@@ -8,12 +8,33 @@ export async function waitForClient(page: Page) {
   await page.waitForTimeout(700);
 }
 
-export function uniquePhone(seed: number) {
-  return `139${String(seed).padStart(8, "0").slice(-8)}`;
+const projectPhoneIds: Record<string, number> = {
+  "flows-desktop": 1,
+  desktop: 2,
+  tablet: 3,
+  mobile: 4,
+};
+
+function phonePart(value: number, width: number, label: string) {
+  if (!Number.isSafeInteger(value) || value < 0 || value >= 10 ** width) {
+    throw new Error(`${label} must fit in ${width} decimal digits`);
+  }
+  return String(value).padStart(width, "0");
+}
+
+export function uniquePhone(
+  projectName: string,
+  workerIndex: number,
+  retry: number,
+  invocation: number,
+) {
+  const projectId = projectPhoneIds[projectName];
+  if (projectId === undefined) throw new Error(`Unknown E2E project: ${projectName}`);
+  return `139${projectId}${phonePart(workerIndex, 3, "workerIndex")}${phonePart(retry, 1, "retry")}${phonePart(invocation, 3, "invocation")}`;
 }
 
 const assignedClientIps = new Set<string>();
-let phoneSeed = Date.now();
+let registrationSequence = 0;
 
 function hashValue(value: string) {
   let hash = 2_166_136_261;
@@ -36,12 +57,22 @@ function e2eClientIp(phone: string) {
   throw new Error("Unable to allocate an isolated E2E client address");
 }
 
-export async function register(page: Page, phone = uniquePhone(phoneSeed++)) {
-  await page.context().setExtraHTTPHeaders({ "CF-Connecting-IP": e2eClientIp(phone) });
+export async function register(page: Page, phone?: string) {
+  const testInfo = test.info();
+  const allocatedPhone = phone ?? uniquePhone(
+    testInfo.project.name,
+    testInfo.workerIndex,
+    testInfo.retry,
+    registrationSequence++,
+  );
+  await page.context().setExtraHTTPHeaders({ "CF-Connecting-IP": e2eClientIp(allocatedPhone) });
   await page.goto("/register", { waitUntil: "load" });
   await waitForClient(page);
-  await expect(page.getByRole("link", { name: "返回登录" })).toHaveAttribute("href", "/login");
-  await page.getByLabel("手机号").fill(phone);
+  await page.getByRole("link", { name: "返回登录" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await page.goto("/register", { waitUntil: "load" });
+  await waitForClient(page);
+  await page.getByLabel("手机号").fill(allocatedPhone);
   await page.getByLabel("头像 4").check();
   await page.getByLabel("密码", { exact: true }).fill(password);
   await page.getByLabel("确认密码").fill(password);
@@ -53,7 +84,7 @@ export async function register(page: Page, phone = uniquePhone(phoneSeed++)) {
   if (!code) throw new Error("The registration dialog did not show a recovery code");
   await page.getByRole("button", { name: "我已保存" }).click();
   await expect(page.getByRole("button", { name: "打开账户菜单" })).toBeVisible();
-  return { code, phone };
+  return { code, phone: allocatedPhone };
 }
 
 export async function logout(page: Page) {
