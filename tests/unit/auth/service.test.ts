@@ -52,6 +52,21 @@ describe("auth service", () => {
     expect(adapter.deleteAuthUser).toHaveBeenCalledWith("user-1");
   });
 
+  it("compensates when sign-in after profile completion fails", async () => {
+    const adapter = ports();
+    const signInFailure = new Error("sign-in failed");
+    vi.mocked(adapter.signIn).mockRejectedValue(signInFailure);
+
+    await expect(
+      registerAccount(
+        { phone: "13800138000", password: "password123", avatarKey: 2, bucket: "register-key" },
+        adapter,
+      ),
+    ).rejects.toThrow(signInFailure);
+
+    expect(adapter.deleteAuthUser).toHaveBeenCalledWith("user-1");
+  });
+
   it("registers with an E.164 phone and signs in", async () => {
     const adapter = ports();
 
