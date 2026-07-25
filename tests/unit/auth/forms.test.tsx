@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -190,5 +190,33 @@ describe("authentication network failures", () => {
     expect(phone).toHaveValue("13800138000");
     expect(await screen.findByRole("alert")).toHaveTextContent("网络连接失败，请检查网络后重试");
     expect(screen.getByRole("button", { name: "重设密码" })).toBeEnabled();
+  });
+});
+
+describe("recovery UI", () => {
+  it("preserves the recovery response profile display name", async () => {
+    const onRecovered = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
+      ok: true,
+      data: {
+        profile: { id: "profile-1", displayName: "Attention_001", avatarKey: 1 },
+        recoveryCode: "01234-56789-ABCDE-FGHJK-MNPQRS",
+      },
+    })));
+    const user = userEvent.setup();
+    render(<RecoverForm onRecovered={onRecovered} />);
+
+    await user.type(screen.getByLabelText("手机号"), "13800138000");
+    await user.type(screen.getByLabelText("恢复码"), "01234-56789-ABCDE-FGHJK-MNPQRS");
+    await user.type(screen.getByLabelText("新密码"), "new-password123");
+    await user.type(screen.getByLabelText("确认新密码"), "new-password123");
+    await user.click(screen.getByRole("button", { name: "重设密码" }));
+
+    await waitFor(() => {
+      expect(onRecovered).toHaveBeenCalledWith({
+        displayName: "Attention_001",
+        recoveryCode: "01234-56789-ABCDE-FGHJK-MNPQRS",
+      });
+    });
   });
 });

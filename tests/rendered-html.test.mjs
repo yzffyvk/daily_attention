@@ -182,9 +182,11 @@ test("renders phone-oriented authentication forms", async () => {
   assert.match(loginForm, /\{ phone, password \}/);
   assert.match(registerForm, /\{ phone, password, avatarKey \}/);
   assert.match(recoverForm, /\{ phone, recoveryCode, newPassword \}/);
+  assert.match(recoverForm, /result\.data\.profile\.displayName/);
   assert.match(registerForm, /<Link className="secondary-button" href="\/login">返回登录<\/Link>/);
   assert.doesNotMatch(registerForm, /name-field|setName|名称/);
   assert.match(registerPage, /result\.profile\.displayName/);
+  assert.match(recoverPage, /name=\{recovered\?\.displayName\}/);
   for (const page of [loginPage, registerPage, recoverPage]) {
     assert.match(page, /手机号/);
   }

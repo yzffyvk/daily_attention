@@ -5,8 +5,12 @@ import { FormEvent, useState } from "react";
 import { postAuth } from "./auth-card";
 
 type FormError = { message: string; field?: string };
+type Recovered = {
+  profile: { displayName: string };
+  recoveryCode: string;
+};
 
-export function RecoverForm({ onRecovered }: { onRecovered: (result: { recoveryCode: string }) => void }) {
+export function RecoverForm({ onRecovered }: { onRecovered: (result: { displayName: string; recoveryCode: string }) => void }) {
   const [phone, setPhone] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -20,12 +24,12 @@ export function RecoverForm({ onRecovered }: { onRecovered: (result: { recoveryC
     setError(null);
     setIsSubmitting(true);
     try {
-      const result = await postAuth<{ recoveryCode: string }>("/api/auth/recover", { phone, recoveryCode, newPassword });
+      const result = await postAuth<Recovered>("/api/auth/recover", { phone, recoveryCode, newPassword });
       if (!result.ok) {
         setError(result.error);
         return;
       }
-      onRecovered({ recoveryCode: result.data.recoveryCode });
+      onRecovered({ displayName: result.data.profile.displayName, recoveryCode: result.data.recoveryCode });
     } catch {
       setError({ message: "请求未能完成，请稍后重试" });
     } finally {
