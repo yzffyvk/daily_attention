@@ -49,10 +49,6 @@ function throwIfError(error: SupabaseError | null) {
 export async function createSupabaseAuthAdapter() {
   const admin = createAdminSupabase();
   const server = await createServerSupabase();
-  const adminRpc = admin.rpc as unknown as (
-    name: string,
-    params: Record<string, unknown>,
-  ) => PromiseLike<{ data: unknown; error: SupabaseError | null }>;
 
   const ports: AuthPorts = {
     async rateLimit({ action, bucket }) {
@@ -79,7 +75,7 @@ export async function createSupabaseAuthAdapter() {
       throwIfError(error);
     },
     async completeRegistration(input) {
-      const { data, error } = await adminRpc("complete_registration", {
+      const { data, error } = await admin.rpc("complete_registration", {
         target_user_id: input.userId,
         target_phone: input.phone,
         target_avatar_key: input.avatarKey,
@@ -90,7 +86,7 @@ export async function createSupabaseAuthAdapter() {
       return profile(data);
     },
     async resolvePhone(phone) {
-      const { data, error } = await adminRpc("resolve_phone", {
+      const { data, error } = await admin.rpc("resolve_phone", {
         target_phone: phone,
       });
       throwIfError(error);
@@ -100,7 +96,7 @@ export async function createSupabaseAuthAdapter() {
       return account ? { userId: account.user_id } : null;
     },
     async readRecoveryDigest(userId) {
-      const { data, error } = await adminRpc("read_recovery_digest", {
+      const { data, error } = await admin.rpc("read_recovery_digest", {
         target_user_id: userId,
       });
       throwIfError(error);
@@ -108,7 +104,7 @@ export async function createSupabaseAuthAdapter() {
       return bytes(data);
     },
     async replaceRecoveryDigest(userId, expected, next) {
-      const { data, error } = await adminRpc("replace_recovery_digest", {
+      const { data, error } = await admin.rpc("replace_recovery_digest", {
         target_user_id: userId,
         expected_digest: bytea(expected),
         next_digest: bytea(next),
@@ -118,7 +114,7 @@ export async function createSupabaseAuthAdapter() {
       return data;
     },
     async updateProfile(input) {
-      const { data, error } = await adminRpc("update_profile", {
+      const { data, error } = await admin.rpc("update_profile", {
         target_user_id: input.userId,
         target_display_name: input.displayName,
         target_avatar_key: input.avatarKey,

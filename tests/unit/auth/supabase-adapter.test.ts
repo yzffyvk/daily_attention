@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
   maybeSingle: vi.fn(),
   rpc: vi.fn(),
+  rpcRequiresClientContext: false,
   select: vi.fn(),
   signInWithPassword: vi.fn(),
   signOut: vi.fn(),
@@ -15,16 +16,24 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({
-  createAdminSupabase: vi.fn(() => ({
-    auth: {
-      admin: {
-        createUser: mocks.createUser,
-        deleteUser: mocks.deleteUser,
-        updateUserById: mocks.updateUserById,
+  createAdminSupabase: vi.fn(() => {
+    const adminClient = {
+      rpc(this: unknown, ...args: Parameters<typeof mocks.rpc>) {
+        if (mocks.rpcRequiresClientContext && this !== adminClient) {
+          throw new TypeError("Supabase rpc requires its client context");
+        }
+        return mocks.rpc(...args);
       },
-    },
-    rpc: mocks.rpc,
-  })),
+      auth: {
+        admin: {
+          createUser: mocks.createUser,
+          deleteUser: mocks.deleteUser,
+          updateUserById: mocks.updateUserById,
+        },
+      },
+    };
+    return adminClient;
+  }),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -52,6 +61,7 @@ const databaseProfile = {
 };
 
 beforeEach(() => {
+  mocks.rpcRequiresClientContext = false;
   mocks.createUser.mockResolvedValue({ data: { user: { id: "user-1" } }, error: null });
   mocks.deleteUser.mockResolvedValue({ error: null });
   mocks.updateUserById.mockResolvedValue({ error: null });
@@ -119,6 +129,21 @@ describe("Supabase auth adapter", () => {
       target_avatar_key: 2,
       target_recovery_digest: "\\xabcd",
     });
+  });
+
+  it("preserves the admin client context when invoking RPCs", async () => {
+    mocks.rpcRequiresClientContext = true;
+    mocks.rpc.mockResolvedValue({ data: databaseProfile, error: null });
+    const { ports } = await createSupabaseAuthAdapter();
+
+    await expect(
+      ports.completeRegistration({
+        userId: "user-1",
+        phone: "13800138000",
+        avatarKey: 2,
+        recoveryDigest: new Uint8Array([0xab, 0xcd]),
+      }),
+    ).resolves.toMatchObject({ id: "user-1", phone: "13800138000" });
   });
 
   it("rejects an array-shaped registration profile response", async () => {
