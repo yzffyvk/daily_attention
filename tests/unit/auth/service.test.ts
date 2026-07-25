@@ -1,18 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
-import { recoverAccount, registerAccount, updateProfile } from "@/server/auth/service";
+import { loginAccount, recoverAccount, registerAccount, updateProfile } from "@/server/auth/service";
 import type { AuthPorts } from "@/server/auth/ports";
 
 function ports(): AuthPorts {
+  const profile = {
+    id: "user-1",
+    phone: "13800138000",
+    displayName: "Attention_001",
+    avatarKey: 2,
+  };
+
   return {
     rateLimit: vi.fn().mockResolvedValue(undefined),
     createAuthUser: vi.fn().mockResolvedValue({ id: "user-1" }),
     deleteAuthUser: vi.fn().mockResolvedValue(undefined),
-    completeRegistration: vi.fn().mockResolvedValue({ id: "user-1", displayName: "学习者", avatarKey: 2 }),
-    resolveLoginName: vi.fn().mockResolvedValue({ userId: "user-1", authEmail: "internal@internal.invalid" }),
+    completeRegistration: vi.fn().mockResolvedValue(profile),
+    resolvePhone: vi.fn().mockResolvedValue({ userId: "user-1" }),
     readRecoveryDigest: vi.fn(),
     replaceRecoveryDigest: vi.fn().mockResolvedValue(true),
-    updateProfileIdentity: vi.fn().mockResolvedValue({ id: "user-1", displayName: "学习者", avatarKey: 2 }),
-    updateProfileAvatar: vi.fn().mockResolvedValue({ id: "user-1", displayName: "学习者", avatarKey: 2 }),
+    updateProfile: vi.fn().mockResolvedValue(profile),
     updatePassword: vi.fn().mockResolvedValue(undefined),
     signIn: vi.fn().mockResolvedValue(undefined),
   };
@@ -26,7 +32,7 @@ async function recoveryDigest() {
 
 function recoveryInput() {
   return {
-    name: "学习者",
+    phone: "13800138000",
     recoveryCode: "01234-56789-ABCDE-FGHJK-MNPQRS",
     newPassword: "newpassword123",
     bucket: "recover-key",
@@ -39,11 +45,43 @@ describe("auth service", () => {
     vi.mocked(adapter.completeRegistration).mockRejectedValue(new Error("duplicate"));
     await expect(
       registerAccount(
-        { name: "学习者", password: "password123", avatarKey: 2, bucket: "register-key" },
+        { phone: "13800138000", password: "password123", avatarKey: 2, bucket: "register-key" },
         adapter,
       ),
     ).rejects.toThrow("duplicate");
     expect(adapter.deleteAuthUser).toHaveBeenCalledWith("user-1");
+  });
+
+  it("registers with an E.164 phone and signs in", async () => {
+    const adapter = ports();
+
+    await registerAccount(
+      {
+        phone: "13800138000",
+        password: "password123",
+        avatarKey: 2,
+        bucket: "register-key",
+      },
+      adapter,
+    );
+
+    expect(adapter.createAuthUser).toHaveBeenCalledWith({
+      phone: "+8613800138000",
+      password: "password123",
+    });
+    expect(adapter.completeRegistration).toHaveBeenCalledWith(
+      expect.objectContaining({ phone: "13800138000" }),
+    );
+    expect(adapter.signIn).toHaveBeenCalledWith("+8613800138000", "password123");
+  });
+
+  it("signs in directly with an E.164 phone", async () => {
+    const adapter = ports();
+
+    await loginAccount({ phone: "13800138000", password: "password123", bucket: "login-key" }, adapter);
+
+    expect(adapter.signIn).toHaveBeenCalledWith("+8613800138000", "password123");
+    expect(adapter.resolvePhone).not.toHaveBeenCalled();
   });
 
   it("claims the recovery digest before changing the password", async () => {
@@ -57,6 +95,7 @@ describe("auth service", () => {
       updatePassword.mock.invocationCallOrder[0],
     );
     expect(adapter.updatePassword).toHaveBeenCalledWith("user-1", "newpassword123");
+    expect(adapter.resolvePhone).toHaveBeenCalledWith("13800138000");
     expect(adapter.replaceRecoveryDigest).toHaveBeenCalledOnce();
     expect(result.recoveryCode.replace(/-/g, "")).toHaveLength(26);
   });
@@ -133,24 +172,22 @@ describe("auth service", () => {
     });
   });
 
-  it("requires the current password before applying a profile rename", async () => {
+  it("updates a profile without signing in or requiring a password", async () => {
     const adapter = ports();
 
     await updateProfile(
       {
         userId: "user-1",
-        currentName: "学习者",
-        nextName: "学习者新",
-        nextAvatarKey: 5,
-        currentPassword: "password123",
+        displayName: "Attention_002",
+        avatarKey: 5,
       },
       adapter,
     );
 
-    expect(adapter.signIn).toHaveBeenCalledWith("internal@internal.invalid", "password123");
-    expect(adapter.updateProfileIdentity).toHaveBeenCalledWith({
+    expect(adapter.signIn).not.toHaveBeenCalled();
+    expect(adapter.updateProfile).toHaveBeenCalledWith({
       userId: "user-1",
-      loginName: "学习者新",
+      displayName: "Attention_002",
       avatarKey: 5,
     });
   });
