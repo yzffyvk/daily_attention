@@ -9,6 +9,7 @@ import {
   countStorageObjects,
   main,
   parseArguments,
+  runCli,
   runReset,
   validateTarget,
 } from "../../scripts/reset-legacy-accounts.mjs";
@@ -31,7 +32,7 @@ describe("guarded legacy account reset", () => {
     expect(createClient).not.toHaveBeenCalled();
   });
 
-  it("accepts only the fixed project ref at its exact Supabase hostname", () => {
+  it("accepts only the fixed project ref and exact raw Supabase URL", () => {
     expect(validateTarget({ projectRef: TARGET_REF, supabaseUrl: TARGET_URL })).toBe(true);
 
     expect(() =>
@@ -61,6 +62,21 @@ describe("guarded legacy account reset", () => {
         supabaseUrl: `${TARGET_URL}/unexpected-path?secret=value#fragment`,
       }),
     ).toThrow("PROJECT_REF_MISMATCH");
+
+    for (const normalizedVariant of [
+      `${TARGET_URL}/`,
+      `${TARGET_URL}:443`,
+      `${TARGET_URL}/path/..`,
+      ` ${TARGET_URL}`,
+      `https://${TARGET_REF.toUpperCase()}.supabase.co`,
+    ]) {
+      expect(() =>
+        validateTarget({
+          projectRef: TARGET_REF,
+          supabaseUrl: normalizedVariant,
+        }),
+      ).toThrow("PROJECT_REF_MISMATCH");
+    }
   });
 
   it("parses dry-run by default and requires an explicit apply flag", () => {
@@ -92,6 +108,109 @@ describe("guarded legacy account reset", () => {
     expect(createClient).not.toHaveBeenCalled();
   });
 
+  it("maps an upstream uppercase rejection to RESET_FAILED without raw details", async () => {
+    const writeError = vi.fn();
+    const listUsers = vi.fn().mockRejectedValue(new Error("ECONNRESET"));
+
+    await expect(
+      runCli({
+        argv: [`--project-ref=${TARGET_REF}`],
+        createSupabaseClient: vi.fn(() => ({
+          auth: { admin: { listUsers } },
+          from: vi.fn(() => countQuery(0)),
+          storage: {
+            from: vi.fn(() => ({
+              list: vi.fn().mockResolvedValue({ data: [], error: null }),
+            })),
+          },
+        })),
+        env: {
+          ...process.env,
+          NEXT_PUBLIC_SUPABASE_URL: TARGET_URL,
+          SUPABASE_SECRET_KEY: "must-not-be-output",
+        },
+        writeError,
+        writeLine: vi.fn(),
+      }),
+    ).resolves.toBe(1);
+
+    expect(writeError).toHaveBeenCalledExactlyOnceWith("RESET_FAILED");
+    expect(JSON.stringify(writeError.mock.calls)).not.toMatch(/ECONNRESET|must-not-be-output/u);
+  });
+
+  it("preserves only script-owned public error codes", async () => {
+    const writeError = vi.fn();
+
+    await expect(
+      runCli({
+        argv: ["--project-ref=wrong-project"],
+        createSupabaseClient: createClient,
+        env: {
+          ...process.env,
+          NEXT_PUBLIC_SUPABASE_URL: TARGET_URL,
+          SUPABASE_SECRET_KEY: "must-not-be-output",
+        },
+        writeError,
+        writeLine: vi.fn(),
+      }),
+    ).resolves.toBe(1);
+
+    expect(writeError).toHaveBeenCalledExactlyOnceWith("PROJECT_REF_MISMATCH");
+    expect(createClient).not.toHaveBeenCalled();
+  });
+
+  it("maps a verification rejection to RESET_FAILED after attempting both snapshots", async () => {
+    let deleted = false;
+    let authInspection = 0;
+    const listUsers = vi.fn(async () => {
+      authInspection += 1;
+      if (!deleted) {
+        return {
+          data: { users: [{ id: "sensitive-user-a" }], nextPage: null },
+          error: null,
+        };
+      }
+      if (authInspection === 2) throw new Error("ECONNRESET");
+      return { data: { users: [], nextPage: null }, error: null };
+    });
+    const writeError = vi.fn();
+
+    await expect(
+      runCli({
+        argv: [`--project-ref=${TARGET_REF}`, "--apply"],
+        createSupabaseClient: vi.fn(() => ({
+          auth: {
+            admin: {
+              deleteUser: vi.fn(async () => {
+                deleted = true;
+                return { data: null, error: null };
+              }),
+              listUsers,
+            },
+          },
+          from: vi.fn(() => countQuery(deleted ? 0 : 1)),
+          storage: {
+            emptyBucket: vi.fn().mockResolvedValue({ data: null, error: null }),
+            from: vi.fn(() => ({
+              list: vi.fn().mockResolvedValue({ data: [], error: null }),
+            })),
+          },
+        })),
+        env: {
+          ...process.env,
+          NEXT_PUBLIC_SUPABASE_URL: TARGET_URL,
+          SUPABASE_SECRET_KEY: "must-not-be-output",
+        },
+        writeError,
+        writeLine: vi.fn(),
+      }),
+    ).resolves.toBe(1);
+
+    expect(listUsers).toHaveBeenCalledTimes(3);
+    expect(writeError).toHaveBeenCalledExactlyOnceWith("RESET_FAILED");
+    expect(JSON.stringify(writeError.mock.calls)).not.toMatch(/ECONNRESET|sensitive-user|must-not-be-output/u);
+  });
+
   it("counts Auth users across every page", async () => {
     const listUsers = vi
       .fn()
@@ -113,6 +232,27 @@ describe("guarded legacy account reset", () => {
     await expect(countAuthUsers({ auth: { admin: { listUsers } } })).resolves.toBe(3);
     expect(listUsers).toHaveBeenNthCalledWith(1, { page: 1, perPage: 1000 });
     expect(listUsers).toHaveBeenNthCalledWith(2, { page: 2, perPage: 1000 });
+  });
+
+  it("deduplicates Auth user IDs across pages", async () => {
+    const listUsers = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          users: [{ id: "sensitive-user-a" }, { id: "sensitive-user-b" }],
+          nextPage: 2,
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          users: [{ id: "sensitive-user-a" }],
+          nextPage: null,
+        },
+        error: null,
+      });
+
+    await expect(countAuthUsers({ auth: { admin: { listUsers } } })).resolves.toBe(2);
   });
 
   it("counts Storage objects recursively and paginates each folder", async () => {
@@ -236,8 +376,8 @@ describe("guarded legacy account reset", () => {
         error: null,
       };
     });
-    const profileCounts = [2, 1];
-    const checkInCounts = [2, 0];
+    const profileCounts = [2, 1, 1];
+    const checkInCounts = [2, 0, 0];
     const client = {
       auth: { admin: { deleteUser, listUsers } },
       from: vi.fn((table: string) => {
@@ -263,7 +403,219 @@ describe("guarded legacy account reset", () => {
     expect(emptyBucket).toHaveBeenCalledOnce();
     expect(deleteUser).toHaveBeenCalledTimes(2);
     expect(emptyBucket.mock.invocationCallOrder[0]).toBeLessThan(deleteUser.mock.invocationCallOrder[0]);
-    expect(output.slice(-4)).toEqual(["users=0", "profiles=1", "check_ins=0", "images=0"]);
+    expect(output.slice(-8)).toEqual([
+      "users=0",
+      "profiles=1",
+      "check_ins=0",
+      "images=0",
+      "users=0",
+      "profiles=1",
+      "check_ins=0",
+      "images=0",
+    ]);
     expect(output.join("\n")).not.toMatch(/sensitive-user|private-image/u);
+  });
+
+  it("recounts twice and skips Auth deletion when emptying Storage fails", async () => {
+    const deleteUser = vi.fn();
+    const emptyBucket = vi.fn().mockResolvedValue({
+      data: null,
+      error: new Error("ECONNRESET"),
+    });
+    const listUsers = vi.fn().mockResolvedValue({
+      data: { users: [{ id: "sensitive-user-a" }], nextPage: null },
+      error: null,
+    });
+    const from = vi.fn(() => countQuery(1));
+    const list = vi.fn().mockResolvedValue({
+      data: [{ id: "image-a", name: "private-image.png" }],
+      error: null,
+    });
+    const output: string[] = [];
+
+    await expect(
+      runReset({
+        apply: true,
+        client: {
+          auth: { admin: { deleteUser, listUsers } },
+          from,
+          storage: { emptyBucket, from: vi.fn(() => ({ list })) },
+        },
+        writeLine: (line: string) => output.push(line),
+      }),
+    ).rejects.toThrow("RESET_INCOMPLETE");
+
+    expect(deleteUser).not.toHaveBeenCalled();
+    expect(from).toHaveBeenCalledTimes(6);
+    expect(listUsers).toHaveBeenCalledTimes(3);
+    expect(list).toHaveBeenCalledTimes(3);
+    expect(output.join("\n")).not.toMatch(/ECONNRESET|sensitive-user|private-image/u);
+  });
+
+  it("continues deleting the frozen snapshot and recounts twice after one deletion rejects", async () => {
+    const remainingUsers = new Set(["sensitive-user-a", "sensitive-user-b"]);
+    const deleteUser = vi.fn(async (userId: string) => {
+      if (userId === "sensitive-user-a") throw new Error("ECONNRESET");
+      remainingUsers.delete(userId);
+      return { data: null, error: null };
+    });
+    const listUsers = vi.fn(async () => ({
+      data: {
+        users: [...remainingUsers].map((id) => ({ id })),
+        nextPage: null,
+      },
+      error: null,
+    }));
+    const from = vi.fn(() => countQuery(remainingUsers.size));
+    const output: string[] = [];
+
+    await expect(
+      runReset({
+        apply: true,
+        client: {
+          auth: { admin: { deleteUser, listUsers } },
+          from,
+          storage: {
+            emptyBucket: vi.fn().mockResolvedValue({ data: null, error: null }),
+            from: vi.fn(() => ({
+              list: vi.fn().mockResolvedValue({ data: [], error: null }),
+            })),
+          },
+        },
+        writeLine: (line: string) => output.push(line),
+      }),
+    ).rejects.toThrow("RESET_INCOMPLETE");
+
+    expect(deleteUser).toHaveBeenCalledTimes(2);
+    expect(deleteUser).toHaveBeenNthCalledWith(1, "sensitive-user-a");
+    expect(deleteUser).toHaveBeenNthCalledWith(2, "sensitive-user-b");
+    expect(from).toHaveBeenCalledTimes(6);
+    expect(listUsers).toHaveBeenCalledTimes(3);
+    expect(output.join("\n")).not.toMatch(/ECONNRESET|sensitive-user/u);
+  });
+
+  it("fails when a concurrent writer appears between zero verification snapshots", async () => {
+    let deleted = false;
+    let authInspection = 0;
+    const listUsers = vi.fn(async () => {
+      authInspection += 1;
+      if (!deleted) {
+        return {
+          data: { users: [{ id: "sensitive-user-a" }], nextPage: null },
+          error: null,
+        };
+      }
+      return {
+        data: {
+          users: authInspection === 2 ? [] : [{ id: "concurrent-sensitive-user" }],
+          nextPage: null,
+        },
+        error: null,
+      };
+    });
+    const deleteUser = vi.fn(async () => {
+      deleted = true;
+      return { data: null, error: null };
+    });
+    const output: string[] = [];
+
+    await expect(
+      runReset({
+        apply: true,
+        client: {
+          auth: { admin: { deleteUser, listUsers } },
+          from: vi.fn(() => countQuery(deleted ? 0 : 1)),
+          storage: {
+            emptyBucket: vi.fn().mockResolvedValue({ data: null, error: null }),
+            from: vi.fn(() => ({
+              list: vi.fn().mockResolvedValue({ data: [], error: null }),
+            })),
+          },
+        },
+        writeLine: (line: string) => output.push(line),
+      }),
+    ).rejects.toThrow("RESET_INCOMPLETE");
+
+    expect(listUsers).toHaveBeenCalledTimes(3);
+    expect(output.slice(-8)).toEqual([
+      "users=0",
+      "profiles=0",
+      "check_ins=0",
+      "images=0",
+      "users=1",
+      "profiles=0",
+      "check_ins=0",
+      "images=0",
+    ]);
+    expect(output.join("\n")).not.toContain("concurrent-sensitive-user");
+  });
+
+  it("deletes each unique Auth user once and succeeds after two stable-zero snapshots", async () => {
+    let deleted = false;
+    let emptied = false;
+    const listUsers = vi.fn(async ({ page }: { page: number }) => {
+      if (deleted) return { data: { users: [], nextPage: null }, error: null };
+      if (page === 1) {
+        return {
+          data: { users: [{ id: "sensitive-user-a" }], nextPage: 2 },
+          error: null,
+        };
+      }
+      return {
+        data: { users: [{ id: "sensitive-user-a" }], nextPage: null },
+        error: null,
+      };
+    });
+    const deleteUser = vi.fn(async () => {
+      deleted = true;
+      return { data: null, error: null };
+    });
+    const emptyBucket = vi.fn(async () => {
+      emptied = true;
+      return { data: null, error: null };
+    });
+    const from = vi.fn(() => countQuery(deleted ? 0 : 1));
+    const output: string[] = [];
+
+    await expect(
+      runReset({
+        apply: true,
+        client: {
+          auth: { admin: { deleteUser, listUsers } },
+          from,
+          storage: {
+            emptyBucket,
+            from: vi.fn(() => ({
+              list: vi.fn().mockResolvedValue({
+                data: emptied ? [] : [{ id: "image-a", name: "private-image.png" }],
+                error: null,
+              }),
+            })),
+          },
+        },
+        writeLine: (line: string) => output.push(line),
+      }),
+    ).resolves.toEqual({
+      checkIns: 0,
+      images: 0,
+      profiles: 0,
+      users: 0,
+    });
+
+    expect(deleteUser).toHaveBeenCalledOnce();
+    expect(emptyBucket.mock.invocationCallOrder[0]).toBeLessThan(deleteUser.mock.invocationCallOrder[0]);
+    expect(from).toHaveBeenCalledTimes(6);
+    expect(listUsers).toHaveBeenCalledTimes(4);
+    expect(output).toHaveLength(12);
+    expect(output.slice(-8)).toEqual([
+      "users=0",
+      "profiles=0",
+      "check_ins=0",
+      "images=0",
+      "users=0",
+      "profiles=0",
+      "check_ins=0",
+      "images=0",
+    ]);
   });
 });

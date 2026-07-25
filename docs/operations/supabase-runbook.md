@@ -46,7 +46,7 @@ In Supabase Auth settings, disable project sign-ups, keep email/password sign-in
 
 ## Guarded Legacy Account Reset
 
-This one-time reset is locked to project `jhiybzdvxvlkbqvamynp`. Its project ref must be passed explicitly and must exactly match the hostname in `NEXT_PUBLIC_SUPABASE_URL`. The command reads `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SECRET_KEY` from `.env.production.local`; keep that file outside source control.
+This one-time reset is locked to project `jhiybzdvxvlkbqvamynp`. Its project ref must be passed explicitly, and the raw `NEXT_PUBLIC_SUPABASE_URL` value must be exactly `https://jhiybzdvxvlkbqvamynp.supabase.co`, with no trailing slash, port, whitespace, credentials, path, query, or fragment. The command reads that value and `SUPABASE_SECRET_KEY` from `.env.production.local`; keep the file outside source control.
 
 Run the default dry-run first:
 
@@ -54,13 +54,47 @@ Run the default dry-run first:
 npm run reset:legacy-accounts -- --project-ref=jhiybzdvxvlkbqvamynp
 ```
 
-The script prints only aggregate `users`, `profiles`, `check_ins`, and `images` counts. It does not empty Storage or delete Auth users without `--apply`. Review those counts and independently confirm the target before using the destructive form:
+The script prints only aggregate `users`, `profiles`, `check_ins`, and `images` counts. It does not empty Storage or delete Auth users without `--apply`.
+
+Apply is irreversible and non-transactional. A failure can leave Storage empty and only some Auth users deleted; the script cannot roll those changes back. Before deletion, complete this preflight:
+
+1. Confirm a current database backup and an independent `checkin-images` Storage export can be restored.
+2. Confirm `202607230001_accounts_and_checkins.sql` is applied to the linked target. That migration defines `public.profiles.id references auth.users(id) on delete cascade` at lines 6-8 and `public.check_ins.user_id references auth.users(id) on delete cascade` at lines 24-27.
+3. In the target SQL editor, verify the live constraints before relying on cascade deletion:
+
+```sql
+select
+  conrelid::regclass::text as table_name,
+  conname,
+  pg_get_constraintdef(oid) as definition
+from pg_constraint
+where conrelid in ('public.profiles'::regclass, 'public.check_ins'::regclass)
+  and conname in ('profiles_id_fkey', 'check_ins_user_id_fkey')
+order by table_name;
+```
+
+The result must contain both `profiles_id_fkey` with `FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE` and `check_ins_user_id_fkey` with `FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE`. Stop if either row or `ON DELETE CASCADE` is absent.
+
+4. Quiesce every application writer before apply: block check-in writes and image uploads, stop background writers, and disable the server-side Admin registration path as well as any other process that can create Auth users. Keep all writers quiesced through the entire command and both final verification snapshots.
+5. Re-run the dry-run while writers are quiesced, review the four aggregate counts, and independently reconfirm the target and authorization.
+
+Only then use the destructive form:
 
 ```sh
 npm run reset:legacy-accounts -- --project-ref=jhiybzdvxvlkbqvamynp --apply
 ```
 
-Apply empties the private `checkin-images` bucket before deleting the paginated Auth user snapshot. Auth deletion is expected to cascade to `profiles` and `check_ins`. The command then recounts all four resources and fails unless every final count is zero. Never record command output together with environment files or secret values.
+Apply freezes a deduplicated paginated Auth user snapshot, empties the private `checkin-images` bucket, and only then attempts every user deletion in that snapshot. Auth deletion relies on the preflighted cascades to remove `profiles` and `check_ins`. Success requires two consecutive recount snapshots in which all four aggregate counts are zero. Resume writers only after the command exits successfully and both zero snapshots have been reviewed.
+
+If apply exits with `RESET_INCOMPLETE` or `RESET_FAILED`, assume partial mutation:
+
+1. Keep all writers and Admin registration quiesced. Do not treat the operation as rolled back and do not resume traffic.
+2. Preserve only the aggregate output and fixed error code; never collect IDs, object paths, credentials, or raw API errors.
+3. Restore API availability or credentials as needed, re-run the dry-run to measure the remaining aggregate state, and repeat the live cascade-constraint preflight above.
+4. If any `profiles` or `check_ins` rows remain after their Auth users were deleted, stop and investigate the cascade mismatch before any retry.
+5. After the failure cause is resolved and a fresh destructive-action authorization is recorded, re-run apply against the remaining data. If recovery rather than completion is required, restore from the verified backups; the script provides no rollback.
+
+Never record command output together with environment files or secret values.
 
 ## Sites Runtime Variables
 

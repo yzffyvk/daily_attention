@@ -3,15 +3,23 @@ import { createClient } from "@supabase/supabase-js";
 
 export const TARGET_PROJECT_REF = "jhiybzdvxvlkbqvamynp";
 
+const TARGET_SUPABASE_URL = `https://${TARGET_PROJECT_REF}.supabase.co`;
 const IMAGE_BUCKET = "checkin-images";
 const AUTH_PAGE_SIZE = 1000;
 const STORAGE_PAGE_SIZE = 100;
+const REQUIRED_ZERO_SNAPSHOTS = 2;
+
+class ResetScriptError extends Error {}
 
 function fail(code) {
-  throw new Error(code);
+  throw new ResetScriptError(code);
 }
 
 export function validateTarget({ projectRef, supabaseUrl }) {
+  if (projectRef !== TARGET_PROJECT_REF || supabaseUrl !== TARGET_SUPABASE_URL) {
+    fail("PROJECT_REF_MISMATCH");
+  }
+
   let url;
   try {
     url = new URL(supabaseUrl);
@@ -20,7 +28,6 @@ export function validateTarget({ projectRef, supabaseUrl }) {
   }
 
   if (
-    projectRef !== TARGET_PROJECT_REF ||
     url.protocol !== "https:" ||
     url.hostname !== `${TARGET_PROJECT_REF}.supabase.co` ||
     url.port !== "" ||
@@ -61,17 +68,23 @@ export function parseArguments(argv) {
 }
 
 async function countTable(client, table, errorCode) {
-  const { count, error } = await client.from(table).select("*", {
-    count: "exact",
-    head: true,
-  });
+  let response;
+  try {
+    response = await client.from(table).select("*", {
+      count: "exact",
+      head: true,
+    });
+  } catch {
+    fail("RESET_FAILED");
+  }
 
-  if (error || !Number.isSafeInteger(count) || count < 0) fail(errorCode);
-  return count;
+  if (response.error) fail("RESET_FAILED");
+  if (!Number.isSafeInteger(response.count) || response.count < 0) fail(errorCode);
+  return response.count;
 }
 
 async function listAuthUserIds(client) {
-  const userIds = [];
+  const userIds = new Set();
   const visitedPages = new Set();
   let page = 1;
 
@@ -79,29 +92,35 @@ async function listAuthUserIds(client) {
     if (visitedPages.has(page)) fail("AUTH_PAGINATION_FAILED");
     visitedPages.add(page);
 
-    const { data, error } = await client.auth.admin.listUsers({
-      page,
-      perPage: AUTH_PAGE_SIZE,
-    });
-    if (error || !data || !Array.isArray(data.users)) fail("AUTH_LIST_FAILED");
+    let response;
+    try {
+      response = await client.auth.admin.listUsers({
+        page,
+        perPage: AUTH_PAGE_SIZE,
+      });
+    } catch {
+      fail("RESET_FAILED");
+    }
+    if (response.error) fail("RESET_FAILED");
+    if (!response.data || !Array.isArray(response.data.users)) fail("AUTH_LIST_FAILED");
 
-    for (const user of data.users) {
+    for (const user of response.data.users) {
       if (!user || typeof user.id !== "string" || user.id.length === 0) {
         fail("AUTH_LIST_FAILED");
       }
-      userIds.push(user.id);
+      userIds.add(user.id);
     }
 
-    if (data.nextPage === null || data.nextPage === undefined) {
+    if (response.data.nextPage === null || response.data.nextPage === undefined) {
       page = null;
-    } else if (Number.isSafeInteger(data.nextPage) && data.nextPage > 0) {
-      page = data.nextPage;
+    } else if (Number.isSafeInteger(response.data.nextPage) && response.data.nextPage > 0) {
+      page = response.data.nextPage;
     } else {
       fail("AUTH_PAGINATION_FAILED");
     }
   }
 
-  return userIds;
+  return [...userIds];
 }
 
 export async function countAuthUsers(client) {
@@ -124,14 +143,20 @@ export async function countStorageObjects(
     let offset = 0;
 
     while (true) {
-      const { data, error } = await storage.list(prefix, {
-        limit: pageSize,
-        offset,
-        sortBy: { column: "name", order: "asc" },
-      });
-      if (error || !Array.isArray(data)) fail("STORAGE_COUNT_FAILED");
+      let response;
+      try {
+        response = await storage.list(prefix, {
+          limit: pageSize,
+          offset,
+          sortBy: { column: "name", order: "asc" },
+        });
+      } catch {
+        fail("RESET_FAILED");
+      }
+      if (response.error) fail("RESET_FAILED");
+      if (!Array.isArray(response.data)) fail("STORAGE_COUNT_FAILED");
 
-      for (const object of data) {
+      for (const object of response.data) {
         if (!object || typeof object.name !== "string" || object.name.length === 0) {
           fail("STORAGE_COUNT_FAILED");
         }
@@ -149,7 +174,7 @@ export async function countStorageObjects(
         }
       }
 
-      if (data.length < pageSize) break;
+      if (response.data.length < pageSize) break;
       offset += pageSize;
     }
   }
@@ -184,28 +209,64 @@ function writeCounts(counts, writeLine) {
   for (const line of formatCounts(counts)) writeLine(line);
 }
 
+function countsAreZero(counts) {
+  return Object.values(counts).every((count) => count === 0);
+}
+
 export async function runReset({ apply = false, client, writeLine = console.log }) {
   const before = await inspectLegacyData(client);
   writeCounts(before.counts, writeLine);
 
   if (!apply) return before.counts;
 
-  const { error: emptyError } = await client.storage.emptyBucket(IMAGE_BUCKET);
-  if (emptyError) fail("STORAGE_EMPTY_FAILED");
+  let mutationFailed = false;
+  let storageEmptied = false;
 
-  for (const userId of before.userIds) {
-    const { error } = await client.auth.admin.deleteUser(userId);
-    if (error) fail("AUTH_DELETE_FAILED");
+  try {
+    const result = await client.storage.emptyBucket(IMAGE_BUCKET);
+    if (result && result.error === null) {
+      storageEmptied = true;
+    } else {
+      mutationFailed = true;
+    }
+  } catch {
+    mutationFailed = true;
   }
 
-  const after = await inspectLegacyData(client);
-  writeCounts(after.counts, writeLine);
+  if (storageEmptied) {
+    for (const userId of before.userIds) {
+      try {
+        const result = await client.auth.admin.deleteUser(userId);
+        if (!result || result.error !== null) mutationFailed = true;
+      } catch {
+        mutationFailed = true;
+      }
+    }
+  }
 
-  if (Object.values(after.counts).some((count) => count !== 0)) {
+  const verificationCounts = [];
+  let verificationError;
+  for (let snapshot = 0; snapshot < REQUIRED_ZERO_SNAPSHOTS; snapshot += 1) {
+    try {
+      const verification = await inspectLegacyData(client);
+      verificationCounts.push(verification.counts);
+      writeCounts(verification.counts, writeLine);
+    } catch (error) {
+      verificationError ??= error;
+    }
+  }
+
+  if (verificationError && !mutationFailed) throw verificationError;
+
+  if (
+    mutationFailed ||
+    verificationCounts.length !== REQUIRED_ZERO_SNAPSHOTS ||
+    verificationCounts.some((counts) => !countsAreZero(counts))
+  ) {
     fail("RESET_INCOMPLETE");
   }
 
-  return after.counts;
+  return verificationCounts.at(-1);
 }
 
 export async function main({
@@ -233,16 +294,26 @@ export async function main({
 }
 
 function publicError(error) {
-  if (error instanceof Error && /^[A-Z_]+$/u.test(error.message)) return error.message;
+  if (error instanceof ResetScriptError) return error.message;
   return "RESET_FAILED";
+}
+
+export async function runCli(options = {}) {
+  const { writeError = console.error, ...mainOptions } = options;
+  try {
+    await main(mainOptions);
+    return 0;
+  } catch (error) {
+    writeError(publicError(error));
+    return 1;
+  }
 }
 
 const isDirectExecution =
   typeof process.argv[1] === "string" && pathToFileURL(process.argv[1]).href === import.meta.url;
 
 if (isDirectExecution) {
-  main().catch((error) => {
-    console.error(publicError(error));
-    process.exitCode = 1;
+  runCli().then((exitCode) => {
+    process.exitCode = exitCode;
   });
 }
