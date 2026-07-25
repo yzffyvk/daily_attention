@@ -14,7 +14,6 @@ const projectPhoneIds: Record<string, number> = {
   tablet: 3,
   mobile: 4,
 };
-const defaultRunSeed = process.env.E2E_RUN_SEED ?? crypto.randomUUID();
 
 function phonePart(value: number, width: number, label: string) {
   if (!Number.isSafeInteger(value) || value < 0 || value >= 10 ** width) {
@@ -28,15 +27,10 @@ export function uniquePhone(
   workerIndex: number,
   retry: number,
   invocation: number,
-  runSeed = defaultRunSeed,
 ) {
   const projectId = projectPhoneIds[projectName];
   if (projectId === undefined) throw new Error(`Unknown E2E project: ${projectName}`);
-  phonePart(workerIndex, 3, "workerIndex");
-  phonePart(retry, 1, "retry");
-  phonePart(invocation, 3, "invocation");
-  const suffix = hashValue(`${runSeed}:${projectId}:${workerIndex}:${retry}:${invocation}`) % 100_000_000;
-  return `139${phonePart(suffix, 8, "phone suffix")}`;
+  return `139${projectId}${phonePart(workerIndex, 3, "workerIndex")}${phonePart(retry, 1, "retry")}${phonePart(invocation, 3, "invocation")}`;
 }
 
 const assignedClientIps = new Set<string>();
