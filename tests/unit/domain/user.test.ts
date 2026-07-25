@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   normalizePhone,
+  loginInputSchema,
   profilePatchSchema,
+  recoverInputSchema,
   registerInputSchema,
   toE164Phone,
 } from "@/lib/domain/user";
@@ -26,6 +28,41 @@ describe("user contracts", () => {
       phone: "12800138000",
       password: "password123",
       avatarKey: 3,
+    }).success).toBe(false);
+  });
+
+  it("normalizes login phones and rejects invalid phone prefixes", () => {
+    expect(loginInputSchema.parse({
+      phone: " 138 0013 8000 ",
+      password: "password123",
+    })).toEqual({
+      phone: "13800138000",
+      password: "password123",
+    });
+    expect(loginInputSchema.safeParse({
+      phone: "12800138000",
+      password: "password123",
+    }).success).toBe(false);
+  });
+
+  it("normalizes recovery phones and preserves the complete recovery payload", () => {
+    expect(recoverInputSchema.parse({
+      phone: " 138 0013 8000 ",
+      recoveryCode: "AAAAA-BBBBB-CCCCC-DDDDD-EEEEEE",
+      newPassword: "new password",
+    })).toEqual({
+      phone: "13800138000",
+      recoveryCode: "AAAAABBBBBCCCCCDDDDDEEEEEE",
+      newPassword: "new password",
+    });
+    expect(recoverInputSchema.safeParse({
+      phone: "12800138000",
+      recoveryCode: "AAAAA-BBBBB-CCCCC-DDDDD-EEEEEE",
+      newPassword: "new password",
+    }).success).toBe(false);
+    expect(recoverInputSchema.safeParse({
+      phone: "13800138000",
+      recoveryCode: "AAAAA-BBBBB-CCCCC-DDDDD-EEEEEE",
     }).success).toBe(false);
   });
 
