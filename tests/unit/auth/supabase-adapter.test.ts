@@ -121,12 +121,35 @@ describe("Supabase auth adapter", () => {
     });
   });
 
+  it("rejects an array-shaped registration profile response", async () => {
+    mocks.rpc.mockResolvedValue({ data: [databaseProfile], error: null });
+    const { ports } = await createSupabaseAuthAdapter();
+
+    await expect(
+      ports.completeRegistration({
+        userId: "user-1",
+        phone: "13800138000",
+        avatarKey: 2,
+        recoveryDigest: new Uint8Array([0xab, 0xcd]),
+      }),
+    ).rejects.toThrow("Malformed profile response");
+  });
+
   it("resolves a local phone through the phone RPC", async () => {
     mocks.rpc.mockResolvedValue({ data: [{ user_id: "user-1" }], error: null });
     const { ports } = await createSupabaseAuthAdapter();
 
     await expect(ports.resolvePhone("13800138000")).resolves.toEqual({ userId: "user-1" });
     expect(mocks.rpc).toHaveBeenCalledWith("resolve_phone", { target_phone: "13800138000" });
+  });
+
+  it("rejects a malformed phone resolution response", async () => {
+    mocks.rpc.mockResolvedValue({ data: [{ user_id: undefined }], error: null });
+    const { ports } = await createSupabaseAuthAdapter();
+
+    await expect(ports.resolvePhone("13800138000")).rejects.toThrow(
+      "Malformed phone resolution response",
+    );
   });
 
   it("updates display name and avatar through the unified profile RPC", async () => {
@@ -151,6 +174,17 @@ describe("Supabase auth adapter", () => {
     });
   });
 
+  it("rejects an updated profile response with a missing phone", async () => {
+    const profileWithoutPhone: Partial<typeof databaseProfile> = { ...databaseProfile };
+    delete profileWithoutPhone.phone;
+    mocks.rpc.mockResolvedValue({ data: profileWithoutPhone, error: null });
+    const { ports } = await createSupabaseAuthAdapter();
+
+    await expect(
+      ports.updateProfile({ userId: "user-1", displayName: "新的名称", avatarKey: 5 }),
+    ).rejects.toThrow("Malformed profile response");
+  });
+
   it("selects and maps the complete current profile", async () => {
     const adapter = await createSupabaseAuthAdapter();
 
@@ -162,6 +196,21 @@ describe("Supabase auth adapter", () => {
     });
     expect(mocks.select).toHaveBeenCalledWith("id, phone, display_name, avatar_key");
     expect(mocks.eq).toHaveBeenCalledWith("id", "user-1");
+  });
+
+  it("rejects a current profile response using the old field shape", async () => {
+    mocks.maybeSingle.mockResolvedValue({
+      data: {
+        id: "user-1",
+        auth_email: "internal@internal.invalid",
+        display_name: "Attention_001",
+        avatar_key: 2,
+      },
+      error: null,
+    });
+    const adapter = await createSupabaseAuthAdapter();
+
+    await expect(adapter.currentProfile("user-1")).rejects.toThrow("Malformed profile response");
   });
 
   it("maps only Supabase invalid-credentials errors to the public credential failure", async () => {

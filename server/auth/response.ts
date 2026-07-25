@@ -39,14 +39,24 @@ export function authFailure(error: unknown, requestId: string) {
 }
 
 function mapError(error: unknown): MappedError {
-  const code = error && typeof error === "object" ? (error as { code?: string }).code : undefined;
-  const message = error instanceof Error ? error.message : "";
+  const errorRecord = error && typeof error === "object"
+    ? error as { code?: unknown; constraint?: unknown; message?: unknown }
+    : undefined;
+  const code = typeof errorRecord?.code === "string" ? errorRecord.code : undefined;
+  const constraint = typeof errorRecord?.constraint === "string" ? errorRecord.constraint : undefined;
+  const message = typeof errorRecord?.message === "string" ? errorRecord.message : "";
   const retryAfterSeconds =
     error && typeof error === "object" && typeof (error as { retryAfterSeconds?: unknown }).retryAfterSeconds === "number"
       ? (error as { retryAfterSeconds: number }).retryAfterSeconds
       : undefined;
 
-  if (code === "23505" || code === "phone_exists") {
+  const isPhoneUniqueConflict =
+    code === "23505"
+    && (
+      constraint === "profiles_phone_key"
+      || message.includes('unique constraint "profiles_phone_key"')
+    );
+  if (code === "phone_exists" || isPhoneUniqueConflict) {
     return { code: "PHONE_TAKEN", message: "该手机号已注册", status: 409, field: "phone" };
   }
   if (code === "RATE_LIMITED" || message === "RATE_LIMITED") {

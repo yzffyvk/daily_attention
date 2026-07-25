@@ -3,15 +3,18 @@ import "server-only";
 import { createAdminSupabase } from "@/lib/supabase/admin";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { consumeRateLimit } from "@/server/rate-limit/service";
+import { z } from "zod";
 import type { AccountProfile, AuthPorts } from "./ports";
 
 type SupabaseError = { code?: string; message?: string };
-type DatabaseProfile = {
-  id: string;
-  phone: string;
-  display_name: string;
-  avatar_key: number;
-};
+
+const databaseProfileSchema = z.object({
+  id: z.string().min(1),
+  phone: z.string().regex(/^1[3-9][0-9]{9}$/u),
+  display_name: z.string().min(1),
+  avatar_key: z.number().int().min(1).max(5),
+});
+const phoneResolutionSchema = z.array(z.object({ user_id: z.string().min(1) })).max(1);
 
 function isInvalidCredentialsError(error: SupabaseError) {
   return error.code === "invalid_credentials";
@@ -27,12 +30,15 @@ function bytes(value: string) {
   return new Uint8Array(Buffer.from(hex, "hex"));
 }
 
-function profile(value: DatabaseProfile): AccountProfile {
+function profile(value: unknown): AccountProfile {
+  const parsed = databaseProfileSchema.safeParse(value);
+  if (!parsed.success) throw new Error("Malformed profile response");
+
   return {
-    id: value.id,
-    phone: value.phone,
-    displayName: value.display_name,
-    avatarKey: value.avatar_key,
+    id: parsed.data.id,
+    phone: parsed.data.phone,
+    displayName: parsed.data.display_name,
+    avatarKey: parsed.data.avatar_key,
   };
 }
 
@@ -43,10 +49,10 @@ function throwIfError(error: SupabaseError | null) {
 export async function createSupabaseAuthAdapter() {
   const admin = createAdminSupabase();
   const server = await createServerSupabase();
-  const adminRpc = admin.rpc as unknown as <T>(
+  const adminRpc = admin.rpc as unknown as (
     name: string,
     params: Record<string, unknown>,
-  ) => PromiseLike<{ data: T; error: SupabaseError | null }>;
+  ) => PromiseLike<{ data: unknown; error: SupabaseError | null }>;
 
   const ports: AuthPorts = {
     async rateLimit({ action, bucket }) {
@@ -73,7 +79,7 @@ export async function createSupabaseAuthAdapter() {
       throwIfError(error);
     },
     async completeRegistration(input) {
-      const { data, error } = await adminRpc<DatabaseProfile | null>("complete_registration", {
+      const { data, error } = await adminRpc("complete_registration", {
         target_user_id: input.userId,
         target_phone: input.phone,
         target_avatar_key: input.avatarKey,
@@ -84,15 +90,17 @@ export async function createSupabaseAuthAdapter() {
       return profile(data);
     },
     async resolvePhone(phone) {
-      const { data, error } = await adminRpc<Array<{ user_id: string }>>("resolve_phone", {
+      const { data, error } = await adminRpc("resolve_phone", {
         target_phone: phone,
       });
       throwIfError(error);
-      const account = data?.[0];
+      const parsed = phoneResolutionSchema.safeParse(data);
+      if (!parsed.success) throw new Error("Malformed phone resolution response");
+      const account = parsed.data[0];
       return account ? { userId: account.user_id } : null;
     },
     async readRecoveryDigest(userId) {
-      const { data, error } = await adminRpc<string | null>("read_recovery_digest", {
+      const { data, error } = await adminRpc("read_recovery_digest", {
         target_user_id: userId,
       });
       throwIfError(error);
@@ -100,7 +108,7 @@ export async function createSupabaseAuthAdapter() {
       return bytes(data);
     },
     async replaceRecoveryDigest(userId, expected, next) {
-      const { data, error } = await adminRpc<boolean>("replace_recovery_digest", {
+      const { data, error } = await adminRpc("replace_recovery_digest", {
         target_user_id: userId,
         expected_digest: bytea(expected),
         next_digest: bytea(next),
@@ -110,7 +118,7 @@ export async function createSupabaseAuthAdapter() {
       return data;
     },
     async updateProfile(input) {
-      const { data, error } = await adminRpc<DatabaseProfile | null>("update_profile", {
+      const { data, error } = await adminRpc("update_profile", {
         target_user_id: input.userId,
         target_display_name: input.displayName,
         target_avatar_key: input.avatarKey,
@@ -152,7 +160,7 @@ export async function createSupabaseAuthAdapter() {
         .maybeSingle();
       throwIfError(error);
       if (!data) throw new Error("PROFILE_NOT_FOUND");
-      return profile(data as unknown as DatabaseProfile);
+      return profile(data);
     },
   };
 }
