@@ -1,13 +1,28 @@
 begin;
-select plan(30);
+select plan(35);
 
 select has_schema('private', 'private schema exists');
 select has_table('public', 'profiles', 'profiles exists');
 select has_table('public', 'check_ins', 'check_ins exists');
-select has_table('private', 'login_aliases', 'login aliases exists');
+select has_table('private', 'account_recovery_credentials', 'account recovery credentials exist');
+select hasnt_table('private', 'login_aliases', 'legacy login aliases are removed');
 select has_table('private', 'auth_rate_limits', 'rate-limit buckets exist');
 select col_is_pk('public', 'profiles', 'id', 'profiles.id is the primary key');
-select col_is_pk('private', 'login_aliases', 'user_id', 'login_aliases.user_id is the primary key');
+select col_is_pk(
+  'private',
+  'account_recovery_credentials',
+  'user_id',
+  'account_recovery_credentials.user_id is the primary key'
+);
+select has_column('public', 'profiles', 'phone', 'profiles have a phone');
+select col_not_null('public', 'profiles', 'phone', 'phone is required');
+select col_is_unique('public', 'profiles', 'phone', 'phone is unique');
+select function_returns(
+  'public',
+  'complete_registration',
+  array['uuid', 'text', 'smallint', 'bytea'],
+  'public.profiles'
+);
 select has_column('public', 'check_ins', 'version', 'check-ins have a version');
 select has_index('public', 'check_ins', 'check_ins_user_date_key', 'one record per user and date');
 select ok(exists (
@@ -59,15 +74,15 @@ insert into auth.users (id)
 values ('00000000-0000-0000-0000-000000000201');
 
 select throws_ok(
-  $$insert into public.profiles (id, display_name, avatar_key)
-    values ('00000000-0000-0000-0000-000000000201', 'Schema test', 0)$$,
+  $$insert into public.profiles (id, phone, display_name, avatar_key)
+    values ('00000000-0000-0000-0000-000000000201', '13800138201', 'Schema test', 0)$$,
   '23514',
   'new row for relation "profiles" violates check constraint "profiles_avatar_key_check"',
   'profiles reject avatar keys outside 1-5'
 );
 select throws_ok(
-  $$insert into public.profiles (id, display_name, avatar_key)
-    values ('00000000-0000-0000-0000-000000000201', 'Schema test', 6)$$,
+  $$insert into public.profiles (id, phone, display_name, avatar_key)
+    values ('00000000-0000-0000-0000-000000000201', '13800138201', 'Schema test', 6)$$,
   '23514',
   'new row for relation "profiles" violates check constraint "profiles_avatar_key_check"',
   'profiles reject avatar keys above 5'

@@ -1,15 +1,15 @@
 begin;
-select plan(20);
+select plan(21);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at)
 values
   ('00000000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'one@internal.invalid', '', now(), now(), now()),
   ('00000000-0000-4000-8000-000000000002', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'two@internal.invalid', '', now(), now(), now());
 
-insert into public.profiles (id, display_name, avatar_key)
+insert into public.profiles (id, phone, display_name, avatar_key)
 values
-  ('00000000-0000-4000-8000-000000000001', '用户一', 1),
-  ('00000000-0000-4000-8000-000000000002', '用户二', 2);
+  ('00000000-0000-4000-8000-000000000001', '13800138001', '用户一', 1),
+  ('00000000-0000-4000-8000-000000000002', '13800138002', '用户二', 2);
 
 insert into public.check_ins (user_id, checkin_date, attention)
 values
@@ -174,7 +174,8 @@ select is_empty(
     returning id$$,
   'user cannot delete another user storage object'
 );
-select has_table('private', 'login_aliases', 'private mapping exists');
+select has_table('private', 'account_recovery_credentials', 'private recovery credentials exist');
+select hasnt_table('private', 'login_aliases', 'legacy private mapping is removed');
 select schema_privs_are('private', 'authenticated', array[]::text[], 'authenticated has no private schema privileges');
 
 reset role;
