@@ -1,10 +1,34 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import * as e2eHelpers from "../../e2e/helpers";
 
-const { uniquePhone } = e2eHelpers;
+const { recordE2EOwnership, uniquePhone } = e2eHelpers;
+const registryDirectoryName = "ai-learning-checkin-phone-auth-e2e-registry";
+
+async function registryFixture() {
+  const root = await mkdtemp(join(tmpdir(), "e2e-helper-registry-"));
+  const registryDirectory = join(root, registryDirectoryName);
+  const registry = join(registryDirectory, "phones");
+  const previousTmpdir = process.env.TMPDIR;
+  const previousRegistry = process.env.E2E_PHONE_REGISTRY_FILE;
+  process.env.TMPDIR = root;
+  process.env.E2E_PHONE_REGISTRY_FILE = registry;
+
+  return {
+    registry,
+    registryDirectory,
+    root,
+    async cleanup() {
+      if (previousTmpdir === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previousTmpdir;
+      if (previousRegistry === undefined) delete process.env.E2E_PHONE_REGISTRY_FILE;
+      else process.env.E2E_PHONE_REGISTRY_FILE = previousRegistry;
+      await rm(root, { force: true, recursive: true });
+    },
+  };
+}
 
 describe("E2E phone allocation", () => {
   it("assigns non-overlapping legal phones across projects, workers, retries, and calls", () => {
@@ -44,39 +68,95 @@ describe("E2E phone allocation", () => {
     expect(uniquePhone("flows-desktop", 0, 0, 0, 2)).toBe("13910002000");
   });
 
-  it("records only confirmed user ownership in the runner registry", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "e2e-helper-registry-"));
-    const registry = join(directory, "phones");
-    const previousRegistry = process.env.E2E_PHONE_REGISTRY_FILE;
-    const recordE2EOwnership = (
-      e2eHelpers as typeof e2eHelpers & {
-        recordE2EOwnership?: (userId: string, phone: string) => void;
-      }
-    ).recordE2EOwnership;
-    process.env.E2E_PHONE_REGISTRY_FILE = registry;
-
+  it("rejects a symlink registry without changing its target", async () => {
+    const fixture = await registryFixture();
+    const target = join(fixture.root, "unrelated");
     try {
-      expect(recordE2EOwnership).toBeTypeOf("function");
-      recordE2EOwnership!("00000000-0000-4000-8000-000000000001", "13910000000");
-      recordE2EOwnership!("00000000-0000-4000-8000-000000000002", "13920000000");
-      expect(await readFile(registry, "utf8")).toBe(
+      await mkdir(fixture.registryDirectory);
+      await writeFile(target, "unchanged\n");
+      await symlink(target, fixture.registry);
+      let failedClosed = false;
+      try {
+        recordE2EOwnership("00000000-0000-4000-8000-000000000001", "13910000000");
+      } catch {
+        failedClosed = true;
+      }
+
+      expect(await readFile(target, "utf8")).toBe("unchanged\n");
+      expect(failedClosed).toBe(true);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("rejects a missing registry without creating it", async () => {
+    const fixture = await registryFixture();
+    try {
+      await mkdir(fixture.registryDirectory);
+      expect(() => recordE2EOwnership(
+        "00000000-0000-4000-8000-000000000001",
+        "13910000000",
+      )).toThrow();
+      await expect(lstat(fixture.registry)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("rejects a registry path outside the runner-owned location", async () => {
+    const fixture = await registryFixture();
+    const outside = join(fixture.root, "outside");
+    process.env.E2E_PHONE_REGISTRY_FILE = outside;
+    try {
+      await writeFile(outside, "unchanged\n");
+      let failedClosed = false;
+      try {
+        recordE2EOwnership("00000000-0000-4000-8000-000000000001", "13910000000");
+      } catch {
+        failedClosed = true;
+      }
+
+      expect(await readFile(outside, "utf8")).toBe("unchanged\n");
+      expect(failedClosed).toBe(true);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("appends ownership to an existing runner-owned registry", async () => {
+    const fixture = await registryFixture();
+    try {
+      await mkdir(fixture.registryDirectory);
+      await writeFile(fixture.registry, "");
+      recordE2EOwnership("00000000-0000-4000-8000-000000000001", "13910000000");
+      recordE2EOwnership("00000000-0000-4000-8000-000000000002", "13920000000");
+
+      expect(await readFile(fixture.registry, "utf8")).toBe(
         '{"userId":"00000000-0000-4000-8000-000000000001","phone":"13910000000"}\n' +
         '{"userId":"00000000-0000-4000-8000-000000000002","phone":"13920000000"}\n',
       );
-      expect(() => recordE2EOwnership!("not-a-user", "13910000000")).toThrow("user ownership");
-      expect(() => recordE2EOwnership!(
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("validates ownership fields and requires a registry setting", async () => {
+    const fixture = await registryFixture();
+    try {
+      await mkdir(fixture.registryDirectory);
+      await writeFile(fixture.registry, "");
+      expect(() => recordE2EOwnership("not-a-user", "13910000000")).toThrow("user ownership");
+      expect(() => recordE2EOwnership(
         "00000000-0000-4000-8000-000000000003",
         "13988888888",
       )).toThrow("reserved E2E phone");
       delete process.env.E2E_PHONE_REGISTRY_FILE;
-      expect(() => recordE2EOwnership!(
+      expect(() => recordE2EOwnership(
         "00000000-0000-4000-8000-000000000003",
         "13910000000",
       )).toThrow("registry");
     } finally {
-      if (previousRegistry === undefined) delete process.env.E2E_PHONE_REGISTRY_FILE;
-      else process.env.E2E_PHONE_REGISTRY_FILE = previousRegistry;
-      await rm(directory, { force: true, recursive: true });
+      await fixture.cleanup();
     }
   });
 });

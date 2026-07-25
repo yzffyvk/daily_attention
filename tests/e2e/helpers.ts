@@ -1,6 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
-import { appendFileSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import {
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  writeSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 export const password = "password123";
 export const appHeading = /今天你\s*attention\s*了吗？/;
@@ -18,6 +26,7 @@ const projectPhoneIds: Record<string, number> = {
 };
 const reservedE2EPhone = /^139[1-4][0-9]{7}$/u;
 const userIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const registryDirectoryName = "ai-learning-checkin-phone-auth-e2e-registry";
 
 function phonePart(value: number, width: number, label: string) {
   if (!Number.isSafeInteger(value) || value < 0 || value >= 10 ** width) {
@@ -46,14 +55,41 @@ export function recordE2EOwnership(userId: string, phone: string) {
     throw new Error(`Cannot record non-reserved E2E phone: ${phone}`);
   }
   const registry = process.env.E2E_PHONE_REGISTRY_FILE;
-  if (!registry || !isAbsolute(registry)) {
+  const registryDirectory = join(tmpdir(), registryDirectoryName);
+  const expectedRegistry = join(registryDirectory, "phones");
+  if (!registry || registry !== expectedRegistry) {
     throw new Error("E2E phone registry path is unavailable");
   }
-  appendFileSync(
-    registry,
-    `${JSON.stringify({ userId, phone })}\n`,
-    { encoding: "utf8", flag: "a", mode: 0o600 },
-  );
+  const directoryMetadata = lstatSync(registryDirectory);
+  if (!directoryMetadata.isDirectory() || directoryMetadata.isSymbolicLink()) {
+    throw new Error("E2E phone registry directory is invalid");
+  }
+  const registryMetadata = lstatSync(registry);
+  if (!registryMetadata.isFile() || registryMetadata.isSymbolicLink()) {
+    throw new Error("E2E phone registry file is invalid");
+  }
+  if (typeof fsConstants.O_NOFOLLOW !== "number" || fsConstants.O_NOFOLLOW === 0) {
+    throw new Error("Safe E2E phone registry writes are unavailable");
+  }
+
+  let descriptor: number | null = null;
+  try {
+    descriptor = openSync(
+      registry,
+      fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_NOFOLLOW,
+    );
+    if (!fstatSync(descriptor).isFile()) {
+      throw new Error("E2E phone registry descriptor is invalid");
+    }
+    writeSync(
+      descriptor,
+      `${JSON.stringify({ userId, phone })}\n`,
+      null,
+      "utf8",
+    );
+  } finally {
+    if (descriptor !== null) closeSync(descriptor);
+  }
 }
 
 const assignedClientIps = new Set<string>();
