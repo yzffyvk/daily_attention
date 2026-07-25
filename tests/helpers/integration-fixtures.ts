@@ -7,6 +7,10 @@ const execFileAsync = promisify(execFile);
 const userIds = new Set<string>();
 const rateBuckets = new Set<string>();
 
+export function uniquePhone(seed: number) {
+  return `139${String(seed).padStart(8, "0").slice(-8)}`;
+}
+
 export function trackIntegrationUser(userId: string) {
   userIds.add(userId);
 }

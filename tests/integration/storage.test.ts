@@ -5,16 +5,18 @@ import {
   cleanupIntegrationFixtures,
   trackIntegrationRateBucket,
   trackIntegrationUser,
+  uniquePhone,
 } from "../helpers/integration-fixtures";
 
 const date = "2026-07-23";
+let phoneSeed = 30_000;
 
 async function registeredSession() {
   const ip = `storage-${crypto.randomUUID()}`;
   const session = new ApiSession(undefined, { "CF-Connecting-IP": ip });
   trackIntegrationRateBucket("register", ip);
   const response = await session.post("/api/auth/register", {
-    name: `图片-${crypto.randomUUID().slice(0, 12)}`,
+    phone: uniquePhone(phoneSeed++),
     password: "password123",
     avatarKey: 1,
   });

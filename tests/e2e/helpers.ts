@@ -8,13 +8,14 @@ export async function waitForClient(page: Page) {
   await page.waitForTimeout(700);
 }
 
-export function uniqueName(prefix: string) {
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+export function uniquePhone(seed: number) {
+  return `139${String(seed).padStart(8, "0").slice(-8)}`;
 }
 
 const assignedClientIps = new Set<string>();
+let phoneSeed = Date.now();
 
-function hashName(value: string) {
+function hashValue(value: string) {
   let hash = 2_166_136_261;
   for (const character of value) {
     hash ^= character.codePointAt(0) ?? 0;
@@ -23,9 +24,9 @@ function hashName(value: string) {
   return hash >>> 0;
 }
 
-function e2eClientIp(name: string) {
+function e2eClientIp(phone: string) {
   for (let collision = 0; collision < 256; collision += 1) {
-    const hash = hashName(`${name}:${collision}`);
+    const hash = hashValue(`${phone}:${collision}`);
     const ip = `10.${1 + (hash >>> 16) % 254}.${1 + (hash >>> 8) % 254}.${1 + hash % 254}`;
     if (!assignedClientIps.has(ip)) {
       assignedClientIps.add(ip);
@@ -35,11 +36,12 @@ function e2eClientIp(name: string) {
   throw new Error("Unable to allocate an isolated E2E client address");
 }
 
-export async function register(page: Page, name = uniqueName("e2e")) {
-  await page.context().setExtraHTTPHeaders({ "CF-Connecting-IP": e2eClientIp(name) });
+export async function register(page: Page, phone = uniquePhone(phoneSeed++)) {
+  await page.context().setExtraHTTPHeaders({ "CF-Connecting-IP": e2eClientIp(phone) });
   await page.goto("/register", { waitUntil: "load" });
   await waitForClient(page);
-  await page.getByLabel("名称").fill(name);
+  await expect(page.getByRole("link", { name: "返回登录" })).toHaveAttribute("href", "/login");
+  await page.getByLabel("手机号").fill(phone);
   await page.getByLabel("头像 4").check();
   await page.getByLabel("密码", { exact: true }).fill(password);
   await page.getByLabel("确认密码").fill(password);
@@ -51,7 +53,7 @@ export async function register(page: Page, name = uniqueName("e2e")) {
   if (!code) throw new Error("The registration dialog did not show a recovery code");
   await page.getByRole("button", { name: "我已保存" }).click();
   await expect(page.getByRole("button", { name: "打开账户菜单" })).toBeVisible();
-  return { code, name };
+  return { code, phone };
 }
 
 export async function logout(page: Page) {

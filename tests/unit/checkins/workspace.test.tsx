@@ -1104,7 +1104,7 @@ describe("CheckInWorkspace", () => {
 
   it("keeps account controls available while the selected record has a session error", async () => {
     const date = "2026-07-23";
-    const profile = { id: "profile-1", avatarKey: 1, displayName: "学习者" };
+    const profile = { id: "profile-1", phone: "13800138000", avatarKey: 1, displayName: "学习者" };
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
@@ -1630,7 +1630,7 @@ describe("CheckInWorkspace", () => {
         <CheckInWorkspace
           initialDate={date}
           initialToday={getTodayKey()}
-          initialProfile={{ id: "profile-1", avatarKey: 1, displayName: "学习者" }}
+          initialProfile={{ id: "profile-1", phone: "13800138000", avatarKey: 1, displayName: "学习者" }}
         />
       </TestQueryProvider>,
     );

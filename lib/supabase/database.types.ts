@@ -85,6 +85,7 @@ export type Database = {
           created_at: string
           display_name: string
           id: string
+          phone: string
           updated_at: string
         }
         Insert: {
@@ -92,6 +93,7 @@ export type Database = {
           created_at?: string
           display_name: string
           id: string
+          phone: string
           updated_at?: string
         }
         Update: {
@@ -99,6 +101,7 @@ export type Database = {
           created_at?: string
           display_name?: string
           id?: string
+          phone?: string
           updated_at?: string
         }
         Relationships: []
@@ -110,9 +113,8 @@ export type Database = {
     Functions: {
       complete_registration: {
         Args: {
-          target_auth_email: string
           target_avatar_key: number
-          target_login_name: string
+          target_phone: string
           target_recovery_digest: string
           target_user_id: string
         }
@@ -121,6 +123,7 @@ export type Database = {
           created_at: string
           display_name: string
           id: string
+          phone: string
           updated_at: string
         }
         SetofOptions: {
@@ -170,33 +173,16 @@ export type Database = {
           retry_after_seconds: number
         }[]
       }
-      resolve_login_name: {
-        Args: { target_login_name: string }
+      resolve_phone: {
+        Args: { target_phone: string }
         Returns: {
-          auth_email: string
           user_id: string
         }[]
       }
-      update_profile_avatar: {
-        Args: { target_avatar_key: number; target_user_id: string }
-        Returns: {
-          avatar_key: number
-          created_at: string
-          display_name: string
-          id: string
-          updated_at: string
-        }
-        SetofOptions: {
-          from: "*"
-          to: "profiles"
-          isOneToOne: true
-          isSetofReturn: false
-        }
-      }
-      update_profile_identity: {
+      update_profile: {
         Args: {
           target_avatar_key: number
-          target_login_name: string
+          target_display_name: string
           target_user_id: string
         }
         Returns: {
@@ -204,6 +190,7 @@ export type Database = {
           created_at: string
           display_name: string
           id: string
+          phone: string
           updated_at: string
         }
         SetofOptions: {

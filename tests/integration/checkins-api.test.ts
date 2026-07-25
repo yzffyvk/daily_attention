@@ -4,9 +4,11 @@ import {
   cleanupIntegrationFixtures,
   trackIntegrationRateBucket,
   trackIntegrationUser,
+  uniquePhone,
 } from "../helpers/integration-fixtures";
 
 const date = "2026-07-23";
+let phoneSeed = 20_000;
 
 function entry(version: number | null) {
   return {
@@ -23,10 +25,9 @@ function entry(version: number | null) {
 async function registeredSession() {
   const ip = `checkin-${crypto.randomUUID()}`;
   const session = new ApiSession(undefined, { "CF-Connecting-IP": ip });
-  const name = `打卡-${crypto.randomUUID().slice(0, 12)}`;
   trackIntegrationRateBucket("register", ip);
   const response = await session.post("/api/auth/register", {
-    name,
+    phone: uniquePhone(phoneSeed++),
     password: "password123",
     avatarKey: 1,
   });
