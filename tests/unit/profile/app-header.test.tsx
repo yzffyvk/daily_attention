@@ -18,7 +18,7 @@ afterEach(() => {
 
 describe("profile header", () => {
   it("loads lifetime totals and a cross-month current streak from the stats query", async () => {
-    const profile = { id: "profile-1", avatarKey: 1, displayName: "学习者" };
+    const profile = { id: "profile-1", phone: "13800138000", avatarKey: 1, displayName: "学习者" };
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
@@ -64,7 +64,7 @@ describe("profile header", () => {
   });
 
   it("keeps a stats failure visible and independently retryable", async () => {
-    const profile = { id: "profile-1", avatarKey: 1, displayName: "学习者" };
+    const profile = { id: "profile-1", phone: "13800138000", avatarKey: 1, displayName: "学习者" };
     let statsRequests = 0;
     vi.stubGlobal(
       "fetch",
@@ -122,8 +122,77 @@ describe("profile header", () => {
     expect(screen.queryByRole("status", { name: "学习统计错误" })).not.toBeInTheDocument();
   });
 
+  it("shows a masked read-only phone number and updates the display name without a password", async () => {
+    const profile = {
+      id: "profile-1",
+      phone: "13800138000",
+      avatarKey: 1,
+      displayName: "Attention_001",
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).startsWith("/api/checkins/stats?")) {
+          return Promise.resolve(response({
+            ok: true,
+            data: {
+              totalCount: 0,
+              currentStreak: 0,
+              hasTodayRecord: false,
+            },
+            requestId: "stats-request",
+          }));
+        }
+        if (init?.method === "PATCH") {
+          return Promise.resolve(response({
+            ok: true,
+            data: { profile: { ...profile, displayName: "今天也学习" } },
+            requestId: "profile-update-request",
+          }));
+        }
+        return Promise.resolve(response({
+          ok: true,
+          data: { profile },
+          requestId: "profile-request",
+        }));
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <TestQueryProvider>
+        <AppHeader
+          initialProfile={profile}
+          isCelebrating={false}
+          isMuted={false}
+          onRequestLogout={vi.fn()}
+          onSelectToday={vi.fn()}
+          onToggleMuted={vi.fn()}
+          today="2026-07-23"
+        />
+      </TestQueryProvider>,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "打开账户菜单" }));
+    await user.click(screen.getByRole("menuitem", { name: "编辑资料" }));
+
+    expect(screen.getByText("138****8000")).toBeVisible();
+    expect(screen.getByLabelText("名称")).toHaveValue("Attention_001");
+    expect(screen.queryByLabelText("当前密码")).not.toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText("名称"));
+    await user.type(screen.getByLabelText("名称"), "今天也学习");
+    await user.click(screen.getByRole("button", { name: "保存资料" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/me",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ displayName: "今天也学习", avatarKey: 1 }),
+      }),
+    );
+    expect(screen.queryByRole("dialog", { name: "编辑资料" })).not.toBeInTheDocument();
+  });
+
   it("keeps a duplicate profile name as its meaningful 409 error", async () => {
-    const profile = { id: "profile-1", avatarKey: 1, displayName: "学习者" };
+    const profile = { id: "profile-1", phone: "13800138000", avatarKey: 1, displayName: "学习者" };
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -144,7 +213,7 @@ describe("profile header", () => {
             error: {
               code: "NAME_TAKEN",
               message: "这个名称已经被使用",
-              details: { field: "name" },
+              details: { field: "displayName" },
             },
             requestId: "name-taken-request",
           }, 409));
@@ -175,7 +244,6 @@ describe("profile header", () => {
     await user.click(screen.getByRole("menuitem", { name: "编辑资料" }));
     await user.clear(screen.getByLabelText("名称"));
     await user.type(screen.getByLabelText("名称"), "已有名称");
-    await user.type(screen.getByLabelText("当前密码"), "password123");
     await user.click(screen.getByRole("button", { name: "保存资料" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("这个名称已经被使用");
@@ -184,7 +252,7 @@ describe("profile header", () => {
   });
 
   it("restores focus to the account trigger after closing the profile dialog", async () => {
-    const profile = { id: "profile-1", avatarKey: 1, displayName: "学习者" };
+    const profile = { id: "profile-1", phone: "13800138000", avatarKey: 1, displayName: "学习者" };
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
@@ -223,7 +291,7 @@ describe("profile header", () => {
   });
 
   it("rotates and shows a recovery code once after confirming the current password", async () => {
-    const profile = { id: "profile-1", avatarKey: 1, displayName: "学习者" };
+    const profile = { id: "profile-1", phone: "13800138000", avatarKey: 1, displayName: "学习者" };
     const rotatedCode = "ABCDE-FGHJK-MNPQR-STUVW-XYZ234";
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const path = String(input);
@@ -287,7 +355,7 @@ describe("profile header", () => {
   });
 
   it("keeps the recovery-code rotation dialog usable after an API error", async () => {
-    const profile = { id: "profile-1", avatarKey: 1, displayName: "学习者" };
+    const profile = { id: "profile-1", phone: "13800138000", avatarKey: 1, displayName: "学习者" };
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {

@@ -34,6 +34,10 @@ function normalizeDisplayName(value: string) {
   return value.normalize("NFKC").trim().replace(/\s+/gu, " ");
 }
 
+function maskPhone(phone: string) {
+  return `${phone.slice(0, 3)}****${phone.slice(-4)}`;
+}
+
 function ProfileDialog({
   profile,
   onClose,
@@ -46,7 +50,6 @@ function ProfileDialog({
   const queryClient = useQueryClient();
   const [name, setName] = useState(profile.displayName);
   const [avatarKey, setAvatarKey] = useState(profile.avatarKey);
-  const [currentPassword, setCurrentPassword] = useState("");
   const [error, setError] = useState("");
   const dialogRef = useRef<HTMLElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -107,16 +110,12 @@ function ProfileDialog({
       onClose();
       return;
     }
-    if (nameChanged && !currentPassword) {
-      setError("修改名称需要输入当前密码");
-      return;
-    }
 
     setError("");
     try {
       await profileMutation.mutateAsync({
+        displayName: nameChanged ? normalizedName : profile.displayName,
         avatarKey,
-        ...(nameChanged ? { name: normalizedName, currentPassword } : {}),
       });
       onClose();
     } catch (mutationError) {
@@ -142,8 +141,12 @@ function ProfileDialog({
         </button>
         <p className="eyebrow">PROFILE</p>
         <h2 id="profile-dialog-title">编辑资料</h2>
-        <p>头像可以随时更新；修改名称时需要确认当前密码。</p>
+        <p>手机号不可修改；头像和名称可以随时更新。</p>
         <form className="profile-form" onSubmit={submit}>
+          <div className="auth-field">
+            <span>手机号</span>
+            <span id="profile-phone">{maskPhone(profile.phone)}</span>
+          </div>
           <label className="auth-field" htmlFor="profile-name">
             <span>名称</span>
             <input
@@ -174,18 +177,6 @@ function ProfileDialog({
               ))}
             </div>
           </fieldset>
-          {nameChanged ? (
-            <label className="auth-field" htmlFor="profile-password">
-              <span>当前密码</span>
-              <input
-                autoComplete="current-password"
-                id="profile-password"
-                onChange={(event) => setCurrentPassword(event.target.value)}
-                type="password"
-                value={currentPassword}
-              />
-            </label>
-          ) : null}
           {error ? <p className="login-error" role="alert">{error}</p> : null}
           <div className="dialog-actions">
             <button className="primary-button" disabled={profileMutation.isPending} type="submit">

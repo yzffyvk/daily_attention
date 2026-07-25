@@ -13,7 +13,7 @@ export default async function AppPage() {
 
   const { data: profile, error } = await supabase
     .from("profiles")
-    .select("id, display_name, avatar_key")
+    .select("id, phone, display_name, avatar_key")
     .eq("id", data.claims.sub)
     .maybeSingle();
   if (error || !profile) redirect("/login");
@@ -25,6 +25,7 @@ export default async function AppPage() {
       userId={data.claims.sub}
       initialProfile={{
         id: profile.id,
+        phone: profile.phone,
         displayName: profile.display_name,
         avatarKey: profile.avatar_key,
       }}

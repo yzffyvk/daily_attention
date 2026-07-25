@@ -1,11 +1,37 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, requestApi } from "@/features/checkins/api";
+import { ApiError, requestApi, updateCurrentProfile } from "@/features/checkins/api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe("check-in API client", () => {
+  it("sends only displayName and avatarKey when updating the current profile", async () => {
+    const profile = {
+      id: "profile-1",
+      phone: "13800138000",
+      avatarKey: 1,
+      displayName: "今天也学习",
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ ok: true, data: { profile }, requestId: "profile-update-request" }),
+        { headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateCurrentProfile({ displayName: "今天也学习", avatarKey: 1 })).resolves.toEqual(profile);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/me",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ displayName: "今天也学习", avatarKey: 1 }),
+      }),
+    );
+  });
+
   it("preserves the cloud record and request metadata on a version conflict", async () => {
     const current = {
       id: "record-1",

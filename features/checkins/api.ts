@@ -228,9 +228,8 @@ export async function getCurrentProfile() {
 }
 
 export async function updateCurrentProfile(input: {
-  name?: string;
-  avatarKey?: number;
-  currentPassword?: string;
+  displayName: string;
+  avatarKey: number;
 }) {
   const result = await requestApi<{ profile: AccountProfile }>("/api/me", {
     method: "PATCH",
