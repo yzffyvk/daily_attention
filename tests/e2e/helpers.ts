@@ -1,4 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
+import { appendFileSync } from "node:fs";
+import { isAbsolute } from "node:path";
 
 export const password = "password123";
 export const appHeading = /今天你\s*attention\s*了吗？/;
@@ -14,6 +16,7 @@ const projectPhoneIds: Record<string, number> = {
   tablet: 3,
   mobile: 4,
 };
+const reservedE2EPhone = /^139[1-4][0-9]{7}$/u;
 
 function phonePart(value: number, width: number, label: string) {
   if (!Number.isSafeInteger(value) || value < 0 || value >= 10 ** width) {
@@ -31,6 +34,17 @@ export function uniquePhone(
   const projectId = projectPhoneIds[projectName];
   if (projectId === undefined) throw new Error(`Unknown E2E project: ${projectName}`);
   return `139${projectId}${phonePart(workerIndex, 3, "workerIndex")}${phonePart(retry, 1, "retry")}${phonePart(invocation, 3, "invocation")}`;
+}
+
+export function recordE2EPhone(phone: string) {
+  if (!reservedE2EPhone.test(phone)) {
+    throw new Error(`Cannot record non-reserved E2E phone: ${phone}`);
+  }
+  const registry = process.env.E2E_PHONE_REGISTRY_FILE;
+  if (!registry || !isAbsolute(registry)) {
+    throw new Error("E2E phone registry path is unavailable");
+  }
+  appendFileSync(registry, `${phone}\n`, { encoding: "utf8", flag: "a", mode: 0o600 });
 }
 
 const assignedClientIps = new Set<string>();
@@ -65,6 +79,7 @@ export async function register(page: Page, phone?: string) {
     testInfo.retry,
     registrationSequence++,
   );
+  recordE2EPhone(allocatedPhone);
   await page.context().setExtraHTTPHeaders({ "CF-Connecting-IP": e2eClientIp(allocatedPhone) });
   await page.goto("/register", { waitUntil: "load" });
   await waitForClient(page);

@@ -1,5 +1,10 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { uniquePhone } from "../../e2e/helpers";
+import * as e2eHelpers from "../../e2e/helpers";
+
+const { uniquePhone } = e2eHelpers;
 
 describe("E2E phone allocation", () => {
   it("assigns non-overlapping legal phones across projects, workers, retries, and calls", () => {
@@ -31,5 +36,29 @@ describe("E2E phone allocation", () => {
     expect(() => uniquePhone("desktop", 1_000, 0, 0)).toThrow("workerIndex");
     expect(() => uniquePhone("desktop", 0, 10, 0)).toThrow("retry");
     expect(() => uniquePhone("desktop", 0, 0, 1_000)).toThrow("invocation");
+  });
+
+  it("atomically records only reserved E2E phones in the runner registry", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "e2e-helper-registry-"));
+    const registry = join(directory, "phones");
+    const previousRegistry = process.env.E2E_PHONE_REGISTRY_FILE;
+    const recordE2EPhone = (
+      e2eHelpers as typeof e2eHelpers & { recordE2EPhone?: (phone: string) => void }
+    ).recordE2EPhone;
+    process.env.E2E_PHONE_REGISTRY_FILE = registry;
+
+    try {
+      expect(recordE2EPhone).toBeTypeOf("function");
+      recordE2EPhone!("13910000000");
+      recordE2EPhone!("13920000000");
+      expect(await readFile(registry, "utf8")).toBe("13910000000\n13920000000\n");
+      expect(() => recordE2EPhone!("13988888888")).toThrow("reserved E2E phone");
+      delete process.env.E2E_PHONE_REGISTRY_FILE;
+      expect(() => recordE2EPhone!("13910000000")).toThrow("registry");
+    } finally {
+      if (previousRegistry === undefined) delete process.env.E2E_PHONE_REGISTRY_FILE;
+      else process.env.E2E_PHONE_REGISTRY_FILE = previousRegistry;
+      await rm(directory, { force: true, recursive: true });
+    }
   });
 });
