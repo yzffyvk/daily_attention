@@ -95,6 +95,14 @@ export async function createSupabaseAuthAdapter() {
       const account = parsed.data[0];
       return account ? { userId: account.user_id } : null;
     },
+    async readProfile(userId) {
+      const { data, error } = await admin.rpc("read_profile", {
+        target_user_id: userId,
+      });
+      throwIfError(error);
+      if (!data) throw new Error("PROFILE_NOT_FOUND");
+      return profile(data);
+    },
     async readRecoveryDigest(userId) {
       const { data, error } = await admin.rpc("read_recovery_digest", {
         target_user_id: userId,

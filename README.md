@@ -37,7 +37,7 @@ value of at least 32 bytes. `.dev.vars` is ignored and must not be committed.
 
 Production values belong in `.env.production.local`, which is also ignored.
 The active environment template is `.dev.vars.example`; it contains no WeChat
-configuration because the current application uses name-and-password accounts
+configuration because the current application uses phone-and-password accounts
 backed by Supabase.
 
 The formal schema and data APIs are Supabase-owned. Apply all local migrations

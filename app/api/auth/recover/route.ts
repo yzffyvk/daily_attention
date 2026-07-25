@@ -21,9 +21,10 @@ export async function POST(request: Request) {
       },
       adapter.ports,
     );
-    const user = await adapter.currentUser();
-    const profile = await adapter.currentProfile(user.id);
-    return authSuccess({ profile, recoveryCode: result.recoveryCode }, requestId);
+    return authSuccess(
+      { profile: result.profile, recoveryCode: result.recoveryCode },
+      requestId,
+    );
   } catch (error) {
     return authFailure(error, requestId);
   }

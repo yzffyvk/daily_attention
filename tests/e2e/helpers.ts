@@ -17,6 +17,7 @@ const projectPhoneIds: Record<string, number> = {
   mobile: 4,
 };
 const reservedE2EPhone = /^139[1-4][0-9]{7}$/u;
+const userIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 function phonePart(value: number, width: number, label: string) {
   if (!Number.isSafeInteger(value) || value < 0 || value >= 10 ** width) {
@@ -30,13 +31,17 @@ export function uniquePhone(
   workerIndex: number,
   retry: number,
   invocation: number,
+  runScope: number,
 ) {
   const projectId = projectPhoneIds[projectName];
   if (projectId === undefined) throw new Error(`Unknown E2E project: ${projectName}`);
-  return `139${projectId}${phonePart(workerIndex, 3, "workerIndex")}${phonePart(retry, 1, "retry")}${phonePart(invocation, 3, "invocation")}`;
+  return `139${projectId}${phonePart(runScope, 4, "runScope")}${phonePart(workerIndex, 1, "workerIndex")}${phonePart(retry, 1, "retry")}${phonePart(invocation, 1, "invocation")}`;
 }
 
-export function recordE2EPhone(phone: string) {
+export function recordE2EOwnership(userId: string, phone: string) {
+  if (!userIdPattern.test(userId)) {
+    throw new Error("Cannot record invalid E2E user ownership");
+  }
   if (!reservedE2EPhone.test(phone)) {
     throw new Error(`Cannot record non-reserved E2E phone: ${phone}`);
   }
@@ -44,11 +49,23 @@ export function recordE2EPhone(phone: string) {
   if (!registry || !isAbsolute(registry)) {
     throw new Error("E2E phone registry path is unavailable");
   }
-  appendFileSync(registry, `${phone}\n`, { encoding: "utf8", flag: "a", mode: 0o600 });
+  appendFileSync(
+    registry,
+    `${JSON.stringify({ userId, phone })}\n`,
+    { encoding: "utf8", flag: "a", mode: 0o600 },
+  );
 }
 
 const assignedClientIps = new Set<string>();
 let registrationSequence = 0;
+
+function currentRunScope() {
+  const value = process.env.E2E_RUN_SCOPE;
+  if (!value || !/^[0-9]{4}$/u.test(value)) {
+    throw new Error("E2E run scope is unavailable");
+  }
+  return Number(value);
+}
 
 function hashValue(value: string) {
   let hash = 2_166_136_261;
@@ -78,8 +95,8 @@ export async function register(page: Page, phone?: string) {
     testInfo.workerIndex,
     testInfo.retry,
     registrationSequence++,
+    currentRunScope(),
   );
-  recordE2EPhone(allocatedPhone);
   await page.context().setExtraHTTPHeaders({ "CF-Connecting-IP": e2eClientIp(allocatedPhone) });
   await page.goto("/register", { waitUntil: "load" });
   await waitForClient(page);
@@ -91,7 +108,28 @@ export async function register(page: Page, phone?: string) {
   await page.getByLabel("头像 4").check();
   await page.getByLabel("密码", { exact: true }).fill(password);
   await page.getByLabel("确认密码").fill(password);
+  const registrationResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === "/api/auth/register" && response.request().method() === "POST";
+  });
   await page.getByRole("button", { name: "注册并进入" }).click();
+  const response = await registrationResponse;
+  if (!response.ok()) {
+    throw new Error(`E2E registration failed with status ${response.status()}`);
+  }
+  const body = await response.json() as {
+    ok?: unknown;
+    data?: { profile?: { id?: unknown; phone?: unknown } };
+  };
+  const profile = body.data?.profile;
+  if (
+    body.ok !== true
+    || typeof profile?.id !== "string"
+    || profile.phone !== allocatedPhone
+  ) {
+    throw new Error("E2E registration returned invalid ownership");
+  }
+  recordE2EOwnership(profile.id, allocatedPhone);
 
   const recoveryCode = page.locator('output[aria-label="恢复码"]');
   await expect(page.getByRole("heading", { name: "恢复码只显示这一次" })).toBeVisible();

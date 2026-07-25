@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  adminFrom: vi.fn(),
   createUser: vi.fn(),
   deleteUser: vi.fn(),
   eq: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock("@/lib/supabase/admin", () => ({
           updateUserById: mocks.updateUserById,
         },
       },
+      from: mocks.adminFrom,
     };
     return adminClient;
   }),
@@ -75,6 +77,7 @@ beforeEach(() => {
   mocks.eq.mockReturnValue({ maybeSingle: mocks.maybeSingle });
   mocks.select.mockReturnValue({ eq: mocks.eq });
   mocks.from.mockReturnValue({ select: mocks.select });
+  mocks.adminFrom.mockReturnValue({ select: mocks.select });
 });
 
 afterEach(() => {
@@ -166,6 +169,22 @@ describe("Supabase auth adapter", () => {
 
     await expect(ports.resolvePhone("13800138000")).resolves.toEqual({ userId: "user-1" });
     expect(mocks.rpc).toHaveBeenCalledWith("resolve_phone", { target_phone: "13800138000" });
+  });
+
+  it("reads and validates a recovery profile through the service-role RPC", async () => {
+    mocks.rpc.mockResolvedValue({ data: databaseProfile, error: null });
+    const { ports } = await createSupabaseAuthAdapter();
+
+    await expect(ports.readProfile("user-1")).resolves.toEqual({
+      id: "user-1",
+      phone: "13800138000",
+      displayName: "Attention_001",
+      avatarKey: 2,
+    });
+    expect(mocks.rpc).toHaveBeenCalledWith("read_profile", {
+      target_user_id: "user-1",
+    });
+    expect(mocks.adminFrom).not.toHaveBeenCalled();
   });
 
   it("rejects a malformed phone resolution response", async () => {

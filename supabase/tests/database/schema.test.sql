@@ -1,5 +1,5 @@
 begin;
-select plan(35);
+select plan(36);
 
 select has_schema('private', 'private schema exists');
 select has_table('public', 'profiles', 'profiles exists');
@@ -21,6 +21,12 @@ select function_returns(
   'public',
   'complete_registration',
   array['uuid', 'text', 'smallint', 'bytea'],
+  'public.profiles'
+);
+select function_returns(
+  'public',
+  'read_profile',
+  array['uuid'],
   'public.profiles'
 );
 select has_column('public', 'check_ins', 'version', 'check-ins have a version');

@@ -16,6 +16,7 @@ function ports(): AuthPorts {
     deleteAuthUser: vi.fn().mockResolvedValue(undefined),
     completeRegistration: vi.fn().mockResolvedValue(profile),
     resolvePhone: vi.fn().mockResolvedValue({ userId: "user-1" }),
+    readProfile: vi.fn().mockResolvedValue(profile),
     readRecoveryDigest: vi.fn(),
     replaceRecoveryDigest: vi.fn().mockResolvedValue(true),
     updateProfile: vi.fn().mockResolvedValue(profile),
@@ -112,7 +113,21 @@ describe("auth service", () => {
     expect(adapter.updatePassword).toHaveBeenCalledWith("user-1", "newpassword123");
     expect(adapter.resolvePhone).toHaveBeenCalledWith("13800138000");
     expect(adapter.replaceRecoveryDigest).toHaveBeenCalledOnce();
+    expect(result.profile).toMatchObject({ id: "user-1", phone: "13800138000" });
     expect(result.recoveryCode.replace(/-/g, "")).toHaveLength(26);
+  });
+
+  it("performs zero recovery mutations when the profile lookup fails", async () => {
+    const adapter = ports();
+    const profileFailure = new Error("profile lookup failed");
+    vi.mocked(adapter.readRecoveryDigest).mockResolvedValue(await recoveryDigest());
+    vi.mocked(adapter.readProfile).mockRejectedValue(profileFailure);
+
+    await expect(recoverAccount(recoveryInput(), adapter)).rejects.toThrow(profileFailure);
+
+    expect(adapter.replaceRecoveryDigest).not.toHaveBeenCalled();
+    expect(adapter.updatePassword).not.toHaveBeenCalled();
+    expect(adapter.signIn).not.toHaveBeenCalled();
   });
 
   it("does not change the password when another recovery claims the digest", async () => {

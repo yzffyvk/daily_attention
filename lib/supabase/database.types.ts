@@ -145,6 +145,23 @@ export type Database = {
           retry_after_seconds: number
         }[]
       }
+      read_profile: {
+        Args: { target_user_id: string }
+        Returns: {
+          avatar_key: number
+          created_at: string
+          display_name: string
+          id: string
+          phone: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       read_recovery_digest: {
         Args: { target_user_id: string }
         Returns: string

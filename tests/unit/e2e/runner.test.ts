@@ -26,17 +26,24 @@ appendFileSync(process.env.FAKE_NPX_LOG, JSON.stringify(args) + "\\n");
   }
 
   if (args[0] === "playwright" && args[1] === "test") {
-    if (process.env.FAKE_PLAYWRIGHT_MARKER) {
-      writeFileSync(process.env.FAKE_PLAYWRIGHT_MARKER, String(process.pid));
+    if (process.env.FAKE_RUN_SCOPE_LOG) {
+      appendFileSync(process.env.FAKE_RUN_SCOPE_LOG, process.env.E2E_RUN_SCOPE + "\\n");
     }
     if (process.env.FAKE_REGISTER_PHONE) {
-      appendFileSync(process.env.E2E_PHONE_REGISTRY_FILE, process.env.FAKE_REGISTER_PHONE + "\\n");
       const response = await fetch(process.env.FAKE_API_URL + "/test/register", {
         body: JSON.stringify({ phone: process.env.FAKE_REGISTER_PHONE }),
         headers: { "content-type": "application/json" },
         method: "POST",
       });
       if (!response.ok) process.exit(12);
+      const { id } = await response.json();
+      appendFileSync(
+        process.env.E2E_PHONE_REGISTRY_FILE,
+        JSON.stringify({ userId: id, phone: process.env.FAKE_REGISTER_PHONE }) + "\\n",
+      );
+    }
+    if (process.env.FAKE_PLAYWRIGHT_MARKER) {
+      writeFileSync(process.env.FAKE_PLAYWRIGHT_MARKER, String(process.pid));
     }
     const hold = Number(process.env.FAKE_PLAYWRIGHT_HOLD_MS || 0);
     const exitCode = Number(process.env.FAKE_PLAYWRIGHT_EXIT || 0);
@@ -62,6 +69,12 @@ const localDeveloper: FakeUser = {
   id: "00000000-0000-4000-8000-000000000002",
   phone: "8613988888888",
 };
+const createdUserId = "00000000-0000-4000-8000-000000000010";
+
+function ownershipLine(user: FakeUser) {
+  const phone = user.phone.replace(/^86/u, "");
+  return `${JSON.stringify({ userId: user.id, phone })}\n`;
+}
 
 async function fixture(initialUsers: FakeUser[] = []) {
   const directory = await mkdtemp(join(tmpdir(), "e2e-runner-test-"));
@@ -109,10 +122,16 @@ async function fixture(initialUsers: FakeUser[] = []) {
       request.on("data", (chunk) => { body += chunk; });
       request.on("end", () => {
         const phone = (JSON.parse(body) as { phone: string }).phone;
+        const collision = [...users.values()].some((user) => user.phone === `86${phone}`);
+        if (collision) {
+          response.writeHead(409, { "content-type": "application/json" });
+          response.end("{}");
+          return;
+        }
         const id = `00000000-0000-4000-8000-${String(users.size + 10).padStart(12, "0")}`;
         users.set(id, { id, phone: `86${phone}` });
         response.writeHead(201, { "content-type": "application/json" });
-        response.end("{}");
+        response.end(JSON.stringify({ id }));
       });
       return;
     }
@@ -139,6 +158,7 @@ async function fixture(initialUsers: FakeUser[] = []) {
     marker: join(directory, "playwright.pid"),
     registryDirectory,
     registryFile: join(registryDirectory, "phones"),
+    scopeLog: join(directory, "run-scopes.log"),
     users,
     env: {
       ...process.env,
@@ -222,9 +242,40 @@ afterEach(async () => {
 });
 
 describe("E2E runner isolation", () => {
+  it("allocates distinct scopes to consecutive runs", async () => {
+    const setup = await fixture();
+    const env = {
+      ...setup.env,
+      FAKE_RUN_SCOPE_LOG: setup.scopeLog,
+    };
+
+    expect((await runRunner(env)).code).toBe(0);
+    expect((await runRunner(env)).code).toBe(0);
+
+    const scopes = (await readFile(setup.scopeLog, "utf8")).trim().split("\n");
+    expect(scopes).toHaveLength(2);
+    expect(scopes[0]).toMatch(/^[0-9]{4}$/u);
+    expect(scopes[1]).toMatch(/^[0-9]{4}$/u);
+    expect(scopes[1]).not.toBe(scopes[0]);
+  });
+
+  it("fails closed on an unconfirmed reserved-phone collision", async () => {
+    const setup = await fixture([staleUser]);
+    await writeRegistry(setup, "13910000000\n");
+
+    const result = await runRunner(setup.env);
+
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("unconfirmed E2E ownership");
+    expect(setup.deletedPhones).toEqual([]);
+    expect([...setup.users.values()]).toEqual([staleUser]);
+    expect(await readFile(setup.registryFile, "utf8")).toBe("13910000000\n");
+    expect(await commandLog(setup.log)).toEqual([["supabase", "status", "-o", "env"]]);
+  });
+
   it("cleans only registry users on the default path and never resets the local database", async () => {
     const setup = await fixture([staleUser, localDeveloper]);
-    await writeRegistry(setup, "13910000000\n");
+    await writeRegistry(setup, ownershipLine(staleUser));
 
     const result = await runRunner({
       ...setup.env,
@@ -257,16 +308,17 @@ describe("E2E runner isolation", () => {
 
   it("fails closed on a corrupted registry without deleting users or starting Playwright", async () => {
     const setup = await fixture([staleUser, localDeveloper]);
-    await writeRegistry(setup, "13910000000\nnot-a-phone\n");
+    const contents = `${ownershipLine(staleUser)}not-an-ownership-record\n`;
+    await writeRegistry(setup, contents);
 
     const rejected = await runRunner(setup.env);
 
     expect(rejected.code).not.toBe(0);
-    expect(rejected.stderr).toContain("Invalid E2E phone registry");
+    expect(rejected.stderr).toContain("Invalid E2E ownership registry");
     expect(setup.deletedPhones).toEqual([]);
     expect([...setup.users.values()]).toEqual([staleUser, localDeveloper]);
     expect(await commandLog(setup.log)).toEqual([["supabase", "status", "-o", "env"]]);
-    expect(await readFile(setup.registryFile, "utf8")).toBe("13910000000\nnot-a-phone\n");
+    expect(await readFile(setup.registryFile, "utf8")).toBe(contents);
 
     await writeRegistry(setup, "");
     expect((await runRunner(setup.env)).code).toBe(0);
@@ -302,7 +354,9 @@ describe("E2E runner isolation", () => {
     });
 
     expect(failed.code).toBe(8);
-    expect(await readFile(setup.registryFile, "utf8")).toBe("13910000000\n");
+    expect(await readFile(setup.registryFile, "utf8")).toBe(
+      ownershipLine({ id: createdUserId, phone: "8613910000000" }),
+    );
     expect([...setup.users.values()].map((user) => user.phone)).toEqual(["8613910000000"]);
 
     expect((await runRunner(setup.env)).code).toBe(0);
@@ -313,7 +367,7 @@ describe("E2E runner isolation", () => {
 
   it("retains the registry and synchronously releases the lock when SIGTERM arrives during cleanup", async () => {
     const setup = await fixture([staleUser]);
-    await writeRegistry(setup, "13910000000\n");
+    await writeRegistry(setup, ownershipLine(staleUser));
     setup.cleanup.delayMs = 300;
     setup.cleanup.marker = join(setup.directory, "cleanup.started");
     const first = startRunner(setup.env);
@@ -324,7 +378,7 @@ describe("E2E runner isolation", () => {
 
     expect(result).toMatchObject({ code: 143, signal: null });
     expect(existsSync(setup.lock)).toBe(false);
-    expect(await readFile(setup.registryFile, "utf8")).toBe("13910000000\n");
+    expect(await readFile(setup.registryFile, "utf8")).toBe(ownershipLine(staleUser));
 
     setup.cleanup.delayMs = 0;
     setup.cleanup.marker = "";
@@ -361,7 +415,9 @@ describe("E2E runner isolation", () => {
       expect(result).toMatchObject({ code: 143, signal: null });
       expect(isAlive(childPid)).toBe(false);
       expect(existsSync(setup.lock)).toBe(false);
-      expect(await readFile(setup.registryFile, "utf8")).toBe("13910000000\n");
+      expect(await readFile(setup.registryFile, "utf8")).toBe(
+        ownershipLine({ id: createdUserId, phone: "8613910000000" }),
+      );
       expect((await runRunner(setup.env)).code).toBe(0);
     } finally {
       if (isAlive(childPid)) process.kill(childPid, "SIGKILL");

@@ -1,5 +1,5 @@
 begin;
-select plan(47);
+select plan(52);
 
 select function_privs_are(
   'public',
@@ -16,6 +16,14 @@ select function_privs_are(
   'anon',
   array[]::text[],
   'anon cannot resolve phone numbers'
+);
+select function_privs_are(
+  'public',
+  'read_profile',
+  array['uuid'],
+  'anon',
+  array[]::text[],
+  'anon cannot read profiles through the service RPC'
 );
 select function_privs_are(
   'public',
@@ -56,6 +64,14 @@ select function_privs_are(
   'authenticated',
   array[]::text[],
   'authenticated cannot resolve phone numbers'
+);
+select function_privs_are(
+  'public',
+  'read_profile',
+  array['uuid'],
+  'authenticated',
+  array[]::text[],
+  'authenticated cannot read profiles through the service RPC'
 );
 select function_privs_are(
   'public',
@@ -210,6 +226,12 @@ select throws_ok(
   'anon cannot resolve phone numbers'
 );
 select throws_ok(
+  $$select * from public.read_profile('00000000-0000-4000-8000-000000000003')$$,
+  '42501',
+  'permission denied for function read_profile',
+  'anon cannot read profiles'
+);
+select throws_ok(
   $$select public.read_recovery_digest('00000000-0000-4000-8000-000000000003')$$,
   '42501',
   'permission denied for function read_recovery_digest',
@@ -258,6 +280,12 @@ select throws_ok(
   '42501',
   'permission denied for function resolve_phone',
   'authenticated cannot resolve phone numbers'
+);
+select throws_ok(
+  $$select * from public.read_profile('00000000-0000-4000-8000-000000000003')$$,
+  '42501',
+  'permission denied for function read_profile',
+  'authenticated cannot read profiles'
 );
 select throws_ok(
   $$select public.read_recovery_digest('00000000-0000-4000-8000-000000000003')$$,
@@ -316,6 +344,12 @@ select results_eq(
   $$select * from public.resolve_phone('13800138000')$$,
   $$values ('00000000-0000-4000-8000-000000000003'::uuid)$$,
   'service role resolves a registered phone'
+);
+select results_eq(
+  $$select phone, display_name, avatar_key
+    from public.read_profile('00000000-0000-4000-8000-000000000003')$$,
+  $$values ('13800138000'::varchar, 'Attention_001'::varchar, 3::smallint)$$,
+  'service role reads the complete registered profile'
 );
 select is(
   encode(public.read_recovery_digest('00000000-0000-4000-8000-000000000003'), 'hex'),

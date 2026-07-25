@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
+import { randomInt } from "node:crypto";
 import {
   chmodSync,
   lstatSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -15,9 +17,11 @@ import { localSupabaseBindings } from "./local-supabase-env.mjs";
 const command = process.platform === "win32" ? "npx.cmd" : "npx";
 const managedSignals = ["SIGINT", "SIGTERM"];
 const reservedE2EPhone = /^139[1-4][0-9]{7}$/u;
+const userIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const lockPath = join(tmpdir(), "ai-learning-checkin-phone-auth-e2e.lock");
 const registryDirectory = join(tmpdir(), "ai-learning-checkin-phone-auth-e2e-registry");
 const registryFile = join(registryDirectory, "phones");
+const runScopeFile = join(registryDirectory, "run-scope");
 
 function localApiUrl(value) {
   let url;
@@ -97,7 +101,7 @@ function ensureRegistryDirectory() {
   chmodSync(registryDirectory, 0o700);
 }
 
-function readRegistryPhones() {
+function readRegistryOwnership() {
   let contents;
   try {
     const metadata = lstatSync(registryFile);
@@ -111,11 +115,43 @@ function readRegistryPhones() {
   }
   if (contents.length === 0) return [];
   const body = contents.endsWith("\n") ? contents.slice(0, -1) : contents;
-  const phones = body.split("\n");
-  if (phones.some((phone) => !reservedE2EPhone.test(phone))) {
-    throw new Error(`Invalid E2E phone registry contents: ${registryFile}`);
+  const ownership = body.split("\n").map((line) => {
+    if (reservedE2EPhone.test(line)) {
+      throw new Error(`Found unconfirmed E2E ownership in registry: ${registryFile}`);
+    }
+    let value;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      throw new Error(`Invalid E2E ownership registry contents: ${registryFile}`);
+    }
+    if (
+      !value
+      || typeof value !== "object"
+      || Array.isArray(value)
+      || Object.keys(value).sort().join(",") !== "phone,userId"
+      || typeof value.userId !== "string"
+      || !userIdPattern.test(value.userId)
+      || typeof value.phone !== "string"
+      || !reservedE2EPhone.test(value.phone)
+    ) {
+      throw new Error(`Invalid E2E ownership registry contents: ${registryFile}`);
+    }
+    return { userId: value.userId, phone: value.phone };
+  });
+  const byUserId = new Map();
+  const byPhone = new Map();
+  for (const entry of ownership) {
+    if (
+      (byUserId.has(entry.userId) && byUserId.get(entry.userId) !== entry.phone)
+      || (byPhone.has(entry.phone) && byPhone.get(entry.phone) !== entry.userId)
+    ) {
+      throw new Error(`Conflicting E2E ownership registry contents: ${registryFile}`);
+    }
+    byUserId.set(entry.userId, entry.phone);
+    byPhone.set(entry.phone, entry.userId);
   }
-  return [...new Set(phones)];
+  return [...byUserId].map(([userId, phone]) => ({ userId, phone }));
 }
 
 function removeRegistryFile() {
@@ -130,6 +166,38 @@ function createRegistryFile() {
   });
 }
 
+function allocateRunScope() {
+  let previous = null;
+  try {
+    const metadata = lstatSync(runScopeFile);
+    if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      throw new Error(`Invalid E2E run scope file: ${runScopeFile}`);
+    }
+    const contents = readFileSync(runScopeFile, "utf8");
+    if (!/^[0-9]{4}\n$/u.test(contents)) {
+      throw new Error(`Invalid E2E run scope contents: ${runScopeFile}`);
+    }
+    previous = Number(contents.trim());
+  } catch (error) {
+    if (!error || typeof error !== "object" || error.code !== "ENOENT") throw error;
+  }
+
+  const scope = previous === null ? randomInt(10_000) : (previous + 1) % 10_000;
+  const value = String(scope).padStart(4, "0");
+  const temporaryFile = join(registryDirectory, `run-scope.${process.pid}.tmp`);
+  try {
+    writeFileSync(temporaryFile, `${value}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+    renameSync(temporaryFile, runScopeFile);
+  } finally {
+    rmSync(temporaryFile, { force: true });
+  }
+  return value;
+}
+
 function normalizedReservedPhone(value) {
   if (typeof value !== "string") return null;
   const raw = value.startsWith("+") ? value.slice(1) : value;
@@ -137,9 +205,8 @@ function normalizedReservedPhone(value) {
   return reservedE2EPhone.test(phone) ? phone : null;
 }
 
-async function deleteRegisteredUsers(bindings, apiUrl, phones) {
-  if (phones.length === 0) return;
-  const targets = new Set(phones);
+async function deleteRegisteredUsers(bindings, apiUrl, ownership) {
+  if (ownership.length === 0) return;
   const admin = createClient(apiUrl.origin, bindings.SUPABASE_SECRET_KEY, {
     auth: {
       autoRefreshToken: false,
@@ -158,11 +225,21 @@ async function deleteRegisteredUsers(bindings, apiUrl, phones) {
     if (data.users.length < 1000) break;
   }
 
-  for (const user of users) {
+  const usersById = new Map(users.map((user) => [user.id, user]));
+  const ownedUsers = [];
+  for (const entry of ownership) {
+    const user = usersById.get(entry.userId);
+    if (!user) continue;
     const phone = normalizedReservedPhone(user.phone);
-    if (!phone || !targets.has(phone)) continue;
+    if (phone !== entry.phone) {
+      throw new Error(`Local E2E ownership no longer matches user ${entry.userId}.`);
+    }
+    ownedUsers.push(user);
+  }
+
+  for (const user of ownedUsers) {
     const { error } = await admin.auth.admin.deleteUser(user.id);
-    if (error) throw new Error(`Unable to delete local E2E user ${phone}: ${error.message}`);
+    if (error) throw new Error(`Unable to delete local E2E user ${user.id}: ${error.message}`);
   }
 }
 
@@ -221,8 +298,9 @@ async function run() {
     if (receivedSignal) return signalExitCode(receivedSignal);
 
     ensureRegistryDirectory();
-    const stalePhones = readRegistryPhones();
-    await deleteRegisteredUsers(bindings, apiUrl, stalePhones);
+    const runScope = allocateRunScope();
+    const staleOwnership = readRegistryOwnership();
+    await deleteRegisteredUsers(bindings, apiUrl, staleOwnership);
     if (receivedSignal) return signalExitCode(receivedSignal);
     removeRegistryFile();
     createRegistryFile();
@@ -231,6 +309,7 @@ async function run() {
       ...process.env,
       ...bindings,
       E2E_PHONE_REGISTRY_FILE: registryFile,
+      E2E_RUN_SCOPE: runScope,
       INTEGRATION_TEST_BINDINGS: "true",
     });
     if (receivedSignal) return signalExitCode(receivedSignal);
@@ -238,8 +317,8 @@ async function run() {
       return playwright.signal ? 1 : (playwright.code ?? 1);
     }
 
-    const currentPhones = readRegistryPhones();
-    await deleteRegisteredUsers(bindings, apiUrl, currentPhones);
+    const currentOwnership = readRegistryOwnership();
+    await deleteRegisteredUsers(bindings, apiUrl, currentOwnership);
     if (receivedSignal) return signalExitCode(receivedSignal);
     removeRegistryFile();
     return 0;

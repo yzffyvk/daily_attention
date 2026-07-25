@@ -1,8 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  currentProfile: vi.fn(),
-  currentUser: vi.fn(),
   recoverAccount: vi.fn(),
 }));
 
@@ -12,8 +10,6 @@ vi.mock("@/server/auth/service", () => ({
 
 vi.mock("@/server/auth/supabase-adapter", () => ({
   createSupabaseAuthAdapter: vi.fn(async () => ({
-    currentProfile: mocks.currentProfile,
-    currentUser: mocks.currentUser,
     ports: {},
   })),
 }));
@@ -26,13 +22,14 @@ afterEach(() => {
 
 describe("POST /api/auth/recover", () => {
   it("returns the recovered profile after using the phone rate bucket", async () => {
-    mocks.recoverAccount.mockResolvedValue({ recoveryCode: "01234-56789-ABCDE-FGHJK-MNPQRS" });
-    mocks.currentUser.mockResolvedValue({ id: "user-1" });
-    mocks.currentProfile.mockResolvedValue({
-      id: "user-1",
-      phone: "13800138000",
-      displayName: "Attention_001",
-      avatarKey: 1,
+    mocks.recoverAccount.mockResolvedValue({
+      recoveryCode: "01234-56789-ABCDE-FGHJK-MNPQRS",
+      profile: {
+        id: "user-1",
+        phone: "13800138000",
+        displayName: "Attention_001",
+        avatarKey: 1,
+      },
     });
 
     const response = await POST(new Request("http://example.test/api/auth/recover", {
@@ -52,8 +49,6 @@ describe("POST /api/auth/recover", () => {
       }),
       expect.anything(),
     );
-    expect(mocks.currentUser).toHaveBeenCalledOnce();
-    expect(mocks.currentProfile).toHaveBeenCalledWith("user-1");
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       data: {
@@ -80,7 +75,5 @@ describe("POST /api/auth/recover", () => {
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(body.error).toEqual({ code: "INTERNAL_ERROR", message: "服务暂时不可用，请稍后再试", details: {} });
     expect(JSON.stringify(body)).not.toContain("10.0.0.8");
-    expect(mocks.currentUser).not.toHaveBeenCalled();
-    expect(mocks.currentProfile).not.toHaveBeenCalled();
   });
 });

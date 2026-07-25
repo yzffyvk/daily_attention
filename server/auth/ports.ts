@@ -16,6 +16,7 @@ export type AuthPorts = {
     recoveryDigest: Uint8Array;
   }): Promise<AccountProfile>;
   resolvePhone(phone: string): Promise<{ userId: string } | null>;
+  readProfile(userId: string): Promise<AccountProfile>;
   readRecoveryDigest(userId: string): Promise<Uint8Array>;
   replaceRecoveryDigest(userId: string, expected: Uint8Array, next: Uint8Array): Promise<boolean>;
   updateProfile(input: {

@@ -42,7 +42,15 @@ npx supabase migration list --linked
 
 Read the dry-run output before applying it. Apply only the ordered migrations in `supabase/migrations`; do not modify an already-applied migration or use destructive reset commands against production. Follow a database change with the RLS checks below before directing traffic to the web release.
 
-In Supabase Auth settings, disable project sign-ups, keep email/password sign-in enabled for the application's internal account addresses, set the minimum password length to at least 8, and keep anonymous sign-ins disabled. Application registration uses the server-only Admin API so users cannot bypass the name, recovery-code, profile, and application rate-limit workflow by calling Supabase Auth directly. Verify these settings again after project cloning or restore.
+Before a hosted phone-password release, verify the target project's Auth configuration:
+
+1. Enable the Phone provider so existing confirmed phone users can sign in with a password.
+2. Disable public project sign-ups, set the minimum password length to at least 8, and disable anonymous sign-ins.
+3. Do not expose an SMS/OTP registration, verification, resend, or recovery path in the application. Registration must remain exclusively on the server-side Admin API, which creates the phone user with `phone_confirm: true` before completing the profile and recovery-code transaction.
+4. Inspect `GET <NEXT_PUBLIC_SUPABASE_URL>/auth/v1/settings` with the publishable API key as appropriate for the hosted project. Confirm that the public settings report the Phone provider enabled and project sign-ups disabled; do not place the secret key in this request or its evidence.
+5. Repeat the dashboard and settings checks after project cloning, restore, or any Auth configuration change.
+
+The public settings response does not prove every dashboard-only password or anonymous-user control. Record those values from the Auth dashboard separately, retaining no keys, phone numbers, or other credentials.
 
 ## Guarded Legacy Account Reset
 
@@ -75,7 +83,7 @@ order by table_name;
 
 The result must contain both `profiles_id_fkey` with `FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE` and `check_ins_user_id_fkey` with `FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE`. Stop if either row or `ON DELETE CASCADE` is absent.
 
-4. Quiesce every application writer before apply: block check-in writes and image uploads, stop background writers, and disable the server-side Admin registration path as well as any other process that can create Auth users. Keep all writers quiesced through the entire command and both final verification snapshots.
+4. Quiesce every application writer before apply: block check-in writes and image uploads, stop background writers, and disable the server-side Admin registration path as well as any other process that can create Auth users. This begins one continuous cutover window; keep every writer stopped through reset, migration, exact-release deployment, schema verification, and production smoke testing.
 5. Re-run the dry-run while writers are quiesced, review the four aggregate counts, and independently reconfirm the target and authorization.
 
 Only then use the destructive form:
@@ -84,7 +92,15 @@ Only then use the destructive form:
 npm run reset:legacy-accounts -- --project-ref=jhiybzdvxvlkbqvamynp --apply
 ```
 
-Apply freezes a deduplicated paginated Auth user snapshot, empties the private `checkin-images` bucket, and only then attempts every user deletion in that snapshot. Auth deletion relies on the preflighted cascades to remove `profiles` and `check_ins`. Success requires two consecutive recount snapshots in which all four aggregate counts are zero. Resume writers only after the command exits successfully and both zero snapshots have been reviewed.
+Apply freezes a deduplicated paginated Auth user snapshot, empties the private `checkin-images` bucket, and only then attempts every user deletion in that snapshot. Auth deletion relies on the preflighted cascades to remove `profiles` and `check_ins`. Success requires two consecutive recount snapshots in which all four aggregate counts are zero. Those snapshots authorize the next cutover step only; do not resume writers.
+
+While writers remain quiesced, complete the cutover in this order:
+
+1. Apply all committed pending phone-password migrations in order and verify linked migration history, the expected phone/profile/recovery schema, RPC grants, and RLS policies.
+2. Verify the hosted Auth prerequisites above and confirm that all five Sites runtime variables below are present and non-empty.
+3. Build, save, and deploy the exact reviewed release commit. Do not deploy a different source revision into this cutover.
+4. Run the phone-password registration, login, profile, check-in, and recovery smoke test against that deployment.
+5. Resume writers and public traffic only after reset, migration, exact-release deployment, schema verification, and smoke testing have all succeeded and their sanitized evidence has been reviewed.
 
 If apply exits with `RESET_INCOMPLETE` or `RESET_FAILED`, assume partial mutation:
 
@@ -93,6 +109,8 @@ If apply exits with `RESET_INCOMPLETE` or `RESET_FAILED`, assume partial mutatio
 3. Restore API availability or credentials as needed, re-run the dry-run to measure the remaining aggregate state, and repeat the live cascade-constraint preflight above.
 4. If any `profiles` or `check_ins` rows remain after their Auth users were deleted, stop and investigate the cascade mismatch before any retry.
 5. After the failure cause is resolved and a fresh destructive-action authorization is recorded, re-run apply against the remaining data. If recovery rather than completion is required, restore from the verified backups; the script provides no rollback.
+
+If migration, deployment, schema verification, or smoke testing fails after a successful reset, keep every writer and the Admin registration path stopped. Preserve sanitized evidence, diagnose the failing stage, and either complete a reviewed forward fix or execute the approved restore procedure. Never resume traffic against a partially migrated schema or an unverified web release.
 
 Never record command output together with environment files or secret values.
 
@@ -109,6 +127,8 @@ APP_ORIGIN=https://<your-public-hostname>
 ```
 
 The first two are intentionally public browser configuration. `SUPABASE_SECRET_KEY` and `AUTH_RATE_LIMIT_PEPPER` are server-only secrets: mark them secret, scope them to the target environment, and do not place them in `NEXT_PUBLIC_*` variables, source files, build arguments, browser logs, or screenshots. `APP_ORIGIN` is the exact trusted HTTPS origin used for canonical social-image metadata; it must not contain a path. After setting values, the release owner must build, save, and deploy the exact source commit through the managed Sites workflow.
+
+Treat all five variables as a single release gate. Before any production smoke test or build/save/deploy action, verify in the target Sites environment that every variable is present and non-empty and that the two public values identify the intended Supabase project. Stop the cutover with writers still quiesced if any value is missing, malformed, or scoped to a different environment.
 
 ## Post-Deploy RLS Verification
 

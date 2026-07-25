@@ -5,6 +5,9 @@ import type { AuthPorts } from "./ports";
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 export type RecoveryCodeResult = { recoveryCode: string };
+export type RecoveryResult = RecoveryCodeResult & {
+  profile: Awaited<ReturnType<AuthPorts["readProfile"]>>;
+};
 
 function randomRecoveryCode() {
   const bytes = crypto.getRandomValues(new Uint8Array(26));
@@ -78,13 +81,17 @@ export async function loginAccount(
 export async function recoverAccount(
   input: { phone: string; recoveryCode: string; newPassword: string; bucket: string },
   ports: AuthPorts,
-): Promise<RecoveryCodeResult> {
+): Promise<RecoveryResult> {
   await ports.rateLimit({ action: "recover", bucket: input.bucket });
   const account = await ports.resolvePhone(input.phone);
   if (!account) throw new Error("INVALID_RECOVERY");
   const expected = await ports.readRecoveryDigest(account.userId);
   const supplied = await digest(input.recoveryCode);
   if (!sameDigest(expected, supplied)) throw new Error("INVALID_RECOVERY");
+  const profile = await ports.readProfile(account.userId);
+  if (profile.id !== account.userId || profile.phone !== input.phone) {
+    throw new Error("PROFILE_NOT_FOUND");
+  }
 
   const recoveryCode = randomRecoveryCode();
   const next = await digest(recoveryCode);
@@ -102,7 +109,7 @@ export async function recoverAccount(
   } catch (signInError) {
     await restoreRecoveryDigest(ports, account.userId, next, expected, signInError);
   }
-  return { recoveryCode };
+  return { profile, recoveryCode };
 }
 
 export async function updateProfile(
