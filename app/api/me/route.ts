@@ -24,22 +24,12 @@ export async function PATCH(request: Request) {
   try {
     const adapter = await createSupabaseAuthAdapter();
     const user = await adapter.currentUser();
-    if (parsed.data.name === undefined && parsed.data.avatarKey !== undefined) {
-      const updated = await adapter.ports.updateProfileAvatar({
-        userId: user.id,
-        avatarKey: parsed.data.avatarKey,
-      });
-      return authSuccess({ profile: updated }, requestId);
-    }
-
     const currentProfile = await adapter.currentProfile(user.id);
     const updated = await updateProfile(
       {
         userId: user.id,
-        currentName: currentProfile.displayName,
-        nextName: parsed.data.name ?? currentProfile.displayName,
-        nextAvatarKey: parsed.data.avatarKey ?? currentProfile.avatarKey,
-        currentPassword: parsed.data.currentPassword!,
+        displayName: parsed.data.displayName ?? currentProfile.displayName,
+        avatarKey: parsed.data.avatarKey ?? currentProfile.avatarKey,
       },
       adapter.ports,
     );

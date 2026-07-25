@@ -1,16 +1,40 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  createUser: vi.fn(),
+  deleteUser: vi.fn(),
+  eq: vi.fn(),
+  from: vi.fn(),
+  getUser: vi.fn(),
+  maybeSingle: vi.fn(),
+  rpc: vi.fn(),
+  select: vi.fn(),
   signInWithPassword: vi.fn(),
+  signOut: vi.fn(),
+  updateUserById: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({
-  createAdminSupabase: vi.fn(() => ({})),
+  createAdminSupabase: vi.fn(() => ({
+    auth: {
+      admin: {
+        createUser: mocks.createUser,
+        deleteUser: mocks.deleteUser,
+        updateUserById: mocks.updateUserById,
+      },
+    },
+    rpc: mocks.rpc,
+  })),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
   createServerSupabase: vi.fn(async () => ({
-    auth: { signInWithPassword: mocks.signInWithPassword },
+    auth: {
+      getUser: mocks.getUser,
+      signInWithPassword: mocks.signInWithPassword,
+      signOut: mocks.signOut,
+    },
+    from: mocks.from,
   })),
 }));
 
@@ -20,11 +44,126 @@ vi.mock("@/server/rate-limit/service", () => ({
 
 import { createSupabaseAuthAdapter } from "@/server/auth/supabase-adapter";
 
+const databaseProfile = {
+  id: "user-1",
+  phone: "13800138000",
+  display_name: "Attention_001",
+  avatar_key: 2,
+};
+
+beforeEach(() => {
+  mocks.createUser.mockResolvedValue({ data: { user: { id: "user-1" } }, error: null });
+  mocks.deleteUser.mockResolvedValue({ error: null });
+  mocks.updateUserById.mockResolvedValue({ error: null });
+  mocks.signInWithPassword.mockResolvedValue({
+    data: { user: { id: "user-1" }, session: { access_token: "token" } },
+    error: null,
+  });
+  mocks.signOut.mockResolvedValue({ error: null });
+  mocks.getUser.mockResolvedValue({ data: { user: { id: "user-1" } }, error: null });
+  mocks.maybeSingle.mockResolvedValue({ data: databaseProfile, error: null });
+  mocks.eq.mockReturnValue({ maybeSingle: mocks.maybeSingle });
+  mocks.select.mockReturnValue({ eq: mocks.eq });
+  mocks.from.mockReturnValue({ select: mocks.select });
+});
+
 afterEach(() => {
   vi.clearAllMocks();
 });
 
 describe("Supabase auth adapter", () => {
+  it("creates a confirmed phone user through the server-only admin client", async () => {
+    const { ports } = await createSupabaseAuthAdapter();
+
+    await expect(
+      ports.createAuthUser({ phone: "+8613800138000", password: "password123" }),
+    ).resolves.toEqual({ id: "user-1" });
+    expect(mocks.createUser).toHaveBeenCalledWith({
+      phone: "+8613800138000",
+      password: "password123",
+      phone_confirm: true,
+    });
+  });
+
+  it("signs in natively with phone and password", async () => {
+    const { ports } = await createSupabaseAuthAdapter();
+
+    await ports.signIn("+8613800138000", "password123");
+
+    expect(mocks.signInWithPassword).toHaveBeenCalledWith({
+      phone: "+8613800138000",
+      password: "password123",
+    });
+  });
+
+  it("uses the phone registration RPC contract and maps all profile fields", async () => {
+    mocks.rpc.mockResolvedValue({ data: databaseProfile, error: null });
+    const { ports } = await createSupabaseAuthAdapter();
+
+    await expect(
+      ports.completeRegistration({
+        userId: "user-1",
+        phone: "13800138000",
+        avatarKey: 2,
+        recoveryDigest: new Uint8Array([0xab, 0xcd]),
+      }),
+    ).resolves.toEqual({
+      id: "user-1",
+      phone: "13800138000",
+      displayName: "Attention_001",
+      avatarKey: 2,
+    });
+    expect(mocks.rpc).toHaveBeenCalledWith("complete_registration", {
+      target_user_id: "user-1",
+      target_phone: "13800138000",
+      target_avatar_key: 2,
+      target_recovery_digest: "\\xabcd",
+    });
+  });
+
+  it("resolves a local phone through the phone RPC", async () => {
+    mocks.rpc.mockResolvedValue({ data: [{ user_id: "user-1" }], error: null });
+    const { ports } = await createSupabaseAuthAdapter();
+
+    await expect(ports.resolvePhone("13800138000")).resolves.toEqual({ userId: "user-1" });
+    expect(mocks.rpc).toHaveBeenCalledWith("resolve_phone", { target_phone: "13800138000" });
+  });
+
+  it("updates display name and avatar through the unified profile RPC", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: { ...databaseProfile, display_name: "新的名称", avatar_key: 5 },
+      error: null,
+    });
+    const { ports } = await createSupabaseAuthAdapter();
+
+    await expect(
+      ports.updateProfile({ userId: "user-1", displayName: "新的名称", avatarKey: 5 }),
+    ).resolves.toMatchObject({
+      id: "user-1",
+      phone: "13800138000",
+      displayName: "新的名称",
+      avatarKey: 5,
+    });
+    expect(mocks.rpc).toHaveBeenCalledWith("update_profile", {
+      target_user_id: "user-1",
+      target_display_name: "新的名称",
+      target_avatar_key: 5,
+    });
+  });
+
+  it("selects and maps the complete current profile", async () => {
+    const adapter = await createSupabaseAuthAdapter();
+
+    await expect(adapter.currentProfile("user-1")).resolves.toEqual({
+      id: "user-1",
+      phone: "13800138000",
+      displayName: "Attention_001",
+      avatarKey: 2,
+    });
+    expect(mocks.select).toHaveBeenCalledWith("id, phone, display_name, avatar_key");
+    expect(mocks.eq).toHaveBeenCalledWith("id", "user-1");
+  });
+
   it("maps only Supabase invalid-credentials errors to the public credential failure", async () => {
     mocks.signInWithPassword.mockResolvedValue({
       data: { user: null, session: null },
@@ -32,7 +171,7 @@ describe("Supabase auth adapter", () => {
     });
     const { ports } = await createSupabaseAuthAdapter();
 
-    await expect(ports.signIn("internal@internal.invalid", "wrong-password")).rejects.toThrow("INVALID_CREDENTIALS");
+    await expect(ports.signIn("+8613800138000", "wrong-password")).rejects.toThrow("INVALID_CREDENTIALS");
   });
 
   it("keeps Supabase availability failures opaque to the response mapper", async () => {
@@ -43,14 +182,14 @@ describe("Supabase auth adapter", () => {
     });
     const { ports } = await createSupabaseAuthAdapter();
 
-    await expect(ports.signIn("internal@internal.invalid", "password123")).rejects.toBe(outage);
+    await expect(ports.signIn("+8613800138000", "password123")).rejects.toBe(outage);
   });
 
   it("rejects malformed sign-in results instead of treating them as a session", async () => {
     mocks.signInWithPassword.mockResolvedValue({ data: { user: null, session: null }, error: null });
     const { ports } = await createSupabaseAuthAdapter();
 
-    await expect(ports.signIn("internal@internal.invalid", "password123")).rejects.toThrow(
+    await expect(ports.signIn("+8613800138000", "password123")).rejects.toThrow(
       "Malformed sign-in response",
     );
   });

@@ -12,7 +12,15 @@ export async function POST(request: Request) {
   if ("response" in parsed) return parsed.response;
   try {
     const adapter = await createSupabaseAuthAdapter();
-    const result = await registerAccount({ ...parsed.data, bucket: requestIp(request) }, adapter.ports);
+    const result = await registerAccount(
+      {
+        phone: parsed.data.phone,
+        password: parsed.data.password,
+        avatarKey: parsed.data.avatarKey,
+        bucket: requestIp(request),
+      },
+      adapter.ports,
+    );
     return authSuccess({ profile: result.profile, recoveryCode: result.recoveryCode }, requestId, 201);
   } catch (error) {
     return authFailure(error, requestId);

@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     const result = await rotateRecoveryCode(
       {
         userId: user.id,
-        currentName: currentProfile.displayName,
+        phone: currentProfile.phone,
         currentPassword: parsed.data.currentPassword,
         bucket: user.id,
       },

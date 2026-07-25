@@ -1,10 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   currentProfile: vi.fn(),
   currentUser: vi.fn(),
-  updateProfileAvatar: vi.fn(),
-  updateProfileIdentity: vi.fn(),
+  updateProfile: vi.fn(),
 }));
 
 vi.mock("@/server/auth/supabase-adapter", () => ({
@@ -12,26 +11,38 @@ vi.mock("@/server/auth/supabase-adapter", () => ({
     currentProfile: mocks.currentProfile,
     currentUser: mocks.currentUser,
     ports: {
-      updateProfileAvatar: mocks.updateProfileAvatar,
-      updateProfileIdentity: mocks.updateProfileIdentity,
+      updateProfile: mocks.updateProfile,
     },
   })),
 }));
 
 import { PATCH } from "@/app/api/me/route";
 
+beforeEach(() => {
+  mocks.currentUser.mockResolvedValue({ id: "user-1" });
+  mocks.currentProfile.mockResolvedValue({
+    id: "user-1",
+    phone: "13800138000",
+    displayName: "Attention_001",
+    avatarKey: 2,
+  });
+  mocks.updateProfile.mockResolvedValue({
+    id: "user-1",
+    phone: "13800138000",
+    displayName: "Attention_001",
+    avatarKey: 5,
+  });
+});
+
 afterEach(() => {
   vi.clearAllMocks();
 });
 
 describe("PATCH /api/me", () => {
-  it.each([
-    ["an empty body", {}],
-    ["a password-only body", { currentPassword: "password123" }],
-  ])("returns the established validation response for %s", async (_label, body) => {
+  it("returns the established validation response for an empty body", async () => {
     const response = await PATCH(new Request("http://example.test/api/me", {
       method: "PATCH",
-      body: JSON.stringify(body),
+      body: JSON.stringify({}),
     }));
 
     expect(response.status).toBe(422);
@@ -43,10 +54,18 @@ describe("PATCH /api/me", () => {
     expect(mocks.currentUser).not.toHaveBeenCalled();
   });
 
-  it("uses the atomic avatar-only operation without reading or rewriting the login name", async () => {
-    mocks.currentUser.mockResolvedValue({ id: "user-1" });
-    mocks.updateProfileAvatar.mockResolvedValue({ id: "user-1", displayName: "已重命名", avatarKey: 5 });
+  it("rejects phone changes before touching the authenticated profile", async () => {
+    const response = await PATCH(new Request("http://example.test/api/me", {
+      method: "PATCH",
+      body: JSON.stringify({ phone: "13900139000" }),
+    }));
 
+    expect(response.status).toBe(422);
+    expect(mocks.currentUser).not.toHaveBeenCalled();
+    expect(mocks.updateProfile).not.toHaveBeenCalled();
+  });
+
+  it("preserves the display name when updating only the avatar", async () => {
     const response = await PATCH(new Request("http://example.test/api/me", {
       method: "PATCH",
       body: JSON.stringify({ avatarKey: 5 }),
@@ -54,10 +73,41 @@ describe("PATCH /api/me", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      data: { profile: { displayName: "已重命名", avatarKey: 5 } },
+      data: {
+        profile: {
+          id: "user-1",
+          phone: "13800138000",
+          displayName: "Attention_001",
+          avatarKey: 5,
+        },
+      },
     });
-    expect(mocks.currentProfile).not.toHaveBeenCalled();
-    expect(mocks.updateProfileIdentity).not.toHaveBeenCalled();
-    expect(mocks.updateProfileAvatar).toHaveBeenCalledWith({ userId: "user-1", avatarKey: 5 });
+    expect(mocks.updateProfile).toHaveBeenCalledWith({
+      userId: "user-1",
+      displayName: "Attention_001",
+      avatarKey: 5,
+    });
+  });
+
+  it("updates displayName without accepting a phone or requiring a password", async () => {
+    mocks.updateProfile.mockResolvedValue({
+      id: "user-1",
+      phone: "13800138000",
+      displayName: "新的名称",
+      avatarKey: 2,
+    });
+
+    const response = await PATCH(new Request("http://example.test/api/me", {
+      method: "PATCH",
+      body: JSON.stringify({ displayName: "新的名称" }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateProfile).toHaveBeenCalledWith({
+      userId: "user-1",
+      displayName: "新的名称",
+      avatarKey: 2,
+    });
+    expect(mocks.updateProfile).not.toHaveBeenCalledWith(expect.objectContaining({ phone: expect.anything() }));
   });
 });
