@@ -3,6 +3,19 @@
 一个使用 Supabase 保存账户、打卡记录和图片的学习打卡应用。前端由
 [vinext](https://github.com/cloudflare/vinext) 运行，并部署到 OpenAI Sites。
 
+## Code Map
+
+日常开发直接使用当前仓库根目录。页面、接口、服务端和数据库文件的位置见
+[`PROJECT_STRUCTURE.md`](./PROJECT_STRUCTURE.md)。
+
+最常用的入口：
+
+- `app/(app)/page.tsx`：打卡主页面。
+- `app/(auth)/`：登录、注册和找回页面。
+- `features/`：日历、打卡编辑器、登录表单等前端功能。
+- `server/`：认证、打卡、存储和限流服务。
+- `supabase/migrations/`：正式数据库结构。
+
 ## Prerequisites
 
 - Node.js `>=22.13.0`
@@ -21,6 +34,11 @@ npm run dev
 Use `supabase status -o env` to copy the local API URL, publishable key, and
 secret key into `.dev.vars`. Set `AUTH_RATE_LIMIT_PEPPER` to a private random
 value of at least 32 bytes. `.dev.vars` is ignored and must not be committed.
+
+Production values belong in `.env.production.local`, which is also ignored.
+The active environment template is `.dev.vars.example`; it contains no WeChat
+configuration because the current application uses name-and-password accounts
+backed by Supabase.
 
 The formal schema and data APIs are Supabase-owned. Apply all local migrations
 and seed data with:
