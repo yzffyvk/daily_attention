@@ -19,7 +19,7 @@ type IntegrationAdmin = {
         error: unknown;
       }>;
       deleteUser(userId: string): Promise<{
-        data: { user: { id: string; email?: string } | null } | null;
+        data: unknown;
         error: unknown;
       }>;
       listUsers(parameters: { page: number; perPage: number }): Promise<{
@@ -98,16 +98,9 @@ export async function deleteOwnedIntegrationUsers(
     try {
       response = await admin.auth.admin.deleteUser(entry.userId);
     } catch {
-      throw new Error("Integration Auth delete response does not match verified ownership");
+      throw new Error("Unable to delete an owned integration user");
     }
     if (response.error) throw new Error("Unable to delete an owned integration user");
-    if (
-      !response.data?.user
-      || response.data.user.id !== entry.userId
-      || response.data.user.email !== entry.email
-    ) {
-      throw new Error("Integration Auth delete response does not match verified ownership");
-    }
 
     for (let page = 1; ; page += 1) {
       const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });

@@ -117,7 +117,7 @@ async function fixture(
     ambiguousStorageRemoval: false,
     delayMs: 0,
     deleteFailureIds: new Set<string>(),
-    deleteResponseUser: undefined as FakeUser | null | undefined,
+    deleteResponseBody: undefined as unknown,
     failPostDeleteList: false,
     malformedPostDeleteList: false,
     marker: "",
@@ -174,9 +174,9 @@ async function fixture(
       }
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify(
-        cleanup.deleteResponseUser === undefined
+        cleanup.deleteResponseBody === undefined
           ? (user ?? { id })
-          : cleanup.deleteResponseUser,
+          : cleanup.deleteResponseBody,
       ));
       return;
     }
@@ -502,46 +502,52 @@ describe("E2E runner isolation", () => {
     expect(existsSync(setup.registryFile)).toBe(true);
   });
 
-  it("rejects a successful delete response with a null user and retains a deleting checkpoint", async () => {
+  it("accepts GoTrue's empty delete success body after fresh Auth absence proof", async () => {
     const setup = await fixture([staleUser]);
-    setup.cleanup.deleteResponseUser = null;
+    setup.cleanup.deleteResponseBody = {};
     await writeRegistry(setup, ownershipLine(staleUser));
 
     const result = await runRunner(setup.env);
 
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain("delete response");
-    expect(result.stderr).not.toContain(staleUser.id);
-    expect(result.stderr).not.toContain(staleUser.email);
-    expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
+    expect(result.code).toBe(0);
+    expect(setup.users.has(staleUser.id)).toBe(false);
+    expect(existsSync(setup.registryFile)).toBe(false);
   });
 
-  it("rejects a successful delete response with a different user ID", async () => {
+  it("accepts null delete body data after fresh Auth absence proof", async () => {
     const setup = await fixture([staleUser]);
-    setup.cleanup.deleteResponseUser = { id: localDeveloper.id, email: staleUser.email };
+    setup.cleanup.deleteResponseBody = { user: null };
     await writeRegistry(setup, ownershipLine(staleUser));
 
     const result = await runRunner(setup.env);
 
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain("delete response");
-    expect(result.stderr).not.toContain(staleUser.id);
-    expect(result.stderr).not.toContain(staleUser.email);
-    expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
+    expect(result.code).toBe(0);
+    expect(setup.users.has(staleUser.id)).toBe(false);
+    expect(existsSync(setup.registryFile)).toBe(false);
   });
 
-  it("rejects a successful delete response with a different email", async () => {
+  it("accepts malformed delete body data after fresh Auth absence proof", async () => {
     const setup = await fixture([staleUser]);
-    setup.cleanup.deleteResponseUser = { id: staleUser.id, email: secondStaleUser.email };
+    setup.cleanup.deleteResponseBody = "malformed-test-body";
     await writeRegistry(setup, ownershipLine(staleUser));
 
     const result = await runRunner(setup.env);
 
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain("delete response");
-    expect(result.stderr).not.toContain(staleUser.id);
-    expect(result.stderr).not.toContain(staleUser.email);
-    expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
+    expect(result.code).toBe(0);
+    expect(setup.users.has(staleUser.id)).toBe(false);
+    expect(existsSync(setup.registryFile)).toBe(false);
+  });
+
+  it("accepts unrelated delete body data after fresh Auth absence proof", async () => {
+    const setup = await fixture([staleUser]);
+    setup.cleanup.deleteResponseBody = localDeveloper;
+    await writeRegistry(setup, ownershipLine(staleUser));
+
+    const result = await runRunner(setup.env);
+
+    expect(result.code).toBe(0);
+    expect(setup.users.has(staleUser.id)).toBe(false);
+    expect(existsSync(setup.registryFile)).toBe(false);
   });
 
   it("rejects an exact delete response when a fresh Admin list still contains the user", async () => {

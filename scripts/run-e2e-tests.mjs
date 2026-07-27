@@ -425,18 +425,6 @@ function confirmCurrentAuthUser(users, entry, allowMissing) {
   return user;
 }
 
-function confirmDeleteResponse(response, entry) {
-  if (response?.error) throw new Error("Unable to delete a local E2E user.");
-  const deletedUser = response?.data?.user;
-  if (
-    !deletedUser
-    || deletedUser.id !== entry.userId
-    || reservedE2EAuthEmail(deletedUser.email) !== entry.email
-  ) {
-    throw new Error("Local E2E Auth delete response did not match verified ownership.");
-  }
-}
-
 async function deleteRegisteredUsers(bindings, apiUrl, ownership, shouldStop) {
   if (ownership.length === 0) {
     if (shouldStop()) return false;
@@ -488,9 +476,9 @@ async function deleteRegisteredUsers(bindings, apiUrl, ownership, shouldStop) {
       try {
         response = await admin.auth.admin.deleteUser(entry.userId);
       } catch {
-        throw new Error("Local E2E Auth delete response did not match verified ownership.");
+        throw new Error("Unable to delete a local E2E user.");
       }
-      confirmDeleteResponse(response, entry);
+      if (response?.error) throw new Error("Unable to delete a local E2E user.");
       const usersAfterDelete = await listLocalE2EUsers(admin);
       if (usersAfterDelete.some((user) => user?.id === entry.userId)) {
         throw new Error("Local E2E Auth cleanup did not complete.");

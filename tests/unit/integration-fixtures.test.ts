@@ -33,12 +33,12 @@ function fixtureExports() {
               error: null;
             }>;
             deleteUser: (ownedUserId: string) => Promise<{
-              data: { user: { id: string; email?: string } | null } | null;
-              error: null;
+              data: unknown;
+              error: unknown;
             }>;
             listUsers: (parameters: { page: number; perPage: number }) => Promise<{
-              data: { users: Array<{ id: string; email?: string }> };
-              error: null;
+              data: { users: unknown[] };
+              error: unknown;
             }>;
           };
         };
@@ -49,13 +49,13 @@ function fixtureExports() {
 }
 
 type DeleteResponse = {
-  data: { user: { id: string; email?: string } | null } | null;
-  error: null;
+  data: unknown;
+  error: unknown;
 };
 
 function cleanupAdmin(
   deleteResponse: DeleteResponse,
-  usersAfterDelete: Array<{ id: string; email?: string }> = [],
+  usersAfterDelete: unknown[] = [],
 ) {
   return {
     auth: {
@@ -96,13 +96,13 @@ describe("integration fixture ownership", () => {
     )).toThrow("Integration Auth ownership does not match the expected fixture");
   });
 
-  it("deletes an unexpected public sign-up only after exact Admin readback", async () => {
+  it("deletes an unexpected public sign-up after exact Admin readback and an empty success body", async () => {
     const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
     expect(typeof deleteOwnedUsers).toBe("function");
     if (!deleteOwnedUsers) return;
 
     const admin = cleanupAdmin({
-      data: { user: { id: userId, email: expectedEmail } },
+      data: { user: {} },
       error: null,
     });
 
@@ -145,29 +145,34 @@ describe("integration fixture ownership", () => {
     expect(deleteCount).toBe(0);
   });
 
-  it("rejects a successful integration delete response with a null user", async () => {
+  it("accepts a successful integration delete response with a null user after absence proof", async () => {
     const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
     expect(typeof deleteOwnedUsers).toBe("function");
     if (!deleteOwnedUsers) return;
     const admin = cleanupAdmin({ data: { user: null }, error: null });
 
-    await expect(
-      deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),
-    ).rejects.toThrow("Integration Auth delete response does not match verified ownership");
+    await deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]);
   });
 
-  it("rejects a malformed successful integration delete response", async () => {
+  it("accepts a successful integration delete response with null data after absence proof", async () => {
     const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
     expect(typeof deleteOwnedUsers).toBe("function");
     if (!deleteOwnedUsers) return;
     const admin = cleanupAdmin({ data: null, error: null });
 
-    await expect(
-      deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),
-    ).rejects.toThrow("Integration Auth delete response does not match verified ownership");
+    await deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]);
   });
 
-  it("rejects a successful integration delete response with a different user ID", async () => {
+  it("accepts malformed successful integration delete data after absence proof", async () => {
+    const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
+    expect(typeof deleteOwnedUsers).toBe("function");
+    if (!deleteOwnedUsers) return;
+    const admin = cleanupAdmin({ data: "malformed-test-data", error: null });
+
+    await deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]);
+  });
+
+  it("accepts unrelated successful integration delete data after absence proof", async () => {
     const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
     expect(typeof deleteOwnedUsers).toBe("function");
     if (!deleteOwnedUsers) return;
@@ -176,28 +181,21 @@ describe("integration fixture ownership", () => {
       error: null,
     });
 
-    await expect(
-      deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),
-    ).rejects.toThrow("Integration Auth delete response does not match verified ownership");
+    await deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]);
   });
 
-  it("rejects a successful integration delete response with a different email", async () => {
+  it("rejects an integration delete error before accepting absence proof", async () => {
     const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
     expect(typeof deleteOwnedUsers).toBe("function");
     if (!deleteOwnedUsers) return;
     const admin = cleanupAdmin({
-      data: {
-        user: {
-          id: userId,
-          email: `integration-${runScope}-10001@integration.daily-attention.invalid`,
-        },
-      },
-      error: null,
+      data: { user: {} },
+      error: { message: "test delete failure" },
     });
 
     await expect(
       deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),
-    ).rejects.toThrow("Integration Auth delete response does not match verified ownership");
+    ).rejects.toThrow("Unable to delete an owned integration user");
   });
 
   it("rejects integration cleanup when a fresh Admin list still contains the deleted user", async () => {
@@ -206,7 +204,7 @@ describe("integration fixture ownership", () => {
     if (!deleteOwnedUsers) return;
     const admin = cleanupAdmin(
       {
-        data: { user: { id: userId, email: expectedEmail } },
+        data: { user: {} },
         error: null,
       },
       [{ id: userId, email: expectedEmail }],
@@ -215,6 +213,20 @@ describe("integration fixture ownership", () => {
     await expect(
       deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),
     ).rejects.toThrow("Integration Auth cleanup did not complete");
+  });
+
+  it("rejects a malformed fresh Admin list as integration Auth absence proof", async () => {
+    const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
+    expect(typeof deleteOwnedUsers).toBe("function");
+    if (!deleteOwnedUsers) return;
+    const admin = cleanupAdmin(
+      { data: { user: {} }, error: null },
+      [{}],
+    );
+
+    await expect(
+      deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),
+    ).rejects.toThrow("Unable to verify integration Auth cleanup");
   });
 
   it("isolates the same counter across runner-provided scopes", () => {
