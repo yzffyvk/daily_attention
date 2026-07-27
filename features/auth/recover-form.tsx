@@ -11,7 +11,7 @@ type Recovered = {
 };
 
 export function RecoverForm({ onRecovered }: { onRecovered: (result: { displayName: string; recoveryCode: string }) => void }) {
-  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -24,7 +24,7 @@ export function RecoverForm({ onRecovered }: { onRecovered: (result: { displayNa
     setError(null);
     setIsSubmitting(true);
     try {
-      const result = await postAuth<Recovered>("/api/auth/recover", { phone, recoveryCode, newPassword });
+      const result = await postAuth<Recovered>("/api/auth/recover", { email, recoveryCode, newPassword });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -39,7 +39,7 @@ export function RecoverForm({ onRecovered }: { onRecovered: (result: { displayNa
 
   return (
     <form className="auth-form" onSubmit={submit} noValidate>
-      <label className="auth-field"><span>手机号</span><input aria-describedby={error?.field === "phone" ? "recover-phone-error" : undefined} aria-invalid={error?.field === "phone" || undefined} autoComplete="tel" autoFocus inputMode="numeric" maxLength={11} onChange={(event) => setPhone(event.target.value.replace(/\D/gu, ""))} value={phone} /></label>
+      <label className="auth-field"><span>邮箱</span><input aria-describedby={error?.field === "email" ? "recover-email-error" : undefined} aria-invalid={error?.field === "email" || undefined} autoComplete="username" autoFocus onChange={(event) => setEmail(event.target.value)} type="email" value={email} /></label>
       <label className="auth-field"><span>恢复码</span><input aria-describedby={error?.field === "recoveryCode" ? "recover-recoveryCode-error" : undefined} aria-invalid={error?.field === "recoveryCode" || undefined} autoComplete="one-time-code" onChange={(event) => setRecoveryCode(event.target.value)} placeholder="01234-56789-ABCDE-FGHJK-MNPQRS" value={recoveryCode} /></label>
       <label className="auth-field"><span>新密码</span><input aria-describedby={error?.field === "newPassword" ? "recover-newPassword-error" : undefined} aria-invalid={error?.field === "newPassword" || undefined} autoComplete="new-password" onChange={(event) => setNewPassword(event.target.value)} type="password" value={newPassword} /></label>
       <label className="auth-field"><span>确认新密码</span><input autoComplete="new-password" onChange={(event) => setConfirmation(event.target.value)} type="password" value={confirmation} /></label>

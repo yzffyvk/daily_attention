@@ -34,10 +34,6 @@ function normalizeDisplayName(value: string) {
   return value.normalize("NFKC").trim().replace(/\s+/gu, " ");
 }
 
-function maskPhone(phone: string) {
-  return `${phone.slice(0, 3)}****${phone.slice(-4)}`;
-}
-
 function ProfileDialog({
   profile,
   onClose,
@@ -141,11 +137,11 @@ function ProfileDialog({
         </button>
         <p className="eyebrow">PROFILE</p>
         <h2 id="profile-dialog-title">编辑资料</h2>
-        <p>手机号不可修改；头像和名称可以随时更新。</p>
+        <p>邮箱不可修改；头像和名称可以随时更新。</p>
         <form className="profile-form" onSubmit={submit}>
           <div className="auth-field">
-            <span>手机号</span>
-            <span id="profile-phone">{maskPhone(profile.phone)}</span>
+            <span>邮箱</span>
+            <span id="profile-email">{profile.email}</span>
           </div>
           <label className="auth-field" htmlFor="profile-name">
             <span>名称</span>

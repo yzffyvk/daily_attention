@@ -16,7 +16,7 @@ type Registered = {
 type FormError = { message: string; field?: string };
 
 export function RegisterForm({ onRegistered }: { onRegistered: (result: Registered) => void }) {
-  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [avatarKey, setAvatarKey] = useState<number | null>(null);
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -31,7 +31,7 @@ export function RegisterForm({ onRegistered }: { onRegistered: (result: Register
     setError(null);
     setIsSubmitting(true);
     try {
-      const result = await postAuth<Registered>("/api/auth/register", { phone, password, avatarKey });
+      const result = await postAuth<Registered>("/api/auth/register", { email, password, avatarKey });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -47,8 +47,8 @@ export function RegisterForm({ onRegistered }: { onRegistered: (result: Register
   return (
     <form className="register-form auth-form" onSubmit={submit} noValidate>
       <label className="auth-field">
-        <span>手机号</span>
-        <input aria-describedby={error?.field === "phone" ? "register-phone-error" : undefined} aria-invalid={error?.field === "phone" || undefined} autoComplete="tel" autoFocus inputMode="numeric" maxLength={11} onChange={(event) => setPhone(event.target.value.replace(/\D/gu, ""))} value={phone} />
+        <span>邮箱</span>
+        <input aria-describedby={error?.field === "email" ? "register-email-error" : undefined} aria-invalid={error?.field === "email" || undefined} autoComplete="username" autoFocus onChange={(event) => setEmail(event.target.value)} type="email" value={email} />
       </label>
       <fieldset aria-describedby={error?.field === "avatarKey" ? "register-avatarKey-error" : undefined} aria-invalid={error?.field === "avatarKey" || undefined} className="avatar-fieldset">
         <legend>选择头像</legend>

@@ -161,7 +161,7 @@ test("defines compact responsive calendar, sticky controls, and reduced-motion f
   assert.doesNotMatch(styles, /border-radius:\s*(1[0-9]|[2-9][0-9])px/);
 });
 
-test("renders phone-oriented authentication forms", async () => {
+test("renders email-oriented authentication forms", async () => {
   const [loginForm, registerForm, recoverForm, loginPage, registerPage, recoverPage] = await Promise.all([
     readFile(new URL("../features/auth/login-form.tsx", import.meta.url), "utf8"),
     readFile(new URL("../features/auth/register-form.tsx", import.meta.url), "utf8"),
@@ -172,22 +172,23 @@ test("renders phone-oriented authentication forms", async () => {
   ]);
 
   for (const form of [loginForm, registerForm, recoverForm]) {
-    assert.match(form, /手机号/);
-    assert.match(form, /inputMode="numeric"/);
-    assert.match(form, /autoComplete="tel"/);
-    assert.match(form, /maxLength=\{11\}/);
-    assert.match(form, /replace\(\/\\D\/gu, ""\)/);
-    assert.doesNotMatch(form, /autoComplete="username"/);
+    assert.match(form, /邮箱/);
+    assert.match(form, /type="email"/);
+    assert.match(form, /autoComplete="username"/);
+    assert.doesNotMatch(form, /inputMode="numeric"/);
+    assert.doesNotMatch(form, /autoComplete="tel"/);
+    assert.doesNotMatch(form, /maxLength=\{11\}/);
+    assert.doesNotMatch(form, /replace\(\/\\D\/gu, ""\)/);
   }
-  assert.match(loginForm, /\{ phone, password \}/);
-  assert.match(registerForm, /\{ phone, password, avatarKey \}/);
-  assert.match(recoverForm, /\{ phone, recoveryCode, newPassword \}/);
+  assert.match(loginForm, /\{ email, password \}/);
+  assert.match(registerForm, /\{ email, password, avatarKey \}/);
+  assert.match(recoverForm, /\{ email, recoveryCode, newPassword \}/);
   assert.match(recoverForm, /result\.data\.profile\.displayName/);
   assert.match(registerForm, /<Link className="secondary-button" href="\/login">返回登录<\/Link>/);
   assert.doesNotMatch(registerForm, /name-field|setName|名称/);
   assert.match(registerPage, /result\.profile\.displayName/);
   assert.match(recoverPage, /name=\{recovered\?\.displayName\}/);
   for (const page of [loginPage, registerPage, recoverPage]) {
-    assert.match(page, /手机号/);
+    assert.match(page, /邮箱/);
   }
 });

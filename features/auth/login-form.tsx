@@ -7,7 +7,7 @@ import { postAuth } from "./auth-card";
 type FormError = { message: string; field?: string };
 
 export function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
-  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<FormError | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -17,7 +17,7 @@ export function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
     setError(null);
     setIsSubmitting(true);
     try {
-      const result = await postAuth<Record<string, never>>("/api/auth/login", { phone, password });
+      const result = await postAuth<Record<string, never>>("/api/auth/login", { email, password });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -32,7 +32,7 @@ export function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
 
   return (
     <form className="auth-form" onSubmit={submit} noValidate>
-      <label className="auth-field"><span>手机号</span><input aria-describedby={error?.field === "phone" ? "login-phone-error" : undefined} aria-invalid={error?.field === "phone" || undefined} autoComplete="tel" autoFocus inputMode="numeric" maxLength={11} onChange={(event) => setPhone(event.target.value.replace(/\D/gu, ""))} value={phone} /></label>
+      <label className="auth-field"><span>邮箱</span><input aria-describedby={error?.field === "email" ? "login-email-error" : undefined} aria-invalid={error?.field === "email" || undefined} autoComplete="username" autoFocus onChange={(event) => setEmail(event.target.value)} type="email" value={email} /></label>
       <label className="auth-field"><span>密码</span><input aria-describedby={error?.field === "password" ? "login-password-error" : undefined} aria-invalid={error?.field === "password" || undefined} autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} type="password" value={password} /></label>
       {error ? <p className="login-error" id={error.field ? `login-${error.field}-error` : undefined} role="alert">{error.message}</p> : null}
       <div className="auth-actions">

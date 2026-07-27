@@ -25,19 +25,18 @@ afterEach(() => {
 });
 
 describe("registration UI", () => {
-  it("renders an accessible phone field, five avatars, and a return-login link", () => {
+  it("renders an accessible email field, five avatars, and a return-login link", () => {
     render(<RegisterForm onRegistered={vi.fn()} />);
-    const phone = screen.getByLabelText("手机号");
+    const email = screen.getByLabelText("邮箱");
 
-    expect(phone).toHaveAttribute("inputmode", "numeric");
-    expect(phone).toHaveAttribute("autocomplete", "tel");
-    expect(phone).toHaveAttribute("maxlength", "11");
+    expect(email).toHaveAttribute("type", "email");
+    expect(email).toHaveAttribute("autocomplete", "username");
     expect(screen.queryByLabelText("名称")).not.toBeInTheDocument();
     expect(screen.getAllByRole("radio", { name: /头像/ })).toHaveLength(5);
     expect(screen.getByRole("link", { name: "返回登录" })).toHaveAttribute("href", "/login");
   });
 
-  it("submits a digit-only phone registration payload", async () => {
+  it("submits the raw email registration payload", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({
       ok: true,
       data: {
@@ -49,7 +48,7 @@ describe("registration UI", () => {
     const user = userEvent.setup();
     render(<RegisterForm onRegistered={vi.fn()} />);
 
-    await user.type(screen.getByLabelText("手机号"), "138 0013 8000");
+    await user.type(screen.getByLabelText("邮箱"), "Student@Example.COM");
     await user.click(screen.getByRole("radio", { name: "头像 1" }));
     await user.type(screen.getByLabelText("密码"), "password123");
     await user.type(screen.getByLabelText("确认密码"), "password123");
@@ -58,28 +57,28 @@ describe("registration UI", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/auth/register",
       expect.objectContaining({
-        body: JSON.stringify({ phone: "13800138000", password: "password123", avatarKey: 1 }),
+        body: JSON.stringify({ email: "Student@Example.COM", password: "password123", avatarKey: 1 }),
       }),
     );
   });
 
-  it("uses a phone field error ID and preserves the entered phone", async () => {
+  it("uses an email field error ID and preserves the entered email", async () => {
     const user = userEvent.setup();
-    const phoneTakenResponse = authFailure({ code: "phone_exists" }, "request-id");
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(phoneTakenResponse));
+    const emailTakenResponse = authFailure({ code: "email_exists" }, "request-id");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(emailTakenResponse));
     render(<RegisterForm onRegistered={vi.fn()} />);
-    const phone = screen.getByLabelText("手机号");
-    await user.type(phone, "13800138000");
+    const email = screen.getByLabelText("邮箱");
+    await user.type(email, "student@example.com");
     await user.click(screen.getByRole("radio", { name: "头像 1" }));
     await user.type(screen.getByLabelText("密码"), "password123");
     await user.type(screen.getByLabelText("确认密码"), "password123");
     await user.click(screen.getByRole("button", { name: "注册并进入" }));
 
-    const error = await screen.findByText("该手机号已注册");
-    expect(phone).toHaveValue("13800138000");
-    expect(phone).toHaveAttribute("aria-invalid", "true");
-    expect(error.id).toBe("register-phone-error");
-    expect(phone).toHaveAttribute("aria-describedby", error.id);
+    const error = await screen.findByText("该邮箱已注册");
+    expect(email).toHaveValue("student@example.com");
+    expect(email).toHaveAttribute("aria-invalid", "true");
+    expect(error.id).toBe("register-email-error");
+    expect(email).toHaveAttribute("aria-describedby", error.id);
   });
 
   it("labels recovery code as one-time information", () => {
@@ -132,6 +131,24 @@ describe("registration UI", () => {
 });
 
 describe("authentication network failures", () => {
+  it("submits the raw email login payload", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<LoginForm onLoggedIn={vi.fn()} />);
+
+    await user.type(screen.getByLabelText("邮箱"), "Student@Example.COM");
+    await user.type(screen.getByLabelText("密码"), "password123");
+    await user.click(screen.getByRole("button", { name: "登录" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/auth/login",
+      expect.objectContaining({
+        body: JSON.stringify({ email: "Student@Example.COM", password: "password123" }),
+      }),
+    );
+  });
+
   it("turns a rejected auth request into a friendly failure", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
 
@@ -146,14 +163,14 @@ describe("authentication network failures", () => {
     const user = userEvent.setup();
     render(<LoginForm onLoggedIn={vi.fn()} />);
 
-    const phone = screen.getByLabelText("手机号");
-    await user.type(phone, "13800138000");
+    const email = screen.getByLabelText("邮箱");
+    await user.type(email, "student@example.com");
     await user.type(screen.getByLabelText("密码"), "password123");
     await user.click(screen.getByRole("button", { name: "登录" }));
 
-    expect(phone).toHaveAttribute("inputmode", "numeric");
-    expect(phone).toHaveAttribute("autocomplete", "tel");
-    expect(phone).toHaveValue("13800138000");
+    expect(email).toHaveAttribute("type", "email");
+    expect(email).toHaveAttribute("autocomplete", "username");
+    expect(email).toHaveValue("student@example.com");
     expect(await screen.findByRole("alert")).toHaveTextContent("网络连接失败，请检查网络后重试");
     expect(screen.getByRole("button", { name: "登录" })).toBeEnabled();
   });
@@ -163,7 +180,7 @@ describe("authentication network failures", () => {
     const user = userEvent.setup();
     render(<RegisterForm onRegistered={vi.fn()} />);
 
-    await user.type(screen.getByLabelText("手机号"), "13800138000");
+    await user.type(screen.getByLabelText("邮箱"), "student@example.com");
     await user.click(screen.getByRole("radio", { name: "头像 1" }));
     await user.type(screen.getByLabelText("密码"), "password123");
     await user.type(screen.getByLabelText("确认密码"), "password123");
@@ -178,16 +195,16 @@ describe("authentication network failures", () => {
     const user = userEvent.setup();
     render(<RecoverForm onRecovered={vi.fn()} />);
 
-    const phone = screen.getByLabelText("手机号");
-    await user.type(phone, "13800138000");
+    const email = screen.getByLabelText("邮箱");
+    await user.type(email, "student@example.com");
     await user.type(screen.getByLabelText("恢复码"), "01234-56789-ABCDE-FGHJK-MNPQRS");
     await user.type(screen.getByLabelText("新密码"), "new-password123");
     await user.type(screen.getByLabelText("确认新密码"), "new-password123");
     await user.click(screen.getByRole("button", { name: "重设密码" }));
 
-    expect(phone).toHaveAttribute("inputmode", "numeric");
-    expect(phone).toHaveAttribute("autocomplete", "tel");
-    expect(phone).toHaveValue("13800138000");
+    expect(email).toHaveAttribute("type", "email");
+    expect(email).toHaveAttribute("autocomplete", "username");
+    expect(email).toHaveValue("student@example.com");
     expect(await screen.findByRole("alert")).toHaveTextContent("网络连接失败，请检查网络后重试");
     expect(screen.getByRole("button", { name: "重设密码" })).toBeEnabled();
   });
@@ -196,21 +213,33 @@ describe("authentication network failures", () => {
 describe("recovery UI", () => {
   it("preserves the recovery response profile display name", async () => {
     const onRecovered = vi.fn();
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({
       ok: true,
       data: {
         profile: { id: "profile-1", displayName: "Attention_001", avatarKey: 1 },
         recoveryCode: "01234-56789-ABCDE-FGHJK-MNPQRS",
       },
-    })));
+    }));
+    vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     render(<RecoverForm onRecovered={onRecovered} />);
 
-    await user.type(screen.getByLabelText("手机号"), "13800138000");
+    await user.type(screen.getByLabelText("邮箱"), "student@example.com");
     await user.type(screen.getByLabelText("恢复码"), "01234-56789-ABCDE-FGHJK-MNPQRS");
     await user.type(screen.getByLabelText("新密码"), "new-password123");
     await user.type(screen.getByLabelText("确认新密码"), "new-password123");
     await user.click(screen.getByRole("button", { name: "重设密码" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/auth/recover",
+      expect.objectContaining({
+        body: JSON.stringify({
+          email: "student@example.com",
+          recoveryCode: "01234-56789-ABCDE-FGHJK-MNPQRS",
+          newPassword: "new-password123",
+        }),
+      }),
+    );
 
     await waitFor(() => {
       expect(onRecovered).toHaveBeenCalledWith({
