@@ -9,6 +9,11 @@ const userId = "00000000-0000-4000-8000-000000000001";
 const otherUserId = "00000000-0000-4000-8000-000000000002";
 let previousScope: string | undefined;
 
+const missingUserResult = {
+  data: { user: null },
+  error: { code: "user_not_found", status: 404 },
+};
+
 beforeEach(() => {
   previousScope = process.env.INTEGRATION_RUN_SCOPE;
   process.env.INTEGRATION_RUN_SCOPE = runScope;
@@ -29,20 +34,8 @@ function fixtureExports() {
       admin: {
         auth: {
           admin: {
-            getUserById: (ownedUserId: string) => Promise<{
-              data: { user: { id: string; email: string } | null };
-              error: null;
-            }>;
+            getUserById: (ownedUserId: string) => Promise<unknown>;
             deleteUser: (ownedUserId: string) => Promise<unknown>;
-            listUsers: (parameters: { page: number; perPage: number }) => Promise<{
-              data: {
-                lastPage: number;
-                nextPage: number | null;
-                total: number;
-                users: unknown[];
-              };
-              error: unknown;
-            }>;
           };
         };
       },
@@ -53,25 +46,28 @@ function fixtureExports() {
 
 function cleanupAdmin(
   deleteResponse: unknown,
-  usersAfterDelete: unknown[] = [],
+  ...postDeleteReads: unknown[]
 ) {
+  const postDeleteRead = postDeleteReads.length === 0
+    ? missingUserResult
+    : postDeleteReads[0];
+  let deleted = false;
   return {
     auth: {
       admin: {
-        getUserById: vi.fn().mockResolvedValue({
-          data: { user: { id: userId, email: expectedEmail } },
-          error: null,
+        getUserById: vi.fn().mockImplementation(async () => (
+          deleted
+            ? postDeleteRead
+            : {
+                data: { user: { id: userId, email: expectedEmail } },
+                error: null,
+              }
+        )),
+        deleteUser: vi.fn().mockImplementation(async () => {
+          deleted = true;
+          return deleteResponse;
         }),
-        deleteUser: vi.fn().mockResolvedValue(deleteResponse),
-        listUsers: vi.fn().mockResolvedValue({
-          data: {
-            lastPage: usersAfterDelete.length > 0 ? 1 : 0,
-            nextPage: null,
-            total: usersAfterDelete.length,
-            users: usersAfterDelete,
-          },
-          error: null,
-        }),
+        listUsers: vi.fn(),
       },
     },
   };
@@ -110,6 +106,22 @@ describe("integration fixture ownership", () => {
     });
 
     await deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]);
+    expect(admin.auth.admin.getUserById).toHaveBeenCalledTimes(3);
+  });
+
+  it("proves target absence without depending on concurrent global Auth population", async () => {
+    const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
+    expect(typeof deleteOwnedUsers).toBe("function");
+    if (!deleteOwnedUsers) return;
+    const admin = cleanupAdmin({ data: {}, error: null });
+    admin.auth.admin.listUsers.mockRejectedValue(
+      new Error("simulated concurrent global population change"),
+    );
+
+    await deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]);
+
+    expect(admin.auth.admin.getUserById).toHaveBeenCalledTimes(3);
+    expect(admin.auth.admin.listUsers).not.toHaveBeenCalled();
   });
 
   it("refuses deletion when Admin readback does not exactly match ownership", async () => {
@@ -137,10 +149,6 @@ describe("integration fixture ownership", () => {
               error: null,
             };
           }),
-          listUsers: vi.fn().mockResolvedValue({
-            data: { lastPage: 0, nextPage: null, total: 0, users: [] },
-            error: null,
-          }),
         },
       },
     };
@@ -158,10 +166,12 @@ describe("integration fixture ownership", () => {
 
     const readsByUser = new Map<string, number>();
     const deletedUserIds: string[] = [];
+    const deletedUsers = new Set<string>();
     const admin = {
       auth: {
         admin: {
           getUserById: vi.fn().mockImplementation(async (ownedUserId: string) => {
+            if (deletedUsers.has(ownedUserId)) return missingUserResult;
             const readCount = (readsByUser.get(ownedUserId) ?? 0) + 1;
             readsByUser.set(ownedUserId, readCount);
             const expectedOwnedEmail = ownedUserId === userId
@@ -181,16 +191,8 @@ describe("integration fixture ownership", () => {
           }),
           deleteUser: vi.fn().mockImplementation(async (ownedUserId: string) => {
             deletedUserIds.push(ownedUserId);
+            deletedUsers.add(ownedUserId);
             return { data: {}, error: null };
-          }),
-          listUsers: vi.fn().mockResolvedValue({
-            data: {
-              lastPage: 1,
-              nextPage: null,
-              total: 1,
-              users: [{ id: otherUserId, email: secondExpectedEmail }],
-            },
-            error: null,
           }),
         },
       },
@@ -276,7 +278,7 @@ describe("integration fixture ownership", () => {
     ).rejects.toThrow("Unable to delete an owned integration user");
   });
 
-  it("rejects integration cleanup when a fresh Admin list still contains the deleted user", async () => {
+  it("rejects integration cleanup when a fresh targeted read still returns the user", async () => {
     const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
     expect(typeof deleteOwnedUsers).toBe("function");
     if (!deleteOwnedUsers) return;
@@ -285,7 +287,10 @@ describe("integration fixture ownership", () => {
         data: { user: {} },
         error: null,
       },
-      [{ id: userId, email: expectedEmail }],
+      {
+        data: { user: { id: userId, email: expectedEmail } },
+        error: null,
+      },
     );
 
     await expect(
@@ -293,106 +298,40 @@ describe("integration fixture ownership", () => {
     ).rejects.toThrow("Integration Auth cleanup did not complete");
   });
 
-  it("rejects a malformed fresh Admin list as integration Auth absence proof", async () => {
-    const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
-    expect(typeof deleteOwnedUsers).toBe("function");
-    if (!deleteOwnedUsers) return;
-    const admin = cleanupAdmin(
-      { data: { user: {} }, error: null },
-      [{}],
-    );
-
-    await expect(
-      deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),
-    ).rejects.toThrow("Unable to verify integration Auth cleanup");
-  });
-
-  it("follows a short-page continuation before proving integration Auth absence", async () => {
-    const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
-    expect(typeof deleteOwnedUsers).toBe("function");
-    if (!deleteOwnedUsers) return;
-    const admin = cleanupAdmin({ data: {}, error: null });
-    admin.auth.admin.listUsers
-      .mockResolvedValueOnce({
-        data: { lastPage: 2, nextPage: 2, total: 1, users: [] },
-        error: null,
-      })
-      .mockResolvedValueOnce({
-        data: {
-          lastPage: 2,
-          nextPage: null,
-          total: 1,
-          users: [{ id: userId, email: expectedEmail }],
-        },
-        error: null,
-      });
-
-    await expect(
-      deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),
-    ).rejects.toThrow("Integration Auth cleanup did not complete");
-    expect(admin.auth.admin.listUsers).toHaveBeenCalledTimes(2);
-  });
-
+  const inheritedMissingError = Object.create({
+    code: "user_not_found",
+    status: 404,
+  }) as Record<string, unknown>;
   it.each([
-    [
-      "missing metadata",
-      [{ data: { users: [] }, error: null }],
-    ],
-    [
-      "malformed continuation",
-      [{
-        data: { lastPage: 2, nextPage: Number.NaN, total: 0, users: [] },
-        error: null,
-      }],
-    ],
-    [
-      "repeated continuation",
-      [
-        {
-          data: { lastPage: 2, nextPage: 2, total: 1, users: [] },
-          error: null,
-        },
-        {
-          data: { lastPage: 2, nextPage: 2, total: 1, users: [] },
-          error: null,
-        },
-      ],
-    ],
-    [
-      "backward continuation",
-      [
-        {
-          data: { lastPage: 3, nextPage: 2, total: 1, users: [] },
-          error: null,
-        },
-        {
-          data: { lastPage: 3, nextPage: 1, total: 1, users: [] },
-          error: null,
-        },
-      ],
-    ],
-    [
-      "inconsistent continuation",
-      [{
-        data: { lastPage: 3, nextPage: 3, total: 1, users: [] },
-        error: null,
-      }],
-    ],
-    [
-      "impossible totals",
-      [{
-        data: { lastPage: 0, nextPage: null, total: 1, users: [] },
-        error: null,
-      }],
-    ],
-  ])("rejects integration Auth pagination with %s", async (_label, pages) => {
+    ["missing result", undefined],
+    ["missing data", { error: { code: "user_not_found", status: 404 } }],
+    ["missing own user", {
+      data: Object.create({ user: null }),
+      error: { code: "user_not_found", status: 404 },
+    }],
+    ["non-null user", {
+      data: { user: undefined },
+      error: { code: "user_not_found", status: 404 },
+    }],
+    ["missing error", { data: { user: null } }],
+    ["null error", { data: { user: null }, error: null }],
+    ["wrong status", {
+      data: { user: null },
+      error: { code: "user_not_found", status: 400 },
+    }],
+    ["wrong code", {
+      data: { user: null },
+      error: { code: "unexpected_error", status: 404 },
+    }],
+    ["inherited status and code", {
+      data: { user: null },
+      error: inheritedMissingError,
+    }],
+  ])("rejects a targeted missing-user response with %s", async (_label, postDeleteRead) => {
     const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
     expect(typeof deleteOwnedUsers).toBe("function");
     if (!deleteOwnedUsers) return;
-    const admin = cleanupAdmin({ data: {}, error: null });
-    for (const page of pages) {
-      admin.auth.admin.listUsers.mockResolvedValueOnce(page);
-    }
+    const admin = cleanupAdmin({ data: {}, error: null }, postDeleteRead);
 
     await expect(
       deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),

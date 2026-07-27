@@ -99,6 +99,16 @@ function deleteResult() {
   return JSON.parse(serialized);
 }
 
+function missingUserResult() {
+  const serialized = process.env.FAKE_SUPABASE_MISSING_USER_RESULT;
+  return serialized
+    ? JSON.parse(serialized)
+    : {
+        data: { user: null },
+        error: { code: "user_not_found", status: 404 },
+      };
+}
+
 export function createClient() {
   return {
     auth: {
@@ -107,17 +117,10 @@ export function createClient() {
           userPresent = false;
           return deleteResult();
         },
-        async listUsers() {
-          const users = userPresent ? [user] : [];
-          return {
-            data: {
-              lastPage: users.length > 0 ? 1 : 0,
-              nextPage: null,
-              total: users.length,
-              users,
-            },
-            error: null,
-          };
+        async getUserById() {
+          return userPresent
+            ? { data: { user }, error: null }
+            : missingUserResult();
         },
       },
     },
@@ -136,13 +139,6 @@ export function createClient() {
 
 type RunnerResult = { code: number | null; signal: NodeJS.Signals | null; stderr: string; stdout: string };
 type FakeUser = { id: string; email: string };
-type FakeUserPage = {
-  lastPage: number;
-  link?: string;
-  nextPage: number | null;
-  total: number;
-  users: unknown[];
-};
 type FakeStorageObject = { bucketId: string; ownerId: string | null; path: string };
 
 const staleUser: FakeUser = {
@@ -185,10 +181,17 @@ async function fixture(
     delayMs: 0,
     deleteFailureIds: new Set<string>(),
     deleteResponseBody: undefined as unknown,
-    failPostDeleteList: false,
-    malformedPostDeleteList: false,
+    failPostDeleteRead: false,
+    globalListReads: 0,
     marker: "",
-    postDeletePages: new Map<number, FakeUserPage>(),
+    missingUserResponse: {
+      body: {
+        error_code: "user_not_found",
+        message: "test missing user",
+      } as unknown,
+      status: 404,
+    },
+    postDeleteTargetedReads: 0,
     retainDeletedUserIds: new Set<string>(),
   };
   const authSettings = {
@@ -207,44 +210,35 @@ async function fixture(
       return;
     }
     if (request.method === "GET" && url.pathname === "/auth/v1/admin/users") {
+      cleanup.globalListReads += 1;
+      const allUsers = [...users.values()];
+      response.writeHead(200, {
+        "content-type": "application/json",
+        "x-total-count": String(allUsers.length),
+      });
+      response.end(JSON.stringify({ users: allUsers }));
+      return;
+    }
+    if (request.method === "GET" && url.pathname.startsWith("/auth/v1/admin/users/")) {
+      const id = url.pathname.split("/").at(-1) ?? "";
       if (cleanup.marker) void writeFile(cleanup.marker, "cleanup");
-      if (deletedEmails.length > 0 && cleanup.failPostDeleteList) {
-        response.writeHead(500, { "content-type": "application/json" });
-        response.end(JSON.stringify({ message: "test post-delete list failure" }));
-        return;
-      }
-      const page = Number(url.searchParams.get("page") || 1);
-      const perPage = Number(url.searchParams.get("per_page") || 1000);
-      const configuredPage = deletedEmails.length > 0
-        ? cleanup.postDeletePages.get(page)
-        : undefined;
-      const allUsers = deletedEmails.length > 0 && cleanup.malformedPostDeleteList
-        ? [{}]
-        : [...users.values()];
-      const selected = configuredPage?.users
-        ?? allUsers.slice((page - 1) * perPage, page * perPage);
       setTimeout(() => {
-        const headers: Record<string, string> = {
-          "content-type": "application/json",
-          "x-total-count": String(configuredPage?.total ?? allUsers.length),
-        };
-        const links = [];
-        if (configuredPage) {
-          if (configuredPage.nextPage !== null) {
-            links.push(
-              `</auth/v1/admin/users?page=${configuredPage.nextPage}>; rel="next"`,
-            );
-          }
-          links.push(
-            `</auth/v1/admin/users?page=${configuredPage.lastPage}>; rel="last"`,
-          );
-          const link = configuredPage.link ?? links.join(", ");
-          if (link) headers.link = link;
-        } else if (allUsers.length > 0) {
-          headers.link = `</auth/v1/admin/users?page=1>; rel="last"`;
+        const user = users.get(id);
+        if (user) {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify(user));
+          return;
         }
-        response.writeHead(200, headers);
-        response.end(JSON.stringify({ users: selected }));
+        if (deletedEmails.length > 0) cleanup.postDeleteTargetedReads += 1;
+        if (deletedEmails.length > 0 && cleanup.failPostDeleteRead) {
+          response.writeHead(500, { "content-type": "application/json" });
+          response.end(JSON.stringify({ message: "test post-delete read failure" }));
+          return;
+        }
+        response.writeHead(cleanup.missingUserResponse.status, {
+          "content-type": "application/json",
+        });
+        response.end(JSON.stringify(cleanup.missingUserResponse.body));
       }, cleanup.delayMs);
       return;
     }
@@ -603,6 +597,21 @@ describe("E2E runner isolation", () => {
 
     expect(result.code).toBe(0);
     expect(setup.users.has(staleUser.id)).toBe(false);
+    expect(setup.cleanup.postDeleteTargetedReads).toBe(1);
+    expect(existsSync(setup.registryFile)).toBe(false);
+  });
+
+  it("proves target absence despite concurrent changes to the global Auth population", async () => {
+    const setup = await fixture([staleUser, localDeveloper]);
+    await writeRegistry(setup, ownershipLine(staleUser));
+
+    const result = await runRunner(setup.env);
+
+    expect(result.code).toBe(0);
+    expect(setup.users.has(staleUser.id)).toBe(false);
+    expect(setup.users.get(localDeveloper.id)).toEqual(localDeveloper);
+    expect(setup.cleanup.globalListReads).toBe(0);
+    expect(setup.cleanup.postDeleteTargetedReads).toBe(1);
     expect(existsSync(setup.registryFile)).toBe(false);
   });
 
@@ -670,7 +679,7 @@ describe("E2E runner isolation", () => {
     expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
   });
 
-  it("rejects an exact delete response when a fresh Admin list still contains the user", async () => {
+  it("rejects an exact delete response when a fresh targeted read still contains the user", async () => {
     const setup = await fixture([staleUser]);
     setup.cleanup.retainDeletedUserIds.add(staleUser.id);
     await writeRegistry(setup, ownershipLine(staleUser));
@@ -685,139 +694,37 @@ describe("E2E runner isolation", () => {
     expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
   });
 
-  it("rejects a malformed fresh Admin list as proof of Auth absence", async () => {
+  it.each([
+    [
+      "wrong status",
+      {
+        body: { error_code: "user_not_found", message: "test wrong status" },
+        status: 400,
+      },
+    ],
+    [
+      "wrong code",
+      {
+        body: { error_code: "unexpected_error", message: "test wrong code" },
+        status: 404,
+      },
+    ],
+    [
+      "malformed success envelope",
+      {
+        body: {},
+        status: 200,
+      },
+    ],
+  ])("rejects a targeted missing-user response with %s", async (_label, missingUserResponse) => {
     const setup = await fixture([staleUser]);
-    setup.cleanup.malformedPostDeleteList = true;
+    setup.cleanup.missingUserResponse = missingUserResponse;
     await writeRegistry(setup, ownershipLine(staleUser));
 
     const result = await runRunner(setup.env);
 
     expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain("invalid E2E user list");
-    expect(result.stderr).not.toContain(staleUser.id);
-    expect(result.stderr).not.toContain(staleUser.email);
-    expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
-  });
-
-  it("follows nextPage after a short page and rejects a target found on the continuation", async () => {
-    const setup = await fixture([staleUser]);
-    setup.cleanup.retainDeletedUserIds.add(staleUser.id);
-    setup.cleanup.postDeletePages.set(1, {
-      lastPage: 2,
-      nextPage: 2,
-      total: 1,
-      users: [],
-    });
-    setup.cleanup.postDeletePages.set(2, {
-      lastPage: 2,
-      nextPage: null,
-      total: 1,
-      users: [staleUser],
-    });
-    await writeRegistry(setup, ownershipLine(staleUser));
-
-    const result = await runRunner(setup.env);
-
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain("Auth cleanup did not complete");
-    expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
-  });
-
-  it("rejects malformed Auth pagination metadata", async () => {
-    const setup = await fixture([staleUser]);
-    setup.cleanup.postDeletePages.set(1, {
-      lastPage: 2,
-      link: '</auth/v1/admin/users?page=x>; rel="next", </auth/v1/admin/users?page=2>; rel="last"',
-      nextPage: 2,
-      total: 0,
-      users: [],
-    });
-    await writeRegistry(setup, ownershipLine(staleUser));
-
-    const result = await runRunner(setup.env);
-
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain("invalid E2E user list");
-    expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
-  });
-
-  it("rejects a repeated Auth pagination continuation", async () => {
-    const setup = await fixture([staleUser]);
-    setup.cleanup.postDeletePages.set(1, {
-      lastPage: 2,
-      nextPage: 2,
-      total: 1,
-      users: [],
-    });
-    setup.cleanup.postDeletePages.set(2, {
-      lastPage: 2,
-      nextPage: 2,
-      total: 1,
-      users: [],
-    });
-    await writeRegistry(setup, ownershipLine(staleUser));
-
-    const result = await runRunner(setup.env);
-
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain("invalid E2E user list");
-    expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
-  });
-
-  it("rejects a backward Auth pagination continuation", async () => {
-    const setup = await fixture([staleUser]);
-    setup.cleanup.postDeletePages.set(1, {
-      lastPage: 3,
-      nextPage: 2,
-      total: 1,
-      users: [],
-    });
-    setup.cleanup.postDeletePages.set(2, {
-      lastPage: 3,
-      nextPage: 1,
-      total: 1,
-      users: [],
-    });
-    await writeRegistry(setup, ownershipLine(staleUser));
-
-    const result = await runRunner(setup.env);
-
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain("invalid E2E user list");
-    expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
-  });
-
-  it("rejects an inconsistent Auth pagination continuation", async () => {
-    const setup = await fixture([staleUser]);
-    setup.cleanup.postDeletePages.set(1, {
-      lastPage: 3,
-      nextPage: 3,
-      total: 1,
-      users: [],
-    });
-    await writeRegistry(setup, ownershipLine(staleUser));
-
-    const result = await runRunner(setup.env);
-
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain("invalid E2E user list");
-    expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
-  });
-
-  it("rejects impossible Auth pagination totals", async () => {
-    const setup = await fixture([staleUser]);
-    setup.cleanup.postDeletePages.set(1, {
-      lastPage: 0,
-      nextPage: null,
-      total: 1,
-      users: [],
-    });
-    await writeRegistry(setup, ownershipLine(staleUser));
-
-    const result = await runRunner(setup.env);
-
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain("invalid E2E user list");
+    expect(result.stderr).toContain("Unable to verify local E2E Auth cleanup");
     expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
   });
 
@@ -862,7 +769,7 @@ describe("E2E runner isolation", () => {
 
   it("removes a deleting checkpoint only after retry proves Auth and Storage absence", async () => {
     const setup = await fixture([staleUser]);
-    setup.cleanup.failPostDeleteList = true;
+    setup.cleanup.failPostDeleteRead = true;
     await writeRegistry(setup, ownershipLine(staleUser));
     const interrupted = await runRunner(setup.env);
 
@@ -870,7 +777,7 @@ describe("E2E runner isolation", () => {
     expect(setup.users.has(staleUser.id)).toBe(false);
     expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
 
-    setup.cleanup.failPostDeleteList = false;
+    setup.cleanup.failPostDeleteRead = false;
     const retried = await runRunner(setup.env);
 
     expect(retried.code).toBe(0);
