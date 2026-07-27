@@ -1,8 +1,9 @@
-import { spawn, spawnSync } from "node:child_process";
+import { fork, spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import {
   acquireIntegrationRunLock,
@@ -12,6 +13,9 @@ import {
 } from "./integration-user-registry.mjs";
 
 const command = process.platform === "win32" ? "npx.cmd" : "npx";
+const vitestWorkerPath = fileURLToPath(
+  new URL("./integration-vitest-worker.mjs", import.meta.url),
+);
 
 function statusEnvironment() {
   const result = spawnSync(command, ["supabase", "status", "-o", "env"], {
@@ -44,15 +48,74 @@ function statusEnvironment() {
   return bindings;
 }
 
-function run(program, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(program, args, { stdio: "inherit", ...options });
-    child.once("error", reject);
-    child.once("exit", (code, signal) => {
-      if (signal) reject(new Error(`${program} stopped with ${signal}`));
-      else resolve(code ?? 1);
+async function runIntegrationVitestWorker(environment, runLock) {
+  let worker;
+  try {
+    worker = fork(vitestWorkerPath, [], {
+      cwd: process.cwd(),
+      env: environment,
+      stdio: ["inherit", "inherit", "inherit", "ipc"],
     });
+  } catch {
+    throw new Error("Unable to start the integration Vitest worker.");
+  }
+
+  let lockHeld = false;
+  let protocolFailed = false;
+  const outcome = new Promise((resolve) => {
+    let settled = false;
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    worker.once("error", () => settle({ failed: true }));
+    worker.once("exit", (code, signal) => settle({ code, signal }));
   });
+  worker.on("message", (message) => {
+    if (
+      !lockHeld
+      && message
+      && typeof message === "object"
+      && !Array.isArray(message)
+      && Object.keys(message).length === 1
+      && message.type === "integration-run-lock-held"
+    ) {
+      lockHeld = true;
+      return;
+    }
+    protocolFailed = true;
+    if (worker.exitCode === null && worker.signalCode === null) {
+      worker.kill("SIGTERM");
+    }
+  });
+
+  try {
+    await Promise.race([
+      runLock.shareWith(worker),
+      outcome.then(() => {
+        throw new Error("Unable to start the integration Vitest worker.");
+      }),
+    ]);
+  } catch {
+    if (worker.exitCode === null && worker.signalCode === null) {
+      worker.kill("SIGTERM");
+    }
+    await outcome;
+    throw new Error("Unable to start the integration Vitest worker.");
+  }
+
+  const result = await outcome;
+  if (
+    result.failed
+    || protocolFailed
+    || !lockHeld
+    || result.signal
+    || typeof result.code !== "number"
+  ) {
+    throw new Error("Integration Vitest worker failed.");
+  }
+  return result.code;
 }
 
 async function waitForServer(url, timeoutMs = 60_000) {
@@ -71,7 +134,7 @@ async function waitForServer(url, timeoutMs = 60_000) {
 
 async function main() {
   const { registryFile } = integrationRegistryPaths();
-  const releaseLock = await acquireIntegrationRunLock();
+  const runLock = await acquireIntegrationRunLock();
   let bindingDirectory;
   let devServer;
   let devServerExited;
@@ -113,16 +176,7 @@ async function main() {
     devServerExited = new Promise((resolve) => devServer.once("exit", resolve));
 
     await waitForServer("http://127.0.0.1:3100");
-    const exitCode = await run(command, [
-      "vitest",
-      "run",
-      "tests/integration",
-      "--no-file-parallelism",
-      "--maxWorkers=1",
-    ], {
-      cwd: process.cwd(),
-      env: environment,
-    });
+    const exitCode = await runIntegrationVitestWorker(environment, runLock);
     await cleanupIntegrationUserRegistry(admin, registryFile);
     return exitCode;
   } finally {
@@ -131,7 +185,7 @@ async function main() {
       if (devServerExited) await devServerExited;
       if (bindingDirectory) await rm(bindingDirectory, { force: true, recursive: true });
     } finally {
-      await releaseLock();
+      await runLock.release();
     }
   }
 }

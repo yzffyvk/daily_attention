@@ -85,7 +85,8 @@ export async function acquireIntegrationRunLock() {
   }
 
   let releasePromise;
-  return () => {
+  let shared = false;
+  const release = () => {
     if (releasePromise) return releasePromise;
     releasePromise = new Promise((resolve, reject) => {
       try {
@@ -102,6 +103,39 @@ export async function acquireIntegrationRunLock() {
     });
     return releasePromise;
   };
+
+  const shareWith = (child) => {
+    if (
+      shared
+      || releasePromise
+      || !child
+      || typeof child.send !== "function"
+      || !child.connected
+    ) {
+      return Promise.reject(new Error("Unable to share the integration test run lock."));
+    }
+    shared = true;
+    return new Promise((resolve, reject) => {
+      try {
+        child.send(
+          { type: "integration-run-lock" },
+          listener,
+          { keepOpen: true },
+          (error) => {
+            if (error) {
+              reject(new Error("Unable to share the integration test run lock."));
+              return;
+            }
+            resolve();
+          },
+        );
+      } catch {
+        reject(new Error("Unable to share the integration test run lock."));
+      }
+    });
+  };
+
+  return Object.freeze({ release, shareWith });
 }
 
 function ensureRegistryDirectory(registryFile) {
