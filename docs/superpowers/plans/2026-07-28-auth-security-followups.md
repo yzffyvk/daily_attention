@@ -250,3 +250,154 @@ git add server/auth/service.ts server/auth/response.ts \
   docs/operations/supabase-runbook.md
 git commit -m "fix: surface registration cleanup failures"
 ```
+
+---
+
+### Task 3: Release And Compensation Safety
+
+**Files:**
+- Create: `supabase/migrations/202607280002_reset_display_name_sequence.sql`
+- Modify: `supabase/tests/database/account-functions.test.sql`
+- Modify: `server/auth/supabase-adapter.ts`
+- Modify: `tests/unit/auth/supabase-adapter.test.ts`
+- Modify: `docs/operations/supabase-runbook.md`
+
+**Interfaces:**
+- Produces: one-time guarded reset of `private.attention_display_name_seq` to `(last_value = 1, is_called = false)`
+- Strengthens: `AuthPorts.deleteAuthUser(userId)` to return only after a strict targeted Auth absence proof
+- Replaces: incompatible web-only rollback guidance with schema-compatible forward-fix/restore rules
+- Documents: `RECOVERY_ROLLBACK_FAILED` containment and reconciliation
+
+- [ ] **Step 1: Write failing sequence expectations**
+
+At the beginning of the account-function pgTAP file, before any registration consumes the sequence, require:
+
+```sql
+select results_eq(
+  $$ select last_value, is_called
+     from private.attention_display_name_seq $$,
+  $$ values (1::bigint, false) $$,
+  'clean-slate email migration resets the display-name sequence'
+);
+```
+
+Also retain the existing assertion that the first registration receives `Attention_001`.
+
+- [ ] **Step 2: Run database tests and verify RED**
+
+Advance the local sequence using one rolled-back registration attempt or `nextval`, then run:
+
+```bash
+npm run supabase:test
+```
+
+Expected: FAIL because the existing migration set preserves the already-called sequence.
+
+- [ ] **Step 3: Add the guarded one-time sequence migration**
+
+Create `202607280002_reset_display_name_sequence.sql` with one `DO` block. It must fail unless all of these production-clean-slate conditions hold:
+
+```sql
+not exists (select 1 from auth.users)
+and not exists (select 1 from public.profiles)
+and not exists (select 1 from private.account_recovery_credentials)
+and not exists (select 1 from public.check_ins)
+and not exists (
+  select 1 from storage.objects where bucket_id = 'checkin-images'
+)
+```
+
+After the guard, execute:
+
+```sql
+perform pg_catalog.setval(
+  'private.attention_display_name_seq'::regclass,
+  1,
+  false
+);
+```
+
+This migration is a one-time clean-slate cutover operation. Future releases must preserve the sequence and must not rerun or copy this reset.
+
+- [ ] **Step 4: Reset local Supabase and verify database GREEN**
+
+```bash
+npm run supabase:reset
+npm run supabase:test
+```
+
+Expected: all migrations apply, the initial sequence assertion passes, and the first generated name remains `Attention_001`.
+
+- [ ] **Step 5: Write failing Auth compensation deletion tests**
+
+Require `deleteAuthUser(userId)` to:
+
+1. accept GoTrue's empty successful delete body only when the result has an own `error: null`;
+2. perform a fresh targeted `getUserById(userId)`;
+3. accept absence only for own `data.user: null`, `error.status: 404`, and `error.code: "user_not_found"`;
+4. reject a returned user, malformed delete/read envelopes, thrown reads, wrong status, and wrong code.
+
+The tests must verify response identity data is ignored and no global `listUsers` call is used.
+
+- [ ] **Step 6: Run adapter tests and verify RED**
+
+```bash
+npx vitest run tests/unit/auth/supabase-adapter.test.ts
+```
+
+Expected: FAIL because `deleteAuthUser` currently checks only a truthy delete error and performs no absence proof.
+
+- [ ] **Step 7: Implement strict production compensation deletion**
+
+Add small local `isRecord`, `hasOwn`, `isSuccessfulDeleteResult`, and `isMissingUserResult` helpers in `server/auth/supabase-adapter.ts`. Keep delete response identity non-authoritative:
+
+```ts
+const deleted = await admin.auth.admin.deleteUser(userId);
+if (!isSuccessfulDeleteResult(deleted)) {
+  throw new Error("Auth user deletion could not be verified");
+}
+const absent = await admin.auth.admin.getUserById(userId);
+if (!isMissingUserResult(absent)) {
+  throw new Error("Auth user deletion could not be verified");
+}
+```
+
+The error message must contain no user ID or response body. Any throw is caught by `registerAccount` and becomes the existing `REGISTRATION_COMPENSATION_FAILED` alert.
+
+- [ ] **Step 8: Correct release and recovery operations**
+
+Update the runbook with all of the following:
+
+1. Before legacy reset, query and record only `last_value` and `is_called` for `private.attention_display_name_seq`.
+2. After applying email migrations, require `last_value = 1` and `is_called = false` before the first registration.
+3. State that `202607280002_reset_display_name_sequence.sql` is one-time and must never reset a live sequence after new registrations begin.
+4. Remove the instruction to redeploy the phone-era web build after the email migration. During the first cutover, keep writers stopped and use a schema-compatible forward fix; returning to the phone build requires a coordinated full database/Auth/Storage restore to the pre-cutover state, never a web-only rollback.
+5. For later releases, roll back only to an artifact explicitly verified compatible with the current schema.
+6. Add `RECOVERY_ROLLBACK_FAILED` containment: pause recovery and rotation routes, correlate by request ID/time, never request the user's password or recovery code, identify the exact account only in a secure Admin session, invalidate active sessions, and choose only a reviewed forward repair or verified full restore. Do not guess which password/digest committed and do not directly overwrite either value.
+
+- [ ] **Step 9: Run focused and full verification**
+
+```bash
+npx vitest run tests/unit/auth/supabase-adapter.test.ts
+npm run lint
+npm run typecheck
+npm run test:unit
+npm run supabase:test
+npm run test:integration
+npm run test:e2e
+npm run test:rendered
+npm run build
+git diff --check
+```
+
+Expected: all commands pass; local Auth, profiles, recovery credentials, check-ins, images, and E2E registry aggregates are zero.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add supabase/migrations/202607280002_reset_display_name_sequence.sql \
+  supabase/tests/database/account-functions.test.sql \
+  server/auth/supabase-adapter.ts tests/unit/auth/supabase-adapter.test.ts \
+  docs/operations/supabase-runbook.md
+git commit -m "fix: close email auth release gaps"
+```
