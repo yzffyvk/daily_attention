@@ -4,6 +4,7 @@ import * as integrationFixtures from "../helpers/integration-fixtures";
 
 const runScope = "0000000000000001";
 const expectedEmail = `integration-${runScope}-10000@integration.daily-attention.invalid`;
+const secondExpectedEmail = `integration-${runScope}-10001@integration.daily-attention.invalid`;
 const userId = "00000000-0000-4000-8000-000000000001";
 const otherUserId = "00000000-0000-4000-8000-000000000002";
 let previousScope: string | undefined;
@@ -32,12 +33,14 @@ function fixtureExports() {
               data: { user: { id: string; email: string } | null };
               error: null;
             }>;
-            deleteUser: (ownedUserId: string) => Promise<{
-              data: unknown;
-              error: unknown;
-            }>;
+            deleteUser: (ownedUserId: string) => Promise<unknown>;
             listUsers: (parameters: { page: number; perPage: number }) => Promise<{
-              data: { users: unknown[] };
+              data: {
+                lastPage: number;
+                nextPage: number | null;
+                total: number;
+                users: unknown[];
+              };
               error: unknown;
             }>;
           };
@@ -48,13 +51,8 @@ function fixtureExports() {
   };
 }
 
-type DeleteResponse = {
-  data: unknown;
-  error: unknown;
-};
-
 function cleanupAdmin(
-  deleteResponse: DeleteResponse,
+  deleteResponse: unknown,
   usersAfterDelete: unknown[] = [],
 ) {
   return {
@@ -66,7 +64,12 @@ function cleanupAdmin(
         }),
         deleteUser: vi.fn().mockResolvedValue(deleteResponse),
         listUsers: vi.fn().mockResolvedValue({
-          data: { users: usersAfterDelete },
+          data: {
+            lastPage: usersAfterDelete.length > 0 ? 1 : 0,
+            nextPage: null,
+            total: usersAfterDelete.length,
+            users: usersAfterDelete,
+          },
           error: null,
         }),
       },
@@ -134,7 +137,10 @@ describe("integration fixture ownership", () => {
               error: null,
             };
           }),
-          listUsers: vi.fn().mockResolvedValue({ data: { users: [] }, error: null }),
+          listUsers: vi.fn().mockResolvedValue({
+            data: { lastPage: 0, nextPage: null, total: 0, users: [] },
+            error: null,
+          }),
         },
       },
     };
@@ -143,6 +149,60 @@ describe("integration fixture ownership", () => {
       deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),
     ).rejects.toThrow("Integration cleanup ownership does not match the current Auth user");
     expect(deleteCount).toBe(0);
+  });
+
+  it("revalidates each exact owner immediately before deleting that user", async () => {
+    const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
+    expect(typeof deleteOwnedUsers).toBe("function");
+    if (!deleteOwnedUsers) return;
+
+    const readsByUser = new Map<string, number>();
+    const deletedUserIds: string[] = [];
+    const admin = {
+      auth: {
+        admin: {
+          getUserById: vi.fn().mockImplementation(async (ownedUserId: string) => {
+            const readCount = (readsByUser.get(ownedUserId) ?? 0) + 1;
+            readsByUser.set(ownedUserId, readCount);
+            const expectedOwnedEmail = ownedUserId === userId
+              ? expectedEmail
+              : secondExpectedEmail;
+            return {
+              data: {
+                user: {
+                  id: ownedUserId,
+                  email: ownedUserId === otherUserId && readCount > 1
+                    ? expectedEmail
+                    : expectedOwnedEmail,
+                },
+              },
+              error: null,
+            };
+          }),
+          deleteUser: vi.fn().mockImplementation(async (ownedUserId: string) => {
+            deletedUserIds.push(ownedUserId);
+            return { data: {}, error: null };
+          }),
+          listUsers: vi.fn().mockResolvedValue({
+            data: {
+              lastPage: 1,
+              nextPage: null,
+              total: 1,
+              users: [{ id: otherUserId, email: secondExpectedEmail }],
+            },
+            error: null,
+          }),
+        },
+      },
+    };
+
+    await expect(deleteOwnedUsers(admin, [
+      { userId, email: expectedEmail },
+      { userId: otherUserId, email: secondExpectedEmail },
+    ])).rejects.toThrow(
+      "Integration cleanup ownership does not match the current Auth user",
+    );
+    expect(deletedUserIds).toEqual([userId]);
   });
 
   it("accepts a successful integration delete response with a null user after absence proof", async () => {
@@ -198,6 +258,24 @@ describe("integration fixture ownership", () => {
     ).rejects.toThrow("Unable to delete an owned integration user");
   });
 
+  it.each([
+    ["missing response", undefined],
+    ["missing error field", { data: {} }],
+    ["undefined error", { data: {}, error: undefined }],
+    ["false error", { data: {}, error: false }],
+    ["zero error", { data: {}, error: 0 }],
+    ["empty-string error", { data: {}, error: "" }],
+  ])("rejects a delete result with %s", async (_label, deleteResponse) => {
+    const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
+    expect(typeof deleteOwnedUsers).toBe("function");
+    if (!deleteOwnedUsers) return;
+    const admin = cleanupAdmin(deleteResponse);
+
+    await expect(
+      deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),
+    ).rejects.toThrow("Unable to delete an owned integration user");
+  });
+
   it("rejects integration cleanup when a fresh Admin list still contains the deleted user", async () => {
     const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
     expect(typeof deleteOwnedUsers).toBe("function");
@@ -223,6 +301,98 @@ describe("integration fixture ownership", () => {
       { data: { user: {} }, error: null },
       [{}],
     );
+
+    await expect(
+      deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),
+    ).rejects.toThrow("Unable to verify integration Auth cleanup");
+  });
+
+  it("follows a short-page continuation before proving integration Auth absence", async () => {
+    const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
+    expect(typeof deleteOwnedUsers).toBe("function");
+    if (!deleteOwnedUsers) return;
+    const admin = cleanupAdmin({ data: {}, error: null });
+    admin.auth.admin.listUsers
+      .mockResolvedValueOnce({
+        data: { lastPage: 2, nextPage: 2, total: 1, users: [] },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          lastPage: 2,
+          nextPage: null,
+          total: 1,
+          users: [{ id: userId, email: expectedEmail }],
+        },
+        error: null,
+      });
+
+    await expect(
+      deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),
+    ).rejects.toThrow("Integration Auth cleanup did not complete");
+    expect(admin.auth.admin.listUsers).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    [
+      "missing metadata",
+      [{ data: { users: [] }, error: null }],
+    ],
+    [
+      "malformed continuation",
+      [{
+        data: { lastPage: 2, nextPage: Number.NaN, total: 0, users: [] },
+        error: null,
+      }],
+    ],
+    [
+      "repeated continuation",
+      [
+        {
+          data: { lastPage: 2, nextPage: 2, total: 1, users: [] },
+          error: null,
+        },
+        {
+          data: { lastPage: 2, nextPage: 2, total: 1, users: [] },
+          error: null,
+        },
+      ],
+    ],
+    [
+      "backward continuation",
+      [
+        {
+          data: { lastPage: 3, nextPage: 2, total: 1, users: [] },
+          error: null,
+        },
+        {
+          data: { lastPage: 3, nextPage: 1, total: 1, users: [] },
+          error: null,
+        },
+      ],
+    ],
+    [
+      "inconsistent continuation",
+      [{
+        data: { lastPage: 3, nextPage: 3, total: 1, users: [] },
+        error: null,
+      }],
+    ],
+    [
+      "impossible totals",
+      [{
+        data: { lastPage: 0, nextPage: null, total: 1, users: [] },
+        error: null,
+      }],
+    ],
+  ])("rejects integration Auth pagination with %s", async (_label, pages) => {
+    const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
+    expect(typeof deleteOwnedUsers).toBe("function");
+    if (!deleteOwnedUsers) return;
+    const admin = cleanupAdmin({ data: {}, error: null });
+    for (const page of pages) {
+      admin.auth.admin.listUsers.mockResolvedValueOnce(page);
+    }
 
     await expect(
       deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),

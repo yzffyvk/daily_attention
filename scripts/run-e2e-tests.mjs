@@ -22,6 +22,7 @@ const checkInImageBucket = "checkin-images";
 const reservedE2EEmail = /^email-[1-4]-[0-9]{4}-[0-9]+-[0-9]+-[0-9]+@e2e\.daily-attention\.invalid$/u;
 const userIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const storageBatchSize = 100;
+const authUserPageLimit = 10_000;
 const lockPath = join(tmpdir(), "ai-learning-checkin-email-auth-e2e.lock");
 const registryDirectory = join(tmpdir(), "ai-learning-checkin-email-auth-e2e-registry");
 const registryFile = join(registryDirectory, "emails");
@@ -391,25 +392,121 @@ async function removeOwnedStoragePaths(admin, paths) {
 
 async function listLocalE2EUsers(admin) {
   const users = [];
-  for (let page = 1; ; page += 1) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
-    if (error) throw new Error("Unable to list local E2E users.");
+  const seenPages = new Set();
+  const seenUserIds = new Set();
+  let expectedLastPage;
+  let expectedTotal;
+  let page = 1;
+
+  while (true) {
+    if (seenPages.has(page) || seenPages.size >= authUserPageLimit) {
+      throw new Error("Local Supabase returned an invalid E2E user list.");
+    }
+    seenPages.add(page);
+
+    let response;
+    try {
+      response = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+    } catch {
+      throw new Error("Unable to list local E2E users.");
+    }
     if (
-      !data
-      || !Array.isArray(data.users)
-      || data.users.some((user) => (
+      !response
+      || typeof response !== "object"
+      || Array.isArray(response)
+      || !Object.prototype.hasOwnProperty.call(response, "error")
+      || response.error !== null
+      || !response.data
+      || typeof response.data !== "object"
+      || Array.isArray(response.data)
+      || !Object.prototype.hasOwnProperty.call(response.data, "users")
+      || !Object.prototype.hasOwnProperty.call(response.data, "nextPage")
+      || !Object.prototype.hasOwnProperty.call(response.data, "lastPage")
+      || !Object.prototype.hasOwnProperty.call(response.data, "total")
+      || !Array.isArray(response.data.users)
+      || typeof response.data.lastPage !== "number"
+      || !Number.isSafeInteger(response.data.lastPage)
+      || response.data.lastPage < 0
+      || typeof response.data.total !== "number"
+      || !Number.isSafeInteger(response.data.total)
+      || response.data.total < 0
+      || (
+        response.data.nextPage !== null
+        && (
+          typeof response.data.nextPage !== "number"
+          || !Number.isSafeInteger(response.data.nextPage)
+          || response.data.nextPage < 1
+        )
+      )
+    ) {
+      throw new Error("Local Supabase returned an invalid E2E user list.");
+    }
+
+    const { lastPage, nextPage, total } = response.data;
+    if (
+      (expectedLastPage !== undefined && lastPage !== expectedLastPage)
+      || (expectedTotal !== undefined && total !== expectedTotal)
+      || (total === 0 && lastPage !== 0)
+      || (total > 0 && lastPage < 1)
+    ) {
+      throw new Error("Local Supabase returned an invalid E2E user list.");
+    }
+    expectedLastPage ??= lastPage;
+    expectedTotal ??= total;
+
+    for (const user of response.data.users) {
+      if (
         !user
         || typeof user !== "object"
         || Array.isArray(user)
         || typeof user.id !== "string"
         || !userIdPattern.test(user.id)
-      ))
+        || seenUserIds.has(user.id)
+      ) {
+        throw new Error("Local Supabase returned an invalid E2E user list.");
+      }
+      seenUserIds.add(user.id);
+      users.push(user);
+    }
+    if (users.length > total) {
+      throw new Error("Local Supabase returned an invalid E2E user list.");
+    }
+
+    if (nextPage !== null) {
+      if (
+        nextPage !== page + 1
+        || nextPage > lastPage
+        || page >= lastPage
+        || users.length >= total
+      ) {
+        throw new Error("Local Supabase returned an invalid E2E user list.");
+      }
+      page = nextPage;
+      continue;
+    }
+
+    if (
+      users.length !== total
+      || (
+        total === 0
+          ? lastPage !== 0 || page !== 1
+          : page !== lastPage
+      )
     ) {
       throw new Error("Local Supabase returned an invalid E2E user list.");
     }
-    users.push(...data.users);
-    if (data.users.length < 1000) return users;
+    return users;
   }
+}
+
+function isSuccessfulDeleteResult(response) {
+  return (
+    response
+    && typeof response === "object"
+    && !Array.isArray(response)
+    && Object.prototype.hasOwnProperty.call(response, "error")
+    && response.error === null
+  );
 }
 
 function confirmCurrentAuthUser(users, entry, allowMissing) {
@@ -478,7 +575,9 @@ async function deleteRegisteredUsers(bindings, apiUrl, ownership, shouldStop) {
       } catch {
         throw new Error("Unable to delete a local E2E user.");
       }
-      if (response?.error) throw new Error("Unable to delete a local E2E user.");
+      if (!isSuccessfulDeleteResult(response)) {
+        throw new Error("Unable to delete a local E2E user.");
+      }
       const usersAfterDelete = await listLocalE2EUsers(admin);
       if (usersAfterDelete.some((user) => user?.id === entry.userId)) {
         throw new Error("Local E2E Auth cleanup did not complete.");
