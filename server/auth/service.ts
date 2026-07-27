@@ -62,9 +62,16 @@ export async function registerAccount(
     });
     await ports.signIn(input.email, input.password);
     return { profile, recoveryCode };
-  } catch (error) {
-    await ports.deleteAuthUser(authUser.id);
-    throw error;
+  } catch (registrationError) {
+    try {
+      await ports.deleteAuthUser(authUser.id);
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [registrationError, cleanupError],
+        "REGISTRATION_COMPENSATION_FAILED",
+      );
+    }
+    throw registrationError;
   }
 }
 

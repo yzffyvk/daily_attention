@@ -1,6 +1,11 @@
 import { apiFailure, apiSuccess } from "@/lib/api/result";
 
 const noStoreHeaders = { "Cache-Control": "private, no-store" };
+const operationalErrorCodes = new Set([
+  "REGISTRATION_COMPENSATION_FAILED",
+  "RECOVERY_ROLLBACK_FAILED",
+  "INTERNAL_ERROR",
+]);
 
 type MappedError = {
   code: string;
@@ -29,6 +34,15 @@ export function authSuccess<T>(data: T, requestId: string, status = 200) {
 
 export function authFailure(error: unknown, requestId: string) {
   const mapped = mapError(error);
+  if (mapped.status >= 500) {
+    console.error("auth request failed", {
+      requestId,
+      errorType: error instanceof AggregateError ? "AggregateError" : error instanceof Error ? "Error" : "UnknownError",
+      errorCode: error instanceof Error && operationalErrorCodes.has(error.message)
+        ? error.message
+        : "INTERNAL_ERROR",
+    });
+  }
   return noStoreJson(
     apiFailure(mapped.code, mapped.message, requestId, {
       field: mapped.field,

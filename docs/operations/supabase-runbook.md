@@ -30,6 +30,17 @@ A retained local E2E ownership registry can contain runner-owned `deleting` chec
 
 Recovery uses one fixed-shape service-role `resolve_recovery_challenge` RPC. It always returns one row containing either the account ID and stored recovery digest or a null account ID with a 32-byte sentinel digest. The sentinel digest is an internal comparison value only: never log it or return it to the browser. Keep `resolve_email` and `read_recovery_digest` limited to authenticated recovery-code rotation.
 
+## Registration Compensation Failure
+
+For a `REGISTRATION_COMPENSATION_FAILED` alert:
+
+1. Correlate the alert by request ID and timestamp without recording request bodies.
+2. Pause the Admin registration route.
+3. Read Auth users created in the narrow incident window and compare only their IDs with `profiles.id`; do not export or log emails.
+4. Select only an exact Auth ID with no profile and no recovery credential.
+5. Obtain destructive-action authorization, hard-delete that exact ID, and verify targeted `getUserById` returns `404 / user_not_found`.
+6. Resume registration and let the user retry.
+
 To stop only a Supabase stack started for this repository:
 
 ```sh

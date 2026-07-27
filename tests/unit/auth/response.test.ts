@@ -1,7 +1,55 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { authFailure } from "@/server/auth/response";
 
 describe("auth response mapping", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("logs a sanitized operational alert for registration compensation failure", async () => {
+    const error = new AggregateError(
+      [
+        new Error("profile registration failed for user@example.com and user-1"),
+        new Error("cleanup failed with password and recovery data"),
+      ],
+      "REGISTRATION_COMPENSATION_FAILED",
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = authFailure(error, "request-id");
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body).toEqual({
+      ok: false,
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "服务暂时不可用，请稍后再试",
+        details: {},
+      },
+      requestId: "request-id",
+    });
+    expect(errorSpy).toHaveBeenCalledWith("auth request failed", {
+      requestId: "request-id",
+      errorType: "AggregateError",
+      errorCode: "REGISTRATION_COMPENSATION_FAILED",
+    });
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(body)).not.toContain("user@example.com");
+    expect(JSON.stringify(body)).not.toContain("user-1");
+    expect(JSON.stringify(body)).not.toContain("password");
+    expect(JSON.stringify(body)).not.toContain("recovery data");
+  });
+
+  it("does not alert for a mapped client error", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = authFailure(new Error("INVALID_CREDENTIALS"), "request-id");
+
+    expect(response.status).toBe(401);
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
   it.each([
     [
       "a duplicate profile email identified by its message",
