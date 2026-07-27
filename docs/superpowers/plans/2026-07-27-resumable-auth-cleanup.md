@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make local integration and E2E Auth cleanup verify exact deletion results and resume safely after any partial multi-user failure.
+**Goal:** Make local integration and E2E Auth cleanup verify deletion through fresh Auth absence checks and resume safely after any partial multi-user failure.
 
-**Architecture:** E2E ownership registry entries begin in an implicit `pending` state. After exact Auth ownership verification and Storage cleanup, the runner atomically checkpoints one entry as `deleting`, performs and validates the Auth deletion, proves the user is absent through a fresh Admin read, and atomically removes only that completed entry. A retry may finish a `deleting` entry only after proving both Auth and owned Storage are absent; an unverified missing `pending` owner remains a hard failure.
+**Architecture:** E2E ownership registry entries begin in an implicit `pending` state. After exact Auth ownership verification and Storage cleanup, the runner atomically checkpoints one entry as `deleting`, performs an error-free Auth deletion, proves the user is absent through a fresh Admin read, and atomically removes only that completed entry. GoTrue's successful hard-delete response is an empty JSON object, so response identity fields are neither required nor trusted. A retry may finish a `deleting` entry only after proving both Auth and owned Storage are absent; an unverified missing `pending` owner remains a hard failure.
 
 **Tech Stack:** Node.js 22, Supabase Admin Auth, local Supabase CLI, Vitest, Playwright.
 
@@ -14,7 +14,7 @@
 - Initial registry writes remain exactly `{ userId, email }`; only the runner may add `state: "deleting"` after exact ownership verification.
 - Registry rewrites must be atomic, remain inside the validated runner-owned directory, reject symlinks, and preserve mode `0600`.
 - Storage for an owner must be verified empty before Auth deletion.
-- A successful Auth delete requires an exact delete response and a fresh Admin read proving the user ID is absent.
+- A successful Auth delete requires `error === null` and a fresh Admin read proving the user ID is absent. The delete response body is not authoritative and must not be used to establish identity.
 - Missing `pending` owners fail closed. Missing `deleting` owners may be checkpointed complete only when the fresh absence check succeeds and owned Storage is empty.
 - A failure never removes the remaining registry entries.
 - No production Supabase operation or `main` merge occurs in this task.
@@ -33,15 +33,15 @@
 **Interfaces:**
 - Produces: E2E registry parser accepting pending `{ userId, email }` and runner-owned deleting `{ userId, email, state: "deleting" }` entries.
 - Produces: atomic registry checkpoint after each completed user.
-- Produces: exact Auth delete-response validation and post-delete absence verification in E2E and integration cleanup.
+- Produces: Auth delete error validation and post-delete absence verification in E2E and integration cleanup.
 
 - [ ] **Step 1: Write failing E2E cleanup regressions**
 
 Add tests for:
 
-1. `deleteUser` returning `{ data: { user: null }, error: null }`.
-2. `deleteUser` returning a different user ID or email.
-3. `deleteUser` returning the expected user while a fresh Admin read still finds that user.
+1. `deleteUser` returning GoTrue's empty success body while a fresh Admin read proves the target absent.
+2. `deleteUser` returning null, malformed, or unrelated body data while a fresh Admin read proves the target absent.
+3. `deleteUser` returning without error while a fresh Admin read still finds that user.
 4. Two owned users where the first fully deletes and the second fails; the registry must contain only the second entry and a later run must complete.
 5. Interruption after checkpointing `state: "deleting"` but before delete; retry must reverify and finish.
 6. Interruption after Auth deletion but before removing the deleting entry; retry may remove it only after proving Auth and Storage absence.
@@ -53,7 +53,7 @@ Add tests for:
 npx vitest run tests/unit/e2e/runner.test.ts
 ```
 
-Expected: the new delete-response and partial-retry tests fail against the current all-or-nothing registry behavior.
+Expected: the new response-body-independent and partial-retry tests fail against the current exact-response/all-or-nothing behavior.
 
 - [ ] **Step 3: Implement atomic E2E registry states**
 
@@ -72,7 +72,7 @@ For each pending owner:
 2. remove and recheck exact owned Storage;
 3. atomically checkpoint that entry as `deleting`;
 4. call `deleteUser`;
-5. validate returned `data.user.id` and reserved exact email;
+5. require the delete call to return no error without trusting its response body;
 6. freshly list/read Auth and require the ID to be absent;
 7. atomically remove only that entry.
 
@@ -84,15 +84,15 @@ For a deleting owner, reverify Storage first. If Auth exists, its email must sti
 npx vitest run tests/unit/e2e/runner.test.ts
 ```
 
-Expected: all runner tests pass, including partial retry and malformed delete responses.
+Expected: all runner tests pass, including partial retry and successful empty/malformed delete bodies.
 
 - [ ] **Step 5: Add integration delete confirmation tests**
 
-Require integration cleanup to reject null, malformed, wrong-ID, and wrong-email successful delete responses, and to reject a post-delete Admin read that still returns the user. Successful cleanup must validate the exact response and then prove absence without printing identity values.
+Require integration cleanup to accept null, empty, malformed, or unrelated successful delete bodies only when a fresh Admin read proves the target user is absent. It must reject any delete error and reject a post-delete Admin read that still returns the user.
 
 - [ ] **Step 6: Implement integration delete confirmation**
 
-Extend the narrow test-only Admin port types and cleanup helper to validate `data.user`, then perform a fresh Admin read/list and require the deleted ID to be absent. Keep the existing exact pre-delete `(userId, email)` verification.
+Keep the narrow test-only Admin port compatible with GoTrue's empty success body. Require no delete error, then perform a fresh Admin read/list and require the deleted ID to be absent. Keep the existing exact pre-delete `(userId, email)` verification.
 
 - [ ] **Step 7: Update runbook**
 
