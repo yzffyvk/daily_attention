@@ -59,9 +59,6 @@ function mapError(error: unknown): MappedError {
   if (code === "email_exists" || isEmailUniqueConflict) {
     return { code: "EMAIL_TAKEN", message: "该邮箱已注册", status: 409, field: "email" };
   }
-  if (code === "phone_exists") {
-    return { code: "PHONE_TAKEN", message: "该手机号已注册", status: 409, field: "phone" };
-  }
   if (code === "RATE_LIMITED" || message === "RATE_LIMITED") {
     return { code: "RATE_LIMITED", message: "请稍后再试", status: 429, retryAfterSeconds };
   }

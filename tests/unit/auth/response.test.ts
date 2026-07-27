@@ -50,6 +50,19 @@ describe("auth response mapping", () => {
     expect(JSON.stringify(body)).not.toContain("Attention_001");
   });
 
+  it("does not retain the legacy phone duplicate contract", async () => {
+    const response = authFailure({ code: "phone_exists" }, "request-id");
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "服务暂时不可用，请稍后再试",
+        details: {},
+      },
+    });
+  });
+
   it("uses the email-specific invalid login message", async () => {
     const response = authFailure(new Error("INVALID_CREDENTIALS"), "request-id");
 
