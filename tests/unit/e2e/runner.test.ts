@@ -33,7 +33,7 @@ appendFileSync(process.env.FAKE_NPX_LOG, JSON.stringify(loggedArgs) + "\\n");
     const userId = sql.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i)?.[0];
     if (!userId) process.exit(14);
     const response = await fetch(process.env.FAKE_API_URL + "/test/storage-query", {
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify({ sql, userId }),
       headers: { "content-type": "application/json" },
       method: "POST",
     });
@@ -273,11 +273,12 @@ async function fixture(
       request.setEncoding("utf8");
       request.on("data", (chunk) => { body += chunk; });
       request.on("end", () => {
-        const userId = (JSON.parse(body) as { userId: string }).userId;
+        const { sql, userId } = JSON.parse(body) as { sql: string; userId: string };
+        const filtersToCheckInImages = sql.includes("where objects.bucket_id = 'checkin-images'");
         const rows = [...storageObjects.values()]
           .filter((object) => (
-            object.bucketId === "checkin-images"
-            && (object.ownerId === userId || object.path.startsWith(`${userId}/`))
+            (object.ownerId === userId || object.path.startsWith(`${userId}/`))
+            && (!filtersToCheckInImages || object.bucketId === "checkin-images")
           ))
           .map((object) => ({
             bucket_id: object.bucketId,
@@ -561,6 +562,55 @@ describe("E2E runner isolation", () => {
     expect((await runRunner(setup.env)).code).toBe(0);
     expect(setup.storageObjects.size).toBe(0);
     expect(existsSync(setup.registryFile)).toBe(false);
+  });
+
+  it("refuses stale cleanup when an associated object is in another bucket", async () => {
+    const image = {
+      bucketId: "other-images",
+      ownerId: staleUser.id,
+      path: `${staleUser.id}/2026-07-27/00000000-0000-4000-8000-000000000020.png`,
+    };
+    const setup = await fixture([staleUser], [image]);
+    await writeRegistry(setup, ownershipLine(staleUser));
+
+    const result = await runRunner(setup.env);
+
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("Storage ownership is ambiguous");
+    expect(result.stderr).not.toContain(staleUser.id);
+    expect(result.stderr).not.toContain(staleUser.email);
+    expect(setup.storageObjects.size).toBe(1);
+    expect(setup.users.has(staleUser.id)).toBe(true);
+    expect(existsSync(setup.registryFile)).toBe(true);
+  });
+
+  it.each([
+    {
+      description: "an impossible calendar date",
+      path: `${staleUser.id}/2026-99-99/00000000-0000-4000-8000-000000000020.png`,
+    },
+    {
+      description: "an uppercase UUID and extension",
+      path: `${staleUser.id}/2026-07-27/00000000-0000-4000-8000-0000000000AA.PNG`,
+    },
+  ])("refuses stale cleanup with $description", async ({ path }) => {
+    const image = {
+      bucketId: "checkin-images",
+      ownerId: staleUser.id,
+      path,
+    };
+    const setup = await fixture([staleUser], [image]);
+    await writeRegistry(setup, ownershipLine(staleUser));
+
+    const result = await runRunner(setup.env);
+
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("Storage ownership is ambiguous");
+    expect(result.stderr).not.toContain(staleUser.id);
+    expect(result.stderr).not.toContain(staleUser.email);
+    expect(setup.storageObjects.size).toBe(1);
+    expect(setup.users.has(staleUser.id)).toBe(true);
+    expect(existsSync(setup.registryFile)).toBe(true);
   });
 
   it.each([

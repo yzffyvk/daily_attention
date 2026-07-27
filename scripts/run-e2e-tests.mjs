@@ -20,7 +20,7 @@ const execFileAsync = promisify(execFile);
 const managedSignals = ["SIGINT", "SIGTERM"];
 const checkInImageBucket = "checkin-images";
 const reservedE2EEmail = /^email-[1-4]-[0-9]{4}-[0-9]+-[0-9]+-[0-9]+@e2e\.daily-attention\.invalid$/u;
-const userIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const userIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const storageBatchSize = 100;
 const lockPath = join(tmpdir(), "ai-learning-checkin-email-auth-e2e.lock");
 const registryDirectory = join(tmpdir(), "ai-learning-checkin-email-auth-e2e-registry");
@@ -292,6 +292,18 @@ function reservedE2EAuthEmail(value) {
   return typeof value === "string" && reservedE2EEmail.test(value) ? value : null;
 }
 
+function isCanonicalCalendarDate(value) {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  if (!parts) return false;
+  const year = Number(parts[1]);
+  const month = Number(parts[2]);
+  const day = Number(parts[3]);
+  if (year < 1 || month < 1 || month > 12) return false;
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day >= 1 && day <= daysInMonth[month - 1];
+}
+
 async function listOwnedStoragePaths(userId) {
   if (!userIdPattern.test(userId)) {
     throw new Error("Invalid E2E Storage ownership.");
@@ -328,11 +340,10 @@ async function listOwnedStoragePaths(userId) {
         )
       ) as has_conflicting_reference
     from storage.objects objects
-    where objects.bucket_id = '${checkInImageBucket}'
-      and (
-        objects.owner_id = '${userId}'
-        or objects.name like '${userId}/%'
-      )
+    where (
+      objects.owner_id = '${userId}'
+      or objects.name like '${userId}/%'
+    )
     order by objects.name;
   `;
   let stdout;
@@ -356,15 +367,15 @@ async function listOwnedStoragePaths(userId) {
     throw new Error("Local Supabase returned an invalid E2E Storage listing.");
   }
 
-  const expectedPrefix = `${userId}/`;
   const ownedPathPattern = new RegExp(
-    `^${userId}/[0-9]{4}-[0-9]{2}-[0-9]{2}/` +
+    `^${userId}/([0-9]{4}-[0-9]{2}-[0-9]{2})/` +
     "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}[.](jpg|png|webp)$",
-    "iu",
+    "u",
   );
   const paths = [];
   const seenPaths = new Set();
   for (const row of result.rows) {
+    const pathMatch = typeof row?.name === "string" ? ownedPathPattern.exec(row.name) : null;
     if (
       !row
       || typeof row !== "object"
@@ -377,8 +388,8 @@ async function listOwnedStoragePaths(userId) {
       || typeof row.has_reservation_reference !== "boolean"
       || typeof row.has_conflicting_reference !== "boolean"
       || typeof row.name !== "string"
-      || !row.name.startsWith(expectedPrefix)
-      || !ownedPathPattern.test(row.name)
+      || !pathMatch
+      || !isCanonicalCalendarDate(pathMatch[1])
       || row.has_conflicting_reference
       || (
         row.owner_id !== userId
