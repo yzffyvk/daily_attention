@@ -1,15 +1,15 @@
 begin;
-select plan(21);
+select plan(22);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at)
 values
   ('00000000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'one@internal.invalid', '', now(), now(), now()),
   ('00000000-0000-4000-8000-000000000002', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'two@internal.invalid', '', now(), now(), now());
 
-insert into public.profiles (id, phone, display_name, avatar_key)
+insert into public.profiles (id, email, display_name, avatar_key)
 values
-  ('00000000-0000-4000-8000-000000000001', '13800138001', '用户一', 1),
-  ('00000000-0000-4000-8000-000000000002', '13800138002', '用户二', 2);
+  ('00000000-0000-4000-8000-000000000001', 'one@example.com', '用户一', 1),
+  ('00000000-0000-4000-8000-000000000002', 'two@example.com', '用户二', 2);
 
 insert into public.check_ins (user_id, checkin_date, attention)
 values
@@ -65,9 +65,15 @@ select set_config(
 );
 
 select results_eq(
-  $$select display_name from public.profiles order by display_name$$,
-  $$values ('用户一'::varchar)$$,
-  'user sees only their profile'
+  $$select email, display_name from public.profiles order by display_name$$,
+  $$values ('one@example.com'::varchar, '用户一'::varchar)$$,
+  'user sees only their email and profile'
+);
+select throws_ok(
+  $$update public.profiles set email = 'changed@example.com'$$,
+  '42501',
+  null,
+  'user cannot modify their email'
 );
 select results_eq(
   $$select attention from public.check_ins$$,

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-export function normalizePhone(value: string) {
-  return value.normalize("NFKC").replace(/[\s-]+/gu, "");
+export function normalizeEmail(value: string) {
+  return value.normalize("NFKC").trim().toLowerCase();
 }
 
 export function normalizeLoginName(value: string) {
@@ -24,28 +24,29 @@ const recoveryCodeSchema = z
   .string()
   .transform((value) => value.replace(/-/g, "").toUpperCase())
   .pipe(z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/u, "恢复码格式不正确"));
-const phoneSchema = z
+const emailSchema = z
   .string()
-  .transform(normalizePhone)
-  .pipe(z.string().regex(/^1[3-9][0-9]{9}$/u, "请输入正确的 11 位手机号"));
-
-export function toE164Phone(phone: string) {
-  return `+86${phone}`;
-}
+  .transform(normalizeEmail)
+  .pipe(
+    z.string()
+      .min(3, "请输入正确的邮箱")
+      .max(254, "邮箱最多 254 个字符")
+      .email("请输入正确的邮箱"),
+  );
 
 export const registerInputSchema = z.object({
-  phone: phoneSchema,
+  email: emailSchema,
   password: passwordSchema,
   avatarKey: z.number().int().min(1).max(5),
 });
 
 export const loginInputSchema = z.object({
-  phone: phoneSchema,
+  email: emailSchema,
   password: z.string(),
 });
 
 export const recoverInputSchema = z.object({
-  phone: phoneSchema,
+  email: emailSchema,
   recoveryCode: recoveryCodeSchema,
   newPassword: passwordSchema,
 });

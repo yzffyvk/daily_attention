@@ -1,73 +1,71 @@
 import { describe, expect, it } from "vitest";
 import {
-  normalizePhone,
   loginInputSchema,
+  normalizeEmail,
   profilePatchSchema,
   recoverInputSchema,
   registerInputSchema,
-  toE164Phone,
 } from "@/lib/domain/user";
 
 describe("user contracts", () => {
-  it("normalizes phone numbers and converts them to E.164", () => {
-    expect(normalizePhone(" 138 0013 8000 ")).toBe("13800138000");
-    expect(toE164Phone("13800138000")).toBe("+8613800138000");
+  it("normalizes email addresses", () => {
+    expect(normalizeEmail(" User@Example.COM ")).toBe("user@example.com");
   });
 
-  it("validates phone registration input without changing passwords", () => {
+  it("validates and normalizes registration emails without changing passwords", () => {
     expect(registerInputSchema.parse({
-      phone: "138 0013 8000",
-      password: "  Keep Spaces  ",
+      email: " User@Example.COM ",
+      password: "password123",
       avatarKey: 3,
     })).toEqual({
-      phone: "13800138000",
-      password: "  Keep Spaces  ",
+      email: "user@example.com",
+      password: "password123",
       avatarKey: 3,
     });
     expect(registerInputSchema.safeParse({
-      phone: "12800138000",
+      email: "not-an-email",
       password: "password123",
       avatarKey: 3,
     }).success).toBe(false);
   });
 
-  it("normalizes login phones and rejects invalid phone prefixes", () => {
+  it("normalizes login emails and rejects malformed email addresses", () => {
     expect(loginInputSchema.parse({
-      phone: " 138 0013 8000 ",
+      email: " User@Example.COM ",
       password: "password123",
     })).toEqual({
-      phone: "13800138000",
+      email: "user@example.com",
       password: "password123",
     });
     expect(loginInputSchema.safeParse({
-      phone: "12800138000",
+      email: "not-an-email",
       password: "password123",
     }).success).toBe(false);
   });
 
-  it("normalizes recovery phones and preserves the complete recovery payload", () => {
+  it("normalizes recovery emails and preserves the complete recovery payload", () => {
     expect(recoverInputSchema.parse({
-      phone: " 138 0013 8000 ",
+      email: " User@Example.COM ",
       recoveryCode: "AAAAA-BBBBB-CCCCC-DDDDD-EEEEEE",
       newPassword: "new password",
     })).toEqual({
-      phone: "13800138000",
+      email: "user@example.com",
       recoveryCode: "AAAAABBBBBCCCCCDDDDDEEEEEE",
       newPassword: "new password",
     });
     expect(recoverInputSchema.safeParse({
-      phone: "12800138000",
+      email: "not-an-email",
       recoveryCode: "AAAAA-BBBBB-CCCCC-DDDDD-EEEEEE",
       newPassword: "new password",
     }).success).toBe(false);
     expect(recoverInputSchema.safeParse({
-      phone: "13800138000",
+      email: "user@example.com",
       recoveryCode: "AAAAA-BBBBB-CCCCC-DDDDD-EEEEEE",
     }).success).toBe(false);
   });
 
-  it("allows display name patches but rejects phone patches", () => {
+  it("allows display name patches but rejects email patches", () => {
     expect(profilePatchSchema.safeParse({ displayName: "新的名称" }).success).toBe(true);
-    expect(profilePatchSchema.safeParse({ phone: "13900139000" }).success).toBe(false);
+    expect(profilePatchSchema.safeParse({ email: "other@example.com" }).success).toBe(false);
   });
 });

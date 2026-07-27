@@ -1,5 +1,5 @@
 begin;
-select plan(36);
+select plan(44);
 
 select has_schema('private', 'private schema exists');
 select has_table('public', 'profiles', 'profiles exists');
@@ -14,9 +14,12 @@ select col_is_pk(
   'user_id',
   'account_recovery_credentials.user_id is the primary key'
 );
-select has_column('public', 'profiles', 'phone', 'profiles have a phone');
-select col_not_null('public', 'profiles', 'phone', 'phone is required');
-select col_is_unique('public', 'profiles', 'phone', 'phone is unique');
+select has_column('public', 'profiles', 'email', 'profiles have an email');
+select col_not_null('public', 'profiles', 'email', 'email is required');
+select col_is_unique('public', 'profiles', 'email', 'email is unique');
+select col_type_is('public', 'profiles', 'email', 'character varying(254)', 'email has a 254-character maximum');
+select hasnt_column('public', 'profiles', 'phone', 'profiles no longer have a phone');
+select hasnt_function('public', 'resolve_phone', array['text'], 'resolve_phone no longer exists');
 select function_returns(
   'public',
   'complete_registration',
@@ -77,21 +80,60 @@ select is(
 );
 
 insert into auth.users (id)
-values ('00000000-0000-0000-0000-000000000201');
+values
+  ('00000000-0000-0000-0000-000000000201'),
+  ('00000000-0000-0000-0000-000000000202'),
+  ('00000000-0000-0000-0000-000000000203'),
+  ('00000000-0000-0000-0000-000000000204'),
+  ('00000000-0000-0000-0000-000000000205'),
+  ('00000000-0000-0000-0000-000000000206');
 
 select throws_ok(
-  $$insert into public.profiles (id, phone, display_name, avatar_key)
-    values ('00000000-0000-0000-0000-000000000201', '13800138201', 'Schema test', 0)$$,
+  $$insert into public.profiles (id, email, display_name, avatar_key)
+    values ('00000000-0000-0000-0000-000000000201', 'schema-test@example.com', 'Schema test', 0)$$,
   '23514',
   'new row for relation "profiles" violates check constraint "profiles_avatar_key_check"',
   'profiles reject avatar keys outside 1-5'
 );
 select throws_ok(
-  $$insert into public.profiles (id, phone, display_name, avatar_key)
-    values ('00000000-0000-0000-0000-000000000201', '13800138201', 'Schema test', 6)$$,
+  $$insert into public.profiles (id, email, display_name, avatar_key)
+    values ('00000000-0000-0000-0000-000000000201', 'schema-test@example.com', 'Schema test', 6)$$,
   '23514',
   'new row for relation "profiles" violates check constraint "profiles_avatar_key_check"',
   'profiles reject avatar keys above 5'
+);
+select throws_ok(
+  $$insert into public.profiles (id, email, display_name, avatar_key)
+    values ('00000000-0000-0000-0000-000000000202', 'Uppercase@example.com', 'Schema test', 1)$$,
+  '23514',
+  null,
+  'profiles reject uppercase emails'
+);
+select throws_ok(
+  $$insert into public.profiles (id, email, display_name, avatar_key)
+    values ('00000000-0000-0000-0000-000000000203', 'not-an-email', 'Schema test', 1)$$,
+  '23514',
+  null,
+  'profiles reject malformed emails'
+);
+select throws_ok(
+  $$insert into public.profiles (id, email, display_name, avatar_key)
+    values ('00000000-0000-0000-0000-000000000204', repeat('a', 244) || '@example.com', 'Schema test', 1)$$,
+  '22001',
+  null,
+  'profiles reject emails longer than 254 characters'
+);
+select lives_ok(
+  $$insert into public.profiles (id, email, display_name, avatar_key)
+    values ('00000000-0000-0000-0000-000000000205', 'duplicate@example.com', 'Schema test', 1)$$,
+  'profiles accept a valid lowercase email'
+);
+select throws_ok(
+  $$insert into public.profiles (id, email, display_name, avatar_key)
+    values ('00000000-0000-0000-0000-000000000206', 'duplicate@example.com', 'Schema test', 1)$$,
+  '23505',
+  null,
+  'profiles reject duplicate emails'
 );
 select throws_ok(
   $$insert into public.check_ins (user_id, checkin_date, attention)

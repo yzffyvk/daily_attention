@@ -84,24 +84,24 @@ export type Database = {
           avatar_key: number
           created_at: string
           display_name: string
+          email: string
           id: string
-          phone: string
           updated_at: string
         }
         Insert: {
           avatar_key: number
           created_at?: string
           display_name: string
+          email: string
           id: string
-          phone: string
           updated_at?: string
         }
         Update: {
           avatar_key?: number
           created_at?: string
           display_name?: string
+          email?: string
           id?: string
-          phone?: string
           updated_at?: string
         }
         Relationships: []
@@ -114,7 +114,7 @@ export type Database = {
       complete_registration: {
         Args: {
           target_avatar_key: number
-          target_phone: string
+          target_email: string
           target_recovery_digest: string
           target_user_id: string
         }
@@ -122,8 +122,8 @@ export type Database = {
           avatar_key: number
           created_at: string
           display_name: string
+          email: string
           id: string
-          phone: string
           updated_at: string
         }
         SetofOptions: {
@@ -151,8 +151,8 @@ export type Database = {
           avatar_key: number
           created_at: string
           display_name: string
+          email: string
           id: string
-          phone: string
           updated_at: string
         }
         SetofOptions: {
@@ -190,8 +190,8 @@ export type Database = {
           retry_after_seconds: number
         }[]
       }
-      resolve_phone: {
-        Args: { target_phone: string }
+      resolve_email: {
+        Args: { target_email: string }
         Returns: {
           user_id: string
         }[]
@@ -206,8 +206,8 @@ export type Database = {
           avatar_key: number
           created_at: string
           display_name: string
+          email: string
           id: string
-          phone: string
           updated_at: string
         }
         SetofOptions: {

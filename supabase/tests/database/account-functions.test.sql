@@ -1,5 +1,5 @@
 begin;
-select plan(52);
+select plan(54);
 
 select function_privs_are(
   'public',
@@ -11,11 +11,11 @@ select function_privs_are(
 );
 select function_privs_are(
   'public',
-  'resolve_phone',
+  'resolve_email',
   array['text'],
   'anon',
   array[]::text[],
-  'anon cannot resolve phone numbers'
+  'anon cannot resolve emails'
 );
 select function_privs_are(
   'public',
@@ -59,11 +59,11 @@ select function_privs_are(
 );
 select function_privs_are(
   'public',
-  'resolve_phone',
+  'resolve_email',
   array['text'],
   'authenticated',
   array[]::text[],
-  'authenticated cannot resolve phone numbers'
+  'authenticated cannot resolve emails'
 );
 select function_privs_are(
   'public',
@@ -136,9 +136,11 @@ values
   ('00000000-0000-4000-8000-000000000005', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'private-anon@internal.invalid', '', now(), now(), now()),
   ('00000000-0000-4000-8000-000000000006', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'private-authenticated@internal.invalid', '', now(), now(), now()),
   ('00000000-0000-4000-8000-000000000007', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'lifecycle-two@internal.invalid', '', now(), now(), now()),
-  ('00000000-0000-4000-8000-000000000008', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'invalid-phone@internal.invalid', '', now(), now(), now()),
-  ('00000000-0000-4000-8000-000000000009', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'duplicate-phone@internal.invalid', '', now(), now(), now()),
-  ('00000000-0000-4000-8000-000000000010', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'sequence-limit@internal.invalid', '', now(), now(), now());
+  ('00000000-0000-4000-8000-000000000008', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'invalid-email@internal.invalid', '', now(), now(), now()),
+  ('00000000-0000-4000-8000-000000000009', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'duplicate-email@internal.invalid', '', now(), now(), now()),
+  ('00000000-0000-4000-8000-000000000010', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'sequence-limit@internal.invalid', '', now(), now(), now()),
+  ('00000000-0000-4000-8000-000000000011', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'uppercase-email@internal.invalid', '', now(), now(), now()),
+  ('00000000-0000-4000-8000-000000000012', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'overlong-email@internal.invalid', '', now(), now(), now());
 
 insert into private.account_recovery_credentials (user_id, recovery_code_digest)
 values (
@@ -211,7 +213,7 @@ set local role anon;
 select throws_ok(
   $$select public.complete_registration(
       '00000000-0000-4000-8000-000000000003'::uuid,
-      '13800138000'::text,
+      'first@example.com'::text,
       3::smallint,
       decode('01020304', 'hex')
     )$$,
@@ -220,10 +222,10 @@ select throws_ok(
   'anon cannot call registration'
 );
 select throws_ok(
-  $$select * from public.resolve_phone('13800138000')$$,
+  $$select * from public.resolve_email('first@example.com')$$,
   '42501',
-  'permission denied for function resolve_phone',
-  'anon cannot resolve phone numbers'
+  'permission denied for function resolve_email',
+  'anon cannot resolve emails'
 );
 select throws_ok(
   $$select * from public.read_profile('00000000-0000-4000-8000-000000000003')$$,
@@ -267,7 +269,7 @@ select set_config(
 select throws_ok(
   $$select public.complete_registration(
       '00000000-0000-4000-8000-000000000003'::uuid,
-      '13800138000'::text,
+      'first@example.com'::text,
       3::smallint,
       decode('01020304', 'hex')
     )$$,
@@ -276,10 +278,10 @@ select throws_ok(
   'authenticated cannot call registration'
 );
 select throws_ok(
-  $$select * from public.resolve_phone('13800138000')$$,
+  $$select * from public.resolve_email('first@example.com')$$,
   '42501',
-  'permission denied for function resolve_phone',
-  'authenticated cannot resolve phone numbers'
+  'permission denied for function resolve_email',
+  'authenticated cannot resolve emails'
 );
 select throws_ok(
   $$select * from public.read_profile('00000000-0000-4000-8000-000000000003')$$,
@@ -319,36 +321,36 @@ select setval('private.attention_display_name_seq', 1, false);
 set local role service_role;
 
 select results_eq(
-  $$select phone, display_name, avatar_key
+  $$select email, display_name, avatar_key
     from public.complete_registration(
       '00000000-0000-4000-8000-000000000003',
-      '13800138000',
+      'first@example.com',
       3::smallint,
       decode('01020304', 'hex')
     )$$,
-  $$values ('13800138000'::varchar, 'Attention_001'::varchar, 3::smallint)$$,
+  $$values ('first@example.com'::varchar, 'Attention_001'::varchar, 3::smallint)$$,
   'first registration receives the first global default name'
 );
 select results_eq(
-  $$select phone, display_name, avatar_key
+  $$select email, display_name, avatar_key
     from public.complete_registration(
       '00000000-0000-4000-8000-000000000007',
-      '13900139000',
+      'second@example.com',
       2::smallint,
       decode('11121314', 'hex')
     )$$,
-  $$values ('13900139000'::varchar, 'Attention_002'::varchar, 2::smallint)$$,
+  $$values ('second@example.com'::varchar, 'Attention_002'::varchar, 2::smallint)$$,
   'second registration in the transaction receives the next global default name'
 );
 select results_eq(
-  $$select * from public.resolve_phone('13800138000')$$,
+  $$select * from public.resolve_email('first@example.com')$$,
   $$values ('00000000-0000-4000-8000-000000000003'::uuid)$$,
-  'service role resolves a registered phone'
+  'service role resolves a registered email'
 );
 select results_eq(
-  $$select phone, display_name, avatar_key
+  $$select email, display_name, avatar_key
     from public.read_profile('00000000-0000-4000-8000-000000000003')$$,
-  $$values ('13800138000'::varchar, 'Attention_001'::varchar, 3::smallint)$$,
+  $$values ('first@example.com'::varchar, 'Attention_001'::varchar, 3::smallint)$$,
   'service role reads the complete registered profile'
 );
 select is(
@@ -385,55 +387,77 @@ select is(
   'service role reads the replacement recovery digest'
 );
 select results_eq(
-  $$select phone, display_name, avatar_key
+  $$select email, display_name, avatar_key
     from public.update_profile(
       '00000000-0000-4000-8000-000000000003',
       'Renamed',
       4::smallint
     )$$,
-  $$values ('13800138000'::varchar, 'Renamed'::varchar, 4::smallint)$$,
-  'service role updates and returns the profile without changing its phone'
+  $$values ('first@example.com'::varchar, 'Renamed'::varchar, 4::smallint)$$,
+  'service role updates and returns the profile without changing its email'
 );
 select results_eq(
-  $$select * from public.resolve_phone('13800138000')$$,
+  $$select * from public.resolve_email('first@example.com')$$,
   $$values ('00000000-0000-4000-8000-000000000003'::uuid)$$,
-  'profile updates preserve phone resolution'
+  'profile updates preserve email resolution'
 );
 select results_eq(
-  $$select * from public.resolve_phone('13900139000')$$,
+  $$select * from public.resolve_email('second@example.com')$$,
   $$values ('00000000-0000-4000-8000-000000000007'::uuid)$$,
-  'the second registration has its own phone mapping'
+  'the second registration has its own email mapping'
 );
 select throws_ok(
   $$select public.complete_registration(
       '00000000-0000-4000-8000-000000000008',
-      '12800138000',
+      'not-an-email',
       3::smallint,
       decode('21222324', 'hex')
     )$$,
   '23514',
   null,
-  'registration rejects an invalid phone'
+  'registration rejects an invalid email'
 );
 select is_empty(
-  $$select * from public.resolve_phone('12800138000')$$,
+  $$select * from public.resolve_email('not-an-email')$$,
   'invalid registration does not leave a profile behind'
 );
 select throws_ok(
   $$select public.complete_registration(
       '00000000-0000-4000-8000-000000000009',
-      '13800138000',
+      'first@example.com',
       3::smallint,
       decode('31323334', 'hex')
     )$$,
   '23505',
   null,
-  'registration rejects a duplicate phone'
+  'registration rejects a duplicate email'
 );
 select is(
   public.read_recovery_digest('00000000-0000-4000-8000-000000000009'),
   null,
   'duplicate registration does not leave recovery credentials behind'
+);
+select throws_ok(
+  $$select public.complete_registration(
+      '00000000-0000-4000-8000-000000000011',
+      'Uppercase@example.com',
+      3::smallint,
+      decode('51525354', 'hex')
+    )$$,
+  '23514',
+  null,
+  'registration rejects uppercase emails'
+);
+select throws_ok(
+  $$select public.complete_registration(
+      '00000000-0000-4000-8000-000000000012',
+      repeat('a', 244) || '@example.com',
+      3::smallint,
+      decode('61626364', 'hex')
+    )$$,
+  '23514',
+  null,
+  'registration rejects emails longer than 254 characters'
 );
 reset role;
 select setval('private.attention_display_name_seq', 999, true);
@@ -441,7 +465,7 @@ set local role service_role;
 select throws_ok(
   $$select public.complete_registration(
       '00000000-0000-4000-8000-000000000010',
-      '13700137000',
+      'limit@example.com',
       3::smallint,
       decode('41424344', 'hex')
     )$$,
