@@ -273,6 +273,10 @@ enable_confirmations = false
 # enabled = true
 # uri = "pg-functions://<database>/<schema>/<hook_name>"
 
+[auth.hook.send_email]
+enabled = true
+uri = "pg-functions://postgres/private/block_unsupported_auth_emails"
+
 # Multi-factor-authentication is available to Supabase Pro plan.
 [auth.mfa]
 # Control how many MFA factors can be enrolled at once per user.

@@ -74,7 +74,7 @@ describe("auth service", () => {
     });
   });
 
-  it("compensates when sign-in after profile completion fails", async () => {
+  it("keeps the completed account when the final sign-in fails", async () => {
     const adapter = ports();
     const signInFailure = new Error("sign-in failed");
     vi.mocked(adapter.signIn).mockRejectedValue(signInFailure);
@@ -84,28 +84,25 @@ describe("auth service", () => {
         { email: "user@example.com", password: "password123", avatarKey: 2, bucket: "register-key" },
         adapter,
       ),
-    ).rejects.toThrow(signInFailure);
+    ).rejects.toThrow("REGISTRATION_SIGNIN_FAILED");
 
-    expect(adapter.deleteAuthUser).toHaveBeenCalledWith("user-1");
+    expect(adapter.completeRegistration).toHaveBeenCalledOnce();
+    expect(adapter.deleteAuthUser).not.toHaveBeenCalled();
   });
 
-  it("preserves sign-in and cleanup failures", async () => {
+  it("does not attempt compensation after profile completion even when deletion would fail", async () => {
     const adapter = ports();
-    const registrationError = new Error("sign-in failed");
-    const cleanupError = new Error("Auth cleanup failed");
-    vi.mocked(adapter.signIn).mockRejectedValue(registrationError);
-    vi.mocked(adapter.deleteAuthUser).mockRejectedValue(cleanupError);
+    vi.mocked(adapter.signIn).mockRejectedValue(new Error("sign-in failed"));
+    vi.mocked(adapter.deleteAuthUser).mockRejectedValue(new Error("Auth cleanup failed"));
 
     await expect(
       registerAccount(
         { email: "user@example.com", password: "password123", avatarKey: 2, bucket: "register-key" },
         adapter,
       ),
-    ).rejects.toMatchObject({
-      name: "AggregateError",
-      message: "REGISTRATION_COMPENSATION_FAILED",
-      errors: [registrationError, cleanupError],
-    });
+    ).rejects.toThrow("REGISTRATION_SIGNIN_FAILED");
+
+    expect(adapter.deleteAuthUser).not.toHaveBeenCalled();
   });
 
   it("registers with email and signs in", async () => {

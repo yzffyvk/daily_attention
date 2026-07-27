@@ -3,6 +3,7 @@ import { apiFailure, apiSuccess } from "@/lib/api/result";
 const noStoreHeaders = { "Cache-Control": "private, no-store" };
 const operationalErrorCodes = new Set([
   "REGISTRATION_COMPENSATION_FAILED",
+  "REGISTRATION_SIGNIN_FAILED",
   "RECOVERY_ROLLBACK_FAILED",
   "INTERNAL_ERROR",
 ]);

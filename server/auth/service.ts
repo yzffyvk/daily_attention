@@ -53,15 +53,14 @@ export async function registerAccount(
   const recoveryCode = randomRecoveryCode();
   const authUser = await ports.createAuthUser({ email: input.email, password: input.password });
 
+  let profile;
   try {
-    const profile = await ports.completeRegistration({
+    profile = await ports.completeRegistration({
       userId: authUser.id,
       email: input.email,
       avatarKey: input.avatarKey,
       recoveryDigest: await digest(recoveryCode),
     });
-    await ports.signIn(input.email, input.password);
-    return { profile, recoveryCode };
   } catch (registrationError) {
     try {
       await ports.deleteAuthUser(authUser.id);
@@ -73,6 +72,13 @@ export async function registerAccount(
     }
     throw registrationError;
   }
+
+  try {
+    await ports.signIn(input.email, input.password);
+  } catch {
+    throw new Error("REGISTRATION_SIGNIN_FAILED");
+  }
+  return { profile, recoveryCode };
 }
 
 export async function loginAccount(

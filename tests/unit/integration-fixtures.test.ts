@@ -1,4 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as integrationFixtures from "../helpers/integration-fixtures";
 
@@ -7,7 +9,11 @@ const expectedEmail = `integration-${runScope}-10000@integration.daily-attention
 const secondExpectedEmail = `integration-${runScope}-10001@integration.daily-attention.invalid`;
 const userId = "00000000-0000-4000-8000-000000000001";
 const otherUserId = "00000000-0000-4000-8000-000000000002";
+const thirdUserId = "00000000-0000-4000-8000-000000000003";
+const thirdExpectedEmail = `integration-${runScope}-10002@integration.daily-attention.invalid`;
 let previousScope: string | undefined;
+let previousRegistryFile: string | undefined;
+const temporaryDirectories = new Set<string>();
 
 const missingUserResult = {
   data: { user: null },
@@ -16,12 +22,19 @@ const missingUserResult = {
 
 beforeEach(() => {
   previousScope = process.env.INTEGRATION_RUN_SCOPE;
+  previousRegistryFile = process.env.INTEGRATION_USER_REGISTRY_FILE;
   process.env.INTEGRATION_RUN_SCOPE = runScope;
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (previousScope === undefined) delete process.env.INTEGRATION_RUN_SCOPE;
   else process.env.INTEGRATION_RUN_SCOPE = previousScope;
+  if (previousRegistryFile === undefined) delete process.env.INTEGRATION_USER_REGISTRY_FILE;
+  else process.env.INTEGRATION_USER_REGISTRY_FILE = previousRegistryFile;
+  await Promise.all([...temporaryDirectories].map((directory) => (
+    rm(directory, { force: true, recursive: true })
+  )));
+  temporaryDirectories.clear();
 });
 
 function fixtureExports() {
@@ -40,7 +53,20 @@ function fixtureExports() {
         };
       },
       ownership: ReadonlyArray<{ userId: string; email: string }>,
+      checkpoint?: (remaining: ReadonlyArray<{ userId: string; email: string }>) => void,
     ) => Promise<void>;
+    readIntegrationUserRegistry?: (
+      registryFile: string,
+    ) => Array<{ userId: string; email: string }>;
+  };
+}
+
+async function registryPath() {
+  const root = await mkdtemp(join(tmpdir(), "integration-registry-test-"));
+  temporaryDirectories.add(root);
+  return {
+    directory: join(root, "registry"),
+    file: join(root, "registry", "users"),
   };
 }
 
@@ -205,6 +231,168 @@ describe("integration fixture ownership", () => {
       "Integration cleanup ownership does not match the current Auth user",
     );
     expect(deletedUserIds).toEqual([userId]);
+  });
+
+  it("checkpoints a partial multi-user cleanup and resumes only the remaining exact owner", async () => {
+    const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
+    expect(typeof deleteOwnedUsers).toBe("function");
+    if (!deleteOwnedUsers) return;
+
+    const ownership = [
+      { userId, email: expectedEmail },
+      { userId: otherUserId, email: secondExpectedEmail },
+    ];
+    const deleted = new Set<string>();
+    const firstRunDeletes: string[] = [];
+    const firstRunCheckpoints: Array<ReadonlyArray<{ userId: string; email: string }>> = [];
+    const firstAdmin = {
+      auth: {
+        admin: {
+          getUserById: vi.fn().mockImplementation(async (ownedUserId: string) => (
+            deleted.has(ownedUserId)
+              ? missingUserResult
+              : {
+                  data: {
+                    user: {
+                      id: ownedUserId,
+                      email: ownedUserId === userId ? expectedEmail : secondExpectedEmail,
+                    },
+                  },
+                  error: null,
+                }
+          )),
+          deleteUser: vi.fn().mockImplementation(async (ownedUserId: string) => {
+            firstRunDeletes.push(ownedUserId);
+            if (ownedUserId === otherUserId) throw new Error("simulated delete failure");
+            deleted.add(ownedUserId);
+            return { data: {}, error: null };
+          }),
+        },
+      },
+    };
+
+    await expect(deleteOwnedUsers(
+      firstAdmin,
+      ownership,
+      (remaining) => firstRunCheckpoints.push([...remaining]),
+    )).rejects.toThrow("Unable to delete an owned integration user");
+    expect(firstRunDeletes).toEqual([userId, otherUserId]);
+    expect(firstRunCheckpoints).toEqual([[ownership[1]]]);
+
+    const secondRunDeletes: string[] = [];
+    const secondRunCheckpoints: Array<ReadonlyArray<{ userId: string; email: string }>> = [];
+    const secondAdmin = {
+      auth: {
+        admin: {
+          getUserById: vi.fn().mockImplementation(async (ownedUserId: string) => (
+            deleted.has(ownedUserId)
+              ? missingUserResult
+              : {
+                  data: { user: { id: ownedUserId, email: secondExpectedEmail } },
+                  error: null,
+                }
+          )),
+          deleteUser: vi.fn().mockImplementation(async (ownedUserId: string) => {
+            secondRunDeletes.push(ownedUserId);
+            deleted.add(ownedUserId);
+            return { data: {}, error: null };
+          }),
+        },
+      },
+    };
+
+    await deleteOwnedUsers(
+      secondAdmin,
+      firstRunCheckpoints.at(-1) ?? [],
+      (remaining) => secondRunCheckpoints.push([...remaining]),
+    );
+    expect(secondRunDeletes).toEqual([otherUserId]);
+    expect(secondRunCheckpoints).toEqual([[]]);
+  });
+
+  it("stores only confirmed exact ownership in a private regular-file registry", async () => {
+    const registry = await registryPath();
+    process.env.INTEGRATION_USER_REGISTRY_FILE = registry.file;
+
+    integrationFixtures.trackIntegrationUser(thirdUserId, thirdExpectedEmail);
+
+    const directoryMetadata = await stat(registry.directory).catch(() => null);
+    const fileMetadata = await lstat(registry.file).catch(() => null);
+    expect(directoryMetadata?.isDirectory()).toBe(true);
+    expect(directoryMetadata && (directoryMetadata.mode & 0o777)).toBe(0o700);
+    expect(fileMetadata?.isFile()).toBe(true);
+    expect(fileMetadata?.isSymbolicLink()).toBe(false);
+    expect(fileMetadata && (fileMetadata.mode & 0o777)).toBe(0o600);
+    expect(await readFile(registry.file, "utf8")).toBe(
+      `${JSON.stringify({ userId: thirdUserId, email: thirdExpectedEmail })}\n`,
+    );
+    expect(() => integrationFixtures.trackIntegrationUser(
+      thirdUserId,
+      thirdExpectedEmail,
+    )).toThrow("Conflicting integration ownership");
+  });
+
+  it.each([
+    ["an unconfirmed email line", `${expectedEmail}\n`],
+    ["malformed JSON", "{\n"],
+    ["an entry with an extra field", `${JSON.stringify({ userId, email: expectedEmail, state: "deleting" })}\n`],
+    ["an exact duplicate", `${JSON.stringify({ userId, email: expectedEmail })}\n${JSON.stringify({ userId, email: expectedEmail })}\n`],
+    ["a conflicting user ID", `${JSON.stringify({ userId, email: expectedEmail })}\n${JSON.stringify({ userId, email: secondExpectedEmail })}\n`],
+    ["a conflicting email", `${JSON.stringify({ userId, email: expectedEmail })}\n${JSON.stringify({ userId: otherUserId, email: expectedEmail })}\n`],
+  ])("rejects registry contents containing %s", async (_label, contents) => {
+    const readRegistry = fixtureExports().readIntegrationUserRegistry;
+    expect(typeof readRegistry).toBe("function");
+    if (!readRegistry) return;
+    const registry = await registryPath();
+    await mkdir(registry.directory, { mode: 0o700 });
+    await writeFile(registry.file, contents, { mode: 0o600 });
+
+    expect(() => readRegistry(registry.file)).toThrow("Invalid integration ownership registry");
+  });
+
+  it("rejects a symlink registry without reading its target", async () => {
+    const readRegistry = fixtureExports().readIntegrationUserRegistry;
+    expect(typeof readRegistry).toBe("function");
+    if (!readRegistry) return;
+    const registry = await registryPath();
+    const target = join(registry.directory, "target");
+    await mkdir(registry.directory, { mode: 0o700 });
+    await writeFile(target, `${JSON.stringify({ userId, email: expectedEmail })}\n`, { mode: 0o600 });
+    await symlink(target, registry.file);
+
+    expect(() => readRegistry(registry.file)).toThrow("Invalid integration ownership registry");
+  });
+
+  it("does not delete an unrelated Auth user that is absent from exact ownership", async () => {
+    const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
+    expect(typeof deleteOwnedUsers).toBe("function");
+    if (!deleteOwnedUsers) return;
+
+    let deleted = false;
+    const admin = {
+      auth: {
+        admin: {
+          getUserById: vi.fn().mockImplementation(async (ownedUserId: string) => (
+            deleted
+              ? missingUserResult
+              : {
+                  data: { user: { id: ownedUserId, email: expectedEmail } },
+                  error: null,
+                }
+          )),
+          deleteUser: vi.fn().mockImplementation(async () => {
+            deleted = true;
+            return { data: {}, error: null };
+          }),
+        },
+      },
+    };
+
+    await deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]);
+
+    expect(admin.auth.admin.getUserById).not.toHaveBeenCalledWith(otherUserId);
+    expect(admin.auth.admin.deleteUser).toHaveBeenCalledWith(userId);
+    expect(admin.auth.admin.deleteUser).not.toHaveBeenCalledWith(otherUserId);
   });
 
   it("accepts a successful integration delete response with a null user after absence proof", async () => {

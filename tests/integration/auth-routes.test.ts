@@ -150,6 +150,65 @@ describe("authentication routes", () => {
     expect((await session.post("/api/auth/login", { email, password: "newpassword123" })).status).toBe(200);
   });
 
+  it("blocks native Auth email flows without changing the account or its password", async () => {
+    const url = process.env.TEST_SUPABASE_URL;
+    const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+    if (!url || !publishableKey) throw new Error("Missing integration Supabase bindings");
+
+    const { ip, session } = fixtureSession();
+    const email = uniqueEmail(emailSeed++);
+    const password = "password123";
+    const registered = await register(session, ip, email, 3);
+    expect(registered.status).toBe(201);
+    const userId = registered.body.data.profile.id as string;
+    await session.post("/api/auth/logout", {});
+
+    const directClient = createClient(url, publishableKey, {
+      auth: {
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        persistSession: false,
+      },
+    });
+    const passwordless = await directClient.auth.signInWithOtp({
+      email,
+      options: { shouldCreateUser: false },
+    });
+    expect(passwordless.data.user === null).toBe(true);
+    expect(passwordless.data.session === null).toBe(true);
+    expect(passwordless.error === null).toBe(false);
+
+    const reset = await directClient.auth.resetPasswordForEmail(email);
+    expect(reset.error === null).toBe(false);
+
+    const signedIn = await directClient.auth.signInWithPassword({ email, password });
+    expect(signedIn.error === null).toBe(true);
+    expect(signedIn.data.user?.email === email).toBe(true);
+
+    const changedEmail = uniqueEmail(emailSeed++);
+    const changed = await directClient.auth.updateUser({ email: changedEmail });
+    expect(changed.error === null).toBe(false);
+
+    const currentUser = await directClient.auth.getUser();
+    expect(currentUser.error === null).toBe(true);
+    expect(currentUser.data.user?.id === userId).toBe(true);
+    expect(currentUser.data.user?.email === email).toBe(true);
+
+    const profile = await directClient
+      .from("profiles")
+      .select("email")
+      .eq("id", userId)
+      .single();
+    expect(profile.error === null).toBe(true);
+    expect(profile.data?.email === email).toBe(true);
+
+    await directClient.auth.signOut({ scope: "local" });
+    const originalPassword = await directClient.auth.signInWithPassword({ email, password });
+    expect(originalPassword.error === null).toBe(true);
+    expect(originalPassword.data.user?.id === userId).toBe(true);
+    expect(originalPassword.data.user?.email === email).toBe(true);
+  });
+
   it("validates requests before service calls", async () => {
     const response = await new ApiSession().post("/api/auth/register", {});
     expect(response.status).toBe(422);

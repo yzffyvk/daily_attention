@@ -2,9 +2,15 @@ import { createHmac } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createClient } from "@supabase/supabase-js";
+import {
+  cleanupIntegrationUserRegistry,
+  deleteOwnedIntegrationUsers as deleteRegistryUsers,
+  localIntegrationApiUrl,
+  readIntegrationUserRegistry,
+  trackIntegrationUserInRegistry,
+} from "../../scripts/integration-user-registry.mjs";
 
 const execFileAsync = promisify(execFile);
-const ownedUsers = new Map<string, string>();
 const rateBuckets = new Set<string>();
 const integrationRunScopePattern = /^[0-9a-f]{16}$/u;
 const reservedIntegrationEmail = /^integration-[0-9a-f]{16}-[0-9]+@integration\.daily-attention\.invalid$/u;
@@ -33,16 +39,11 @@ export function trackIntegrationUser(userId: string, email: string) {
   if (!userIdPattern.test(userId) || !reservedIntegrationEmail.test(email)) {
     throw new Error("Cannot track invalid integration ownership");
   }
-  const existing = ownedUsers.get(userId);
-  if (existing && existing !== email) {
-    throw new Error("Conflicting integration email ownership");
+  const registryFile = process.env.INTEGRATION_USER_REGISTRY_FILE;
+  if (!registryFile) {
+    throw new Error("Integration ownership registry is unavailable");
   }
-  for (const [ownedUserId, ownedEmail] of ownedUsers) {
-    if (ownedUserId !== userId && ownedEmail === email) {
-      throw new Error("Conflicting integration email ownership");
-    }
-  }
-  ownedUsers.set(userId, email);
+  trackIntegrationUserInRegistry(registryFile, { userId, email });
 }
 
 export function confirmIntegrationAuthOwnership(
@@ -62,118 +63,15 @@ export function confirmIntegrationAuthOwnership(
   return { userId: user.id, email: expectedEmail };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isSuccessfulDeleteResult(value: unknown) {
-  return (
-    isRecord(value)
-    && Object.prototype.hasOwnProperty.call(value, "error")
-    && value.error === null
-  );
-}
-
-function hasOwn(value: Record<string, unknown>, key: string) {
-  return Object.prototype.hasOwnProperty.call(value, key);
-}
-
-function isMissingUserResult(value: unknown) {
-  if (
-    !isRecord(value)
-    || !hasOwn(value, "data")
-    || !hasOwn(value, "error")
-    || !isRecord(value.data)
-    || !hasOwn(value.data, "user")
-    || value.data.user !== null
-    || !isRecord(value.error)
-    || !hasOwn(value.error, "status")
-    || value.error.status !== 404
-    || !hasOwn(value.error, "code")
-    || value.error.code !== "user_not_found"
-  ) {
-    return false;
-  }
-  return true;
-}
-
-function isCurrentIntegrationOwnerResult(
-  value: unknown,
-  entry: IntegrationOwnership,
-) {
-  return (
-    isRecord(value)
-    && hasOwn(value, "data")
-    && hasOwn(value, "error")
-    && value.error === null
-    && isRecord(value.data)
-    && hasOwn(value.data, "user")
-    && isRecord(value.data.user)
-    && value.data.user.id === entry.userId
-    && value.data.user.email === entry.email
-  );
-}
-
-async function verifyCurrentIntegrationOwner(
-  admin: IntegrationAdmin,
-  entry: IntegrationOwnership,
-) {
-  let response;
-  try {
-    response = await admin.auth.admin.getUserById(entry.userId);
-  } catch {
-    throw new Error("Integration cleanup ownership does not match the current Auth user");
-  }
-  if (!isCurrentIntegrationOwnerResult(response, entry)) {
-    throw new Error("Integration cleanup ownership does not match the current Auth user");
-  }
-}
-
-async function verifyIntegrationUserAbsent(
-  admin: IntegrationAdmin,
-  entry: IntegrationOwnership,
-) {
-  let response;
-  try {
-    response = await admin.auth.admin.getUserById(entry.userId);
-  } catch {
-    throw new Error("Unable to verify integration Auth cleanup");
-  }
-  if (isMissingUserResult(response)) return;
-  if (isCurrentIntegrationOwnerResult(response, entry)) {
-    throw new Error("Integration Auth cleanup did not complete");
-  }
-  throw new Error("Unable to verify integration Auth cleanup");
-}
-
 export async function deleteOwnedIntegrationUsers(
   admin: IntegrationAdmin,
   ownership: ReadonlyArray<IntegrationOwnership>,
+  checkpoint?: (remaining: ReadonlyArray<IntegrationOwnership>) => void,
 ) {
-  const verifiedOwnership: IntegrationOwnership[] = [];
-  for (const entry of ownership) {
-    if (!userIdPattern.test(entry.userId) || !reservedIntegrationEmail.test(entry.email)) {
-      throw new Error("Refusing to clean up invalid integration ownership");
-    }
-    await verifyCurrentIntegrationOwner(admin, entry);
-    verifiedOwnership.push(entry);
-  }
-
-  for (const entry of verifiedOwnership) {
-    await verifyCurrentIntegrationOwner(admin, entry);
-    let response;
-    try {
-      response = await admin.auth.admin.deleteUser(entry.userId);
-    } catch {
-      throw new Error("Unable to delete an owned integration user");
-    }
-    if (!isSuccessfulDeleteResult(response)) {
-      throw new Error("Unable to delete an owned integration user");
-    }
-
-    await verifyIntegrationUserAbsent(admin, entry);
-  }
+  await deleteRegistryUsers(admin, ownership, checkpoint);
 }
+
+export { readIntegrationUserRegistry };
 
 export function trackIntegrationRateBucket(action: "register" | "login" | "recover" | "rotate", bucket: string) {
   rateBuckets.add(`${action}:${bucket}`);
@@ -183,15 +81,16 @@ export async function cleanupIntegrationFixtures() {
   const url = process.env.TEST_SUPABASE_URL;
   const secretKey = process.env.TEST_SUPABASE_SECRET_KEY;
   const pepper = process.env.AUTH_RATE_LIMIT_PEPPER;
-  if (!url || !secretKey || !pepper) throw new Error("Missing integration cleanup bindings");
+  const registryFile = process.env.INTEGRATION_USER_REGISTRY_FILE;
+  if (!url || !secretKey || !pepper || !registryFile) {
+    throw new Error("Missing integration cleanup bindings");
+  }
+  const apiUrl = localIntegrationApiUrl(url);
 
-  const admin = createClient(url, secretKey, {
+  const admin = createClient(apiUrl.origin, secretKey, {
     auth: { autoRefreshToken: false, detectSessionInUrl: false, persistSession: false },
   });
-  await deleteOwnedIntegrationUsers(
-    admin,
-    [...ownedUsers].map(([userId, email]) => ({ userId, email })),
-  );
+  await cleanupIntegrationUserRegistry(admin, registryFile);
 
   if (rateBuckets.size === 0) return;
   const entries = [...rateBuckets].map((entry) => {

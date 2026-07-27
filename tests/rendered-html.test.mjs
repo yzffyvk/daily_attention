@@ -93,6 +93,10 @@ test("disables direct Supabase sign-up and rejects sessions without an applicati
 
   assert.match(config, /\[auth\][\s\S]*?enable_signup\s*=\s*false/);
   assert.match(config, /\[auth\.email\][\s\S]*?enable_signup\s*=\s*true/);
+  assert.match(
+    config,
+    /\[auth\.hook\.send_email\][\s\S]*?enabled\s*=\s*true[\s\S]*?uri\s*=\s*"pg-functions:\/\/postgres\/private\/block_unsupported_auth_emails"/,
+  );
   assert.match(config, /minimum_password_length\s*=\s*8/);
   assert.match(page, /if \(error \|\| !profile\) redirect\("\/login"\)/);
   assert.match(requestContext, /\.from\("profiles"\)/);

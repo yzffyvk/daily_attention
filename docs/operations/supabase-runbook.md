@@ -18,15 +18,15 @@ npm run typecheck
 npm run test:unit
 npm run supabase:test
 npm run test:integration
-npm run test:rendered
 npm run test:e2e
+npm run test:rendered
 npm run build
 git diff --check
 ```
 
-`supabase:reset` reapplies every migration and `supabase/seed.sql`, but does not reload Auth provider configuration. `supabase:types` must produce a deterministic update; inspect and commit a changed `lib/supabase/database.types.ts` only when the migration schema requires it. Before Playwright starts, `npm run test:e2e` makes a sanitized local `/auth/v1/settings` assertion using the locally sourced publishable key: Email ON, Phone OFF, and public signup OFF. It prints neither the key nor the response body. The E2E runner starts its own application server on `127.0.0.1:3200`, and stops that server when finished. It never reuses or stops a process on port 3000.
+`supabase:reset` reapplies every migration and `supabase/seed.sql`, but does not reload Auth provider configuration. `supabase:types` must produce a deterministic update; inspect and commit a changed `lib/supabase/database.types.ts` only when the migration schema requires it. The integration suite directly proves that the configured Send Email Hook blocks passwordless OTP/magic-link, password-reset email, and authenticated email-change requests while preserving the account email, profile email, and original password login. Before Playwright starts, `npm run test:e2e` makes a sanitized local `/auth/v1/settings` assertion using the locally sourced publishable key: Email ON, Phone OFF, and public signup OFF. It prints neither the key nor the response body. The E2E runner starts its own application server on `127.0.0.1:3200`, and stops that server when finished. It never reuses or stops a process on port 3000.
 
-A retained local E2E ownership registry can contain runner-owned `deleting` checkpoints after a partial cleanup. Resume cleanup only by running the standard `npm run test:e2e` command again after resolving the original failure. Do not edit or discard the registry manually: the runner removes each checkpoint only after it proves that the exact owned Auth user and Storage objects are absent. Integration cleanup revalidates the exact current `(userId, email)` owner immediately before each individual delete. GoTrue hard-delete success bodies are non-authoritative and may be empty; cleanup requires a valid SDK result object with its own `error` field exactly `null`, then a fresh targeted Admin `getUserById` for the deleted ID. Absence is proven only by a structurally valid result with an own `data.user` equal to `null` and own error fields `status: 404` and `code: "user_not_found"`. A returned user, any other error, or any malformed result fails closed; cleanup never infers target absence from a global Auth list or from identity fields in the delete response.
+A retained local E2E or integration ownership registry can contain exact runner-owned entries after a partial cleanup. Resume cleanup only by running the corresponding standard `npm run test:e2e` or `npm run test:integration` command again after resolving the original failure. Do not edit or discard either registry manually: each runner removes an entry only after it proves the exact owned Auth user, and for E2E the owned Storage objects, are absent. Both runners prevent concurrent standard runs, reject symlinks and malformed or conflicting ownership, and keep private registry permissions. GoTrue hard-delete success bodies are non-authoritative and may be empty; cleanup requires a valid SDK result object with its own `error` field exactly `null`, then a fresh targeted Admin `getUserById` for the deleted ID. Absence is proven only by a structurally valid result with an own `data.user` equal to `null` and own error fields `status: 404` and `code: "user_not_found"`. A returned user, any other error, or any malformed result fails closed; cleanup never infers target absence from a global Auth list or from identity fields in the delete response.
 
 Recovery uses one fixed-shape service-role `resolve_recovery_challenge` RPC. It always returns one row containing either the account ID and stored recovery digest or a null account ID with a 32-byte sentinel digest. The sentinel digest is an internal comparison value only: never log it or return it to the browser. Keep `resolve_email` and `read_recovery_digest` limited to authenticated recovery-code rotation.
 
@@ -40,6 +40,10 @@ For a `REGISTRATION_COMPENSATION_FAILED` alert:
 4. Select only an exact Auth ID with no profile and no recovery credential.
 5. Obtain destructive-action authorization, hard-delete that exact ID, and verify targeted `getUserById` returns `404 / user_not_found`.
 6. Resume registration and let the user retry.
+
+## Registration Sign-in Failure
+
+For a `REGISTRATION_SIGNIN_FAILED` alert, `complete_registration` has already committed a valid profile and recovery credential. Do not delete the account from this alert alone. Correlate only the request ID and timestamp, direct the user to the login page, and have the user rotate the recovery code after login because the original recovery code was not delivered by the failed registration response.
 
 ## Recovery Rollback Failure
 
@@ -58,7 +62,7 @@ To stop only a Supabase stack started for this repository:
 npm run supabase:stop
 ```
 
-## Production Database Change
+## Production Project Preparation
 
 Set the project reference in the shell, not in source control:
 
@@ -66,6 +70,15 @@ Set the project reference in the shell, not in source control:
 export SUPABASE_PROJECT_REF="your-project-ref"
 npx supabase login
 npx supabase link --project-ref "$SUPABASE_PROJECT_REF"
+```
+
+Linking selects the target but does not authorize a release. Never include environment files, secret keys, or raw linked-project output in release evidence.
+
+## Later Schema-Compatible Production Database Change
+
+This generic database-push path is only for later releases that are explicitly verified schema-compatible with the running application. It is prohibited for the first phone-to-email cutover; that release must use the continuously quiesced sequence under **Guarded Legacy Account Reset**.
+
+```sh
 npx supabase migration list --linked
 npx supabase db push --dry-run
 npx supabase db push --linked
@@ -77,10 +90,12 @@ Read the dry-run output before applying it. Apply only the ordered migrations in
 Before a hosted email-password release, verify the target project's Auth configuration:
 
 1. Enable the Email provider and disable the Phone provider. Phone and SMS are not used by this application; do not configure an SMS provider.
-2. Disable public project sign-ups, set the minimum password length to at least 8, and disable anonymous sign-ins. No SMTP configuration is required because the application does not send account email.
-3. Do not expose an email-confirmation, magic-link, or password-reset-email path in the application. Registration remains exclusively on the server-side Admin API, which creates the email user with `email_confirm: true` before completing the profile and recovery-code transaction.
-4. Inspect `GET <NEXT_PUBLIC_SUPABASE_URL>/auth/v1/settings` with the publishable API key as appropriate for the hosted project. Confirm that the public settings report email enabled, phone disabled, and project sign-ups disabled; do not place the secret key in this request or its evidence.
-5. Repeat the dashboard and settings checks after project cloning, restore, or any Auth configuration change.
+2. Disable public project sign-ups, set the minimum password length to at least 8, and disable anonymous sign-ins.
+3. Enable the Postgres Send Email Hook at `pg-functions://postgres/private/block_unsupported_auth_emails`. The database migration must exist before this Auth configuration is pushed. The hook rejects access-granting and identity-changing Auth emails and silently consumes only notification actions; do not configure SMTP.
+4. Do not expose an email-confirmation, magic-link, or password-reset-email path in the application. Registration remains exclusively on the server-side Admin API, which creates the email user with `email_confirm: true` before completing the profile and recovery-code transaction.
+5. Inspect `GET <NEXT_PUBLIC_SUPABASE_URL>/auth/v1/settings` with the publishable API key as appropriate for the hosted project. Confirm that the public settings report Email ON, Phone OFF, and public signup OFF; do not place the secret key in this request or its evidence.
+6. Verify in Auth Hooks that the Send Email Hook is enabled. Using one synthetic application-registered account, directly prove that passwordless OTP/magic-link, reset-password email, and authenticated email-change APIs fail. Then prove the original Auth email and `profiles.email` are unchanged and the original password still signs in.
+7. Repeat the dashboard, settings, hook, and direct negative checks after project cloning, restore, or any Auth configuration change.
 
 The public settings response does not prove every dashboard-only password or anonymous-user control. Record those values from the Auth dashboard separately, retaining no keys or other credentials.
 
@@ -133,14 +148,35 @@ npm run reset:legacy-accounts -- --project-ref=jhiybzdvxvlkbqvamynp --apply
 
 Apply freezes a deduplicated paginated Auth user snapshot, empties the private `checkin-images` bucket, and only then attempts every user deletion in that snapshot. Auth deletion relies on the preflighted cascades to remove `profiles` and `check_ins`. Success requires two consecutive recount snapshots in which all four aggregate counts are zero. Those snapshots authorize the next cutover step only; do not resume writers.
 
+Do not execute any pending email-password migration before every writer and the Admin registration route are quiesced and the legacy reset has produced the required two consecutive all-zero aggregate snapshots.
+
 While writers remain quiesced, complete the cutover in this order:
 
-1. Apply all committed pending email-password migrations in order and verify linked migration history, the expected email/profile/recovery schema, RPC grants, and RLS policies.
-2. Immediately after the email migrations and before the first registration, require `private.attention_display_name_seq` to report `last_value = 1` and `is_called = false`. `202607280002_reset_display_name_sequence.sql` is a one-time clean-slate cutover migration; never rerun or copy it to reset a live sequence after registrations begin.
-3. Verify the hosted Auth prerequisites above and confirm that all five Sites runtime variables below are present and non-empty.
-4. Build, save, and deploy the exact reviewed release commit. Do not deploy a different source revision into this cutover.
-5. Run the email-password registration, login, profile, check-in, and recovery smoke test against that deployment.
-6. Resume writers and public traffic only after reset, migration, exact-release deployment, schema verification, and smoke testing have all succeeded and their sanitized evidence has been reviewed.
+1. Review linked migration history and the exact dry-run while no writer can recreate legacy data:
+
+   ```sh
+   npx supabase migration list --linked
+   npx supabase db push --dry-run
+   ```
+
+2. Apply only the reviewed pending migrations, then verify linked migration history:
+
+   ```sh
+   npx supabase db push --linked
+   npx supabase migration list --linked
+   ```
+
+3. Verify the expected email/profile/recovery schema, RPC grants, RLS policies, and `private.block_unsupported_auth_emails(jsonb)` function. Immediately after the email migrations and before the first registration, require `private.attention_display_name_seq` to report `last_value = 1` and `is_called = false`. `202607280002_reset_display_name_sequence.sql` is a one-time clean-slate cutover migration; never rerun or copy it to reset a live sequence after registrations begin.
+4. Only after the hook function exists, push the reviewed Auth configuration:
+
+   ```sh
+   npx supabase config push --project-ref "$SUPABASE_PROJECT_REF"
+   ```
+
+5. Verify Email ON, Phone OFF, public signup OFF, anonymous sign-ins OFF, minimum password length at least 8, and the Send Email Hook enabled. Confirm that all five Sites runtime variables below are present and non-empty.
+6. Build, save, and deploy the exact reviewed release commit. Do not deploy a different source revision into this cutover.
+7. Register one synthetic account through the deployed Admin registration route. Directly prove that native passwordless OTP/magic-link, reset-password email, and authenticated email-change APIs fail; prove the original Auth email and `profiles.email` remain unchanged and the original password still signs in. Complete the profile, check-in, recovery-code rotation, and recovery smoke test with synthetic data.
+8. Resume writers and public traffic only after reset, database migration, Auth config push, exact-release deployment, schema verification, direct negative Auth checks, and smoke testing have all succeeded and their sanitized evidence has been reviewed.
 
 If apply exits with `RESET_INCOMPLETE` or `RESET_FAILED`, assume partial mutation:
 
