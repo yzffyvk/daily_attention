@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   eq: vi.fn(),
   from: vi.fn(),
   getUser: vi.fn(),
+  getUserById: vi.fn(),
+  listUsers: vi.fn(),
   maybeSingle: vi.fn(),
   rpc: vi.fn(),
   rpcRequiresClientContext: false,
@@ -29,6 +31,8 @@ vi.mock("@/lib/supabase/admin", () => ({
         admin: {
           createUser: mocks.createUser,
           deleteUser: mocks.deleteUser,
+          getUserById: mocks.getUserById,
+          listUsers: mocks.listUsers,
           updateUserById: mocks.updateUserById,
         },
       },
@@ -66,6 +70,10 @@ beforeEach(() => {
   mocks.rpcRequiresClientContext = false;
   mocks.createUser.mockResolvedValue({ data: { user: { id: "user-1" } }, error: null });
   mocks.deleteUser.mockResolvedValue({ error: null });
+  mocks.getUserById.mockResolvedValue({
+    data: { user: null },
+    error: { status: 404, code: "user_not_found" },
+  });
   mocks.updateUserById.mockResolvedValue({ error: null });
   mocks.signInWithPassword.mockResolvedValue({
     data: { user: { id: "user-1" }, session: { access_token: "token" } },
@@ -96,6 +104,64 @@ describe("Supabase auth adapter", () => {
       password: "password123",
       email_confirm: true,
     });
+  });
+
+  it("verifies targeted Auth absence after a successful delete", async () => {
+    mocks.deleteUser.mockResolvedValue({
+      data: { user: { id: "untrusted-delete-response" } },
+      error: null,
+    });
+    const { ports } = await createSupabaseAuthAdapter();
+
+    await expect(ports.deleteAuthUser("user-1")).resolves.toBeUndefined();
+
+    expect(mocks.deleteUser).toHaveBeenCalledWith("user-1");
+    expect(mocks.getUserById).toHaveBeenCalledWith("user-1");
+    expect(mocks.listUsers).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { description: "a missing error property", deleted: {} },
+    { description: "an inherited null error", deleted: Object.create({ error: null }) },
+    { description: "a non-null error", deleted: { error: { code: "delete_failed" } } },
+  ])("rejects a delete response with $description", async ({ deleted }) => {
+    mocks.deleteUser.mockResolvedValue(deleted);
+    const { ports } = await createSupabaseAuthAdapter();
+
+    await expect(ports.deleteAuthUser("user-1")).rejects.toThrow(
+      "Auth user deletion could not be verified",
+    );
+    expect(mocks.getUserById).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      description: "a returned user",
+      absent: { data: { user: { id: "unexpected-user" } }, error: { status: 404, code: "user_not_found" } },
+    },
+    { description: "a missing data envelope", absent: { error: { status: 404, code: "user_not_found" } } },
+    { description: "an inherited null user", absent: { data: Object.create({ user: null }), error: { status: 404, code: "user_not_found" } } },
+    { description: "a missing error envelope", absent: { data: { user: null } } },
+    { description: "an inherited error status", absent: { data: { user: null }, error: Object.create({ status: 404, code: "user_not_found" }) } },
+    { description: "an inherited error code", absent: { data: { user: null }, error: Object.assign(Object.create({ code: "user_not_found" }), { status: 404 }) } },
+    { description: "a wrong status", absent: { data: { user: null }, error: { status: 400, code: "user_not_found" } } },
+    { description: "a wrong code", absent: { data: { user: null }, error: { status: 404, code: "other" } } },
+  ])("rejects a targeted read with $description", async ({ absent }) => {
+    mocks.getUserById.mockResolvedValue(absent);
+    const { ports } = await createSupabaseAuthAdapter();
+
+    await expect(ports.deleteAuthUser("user-1")).rejects.toThrow(
+      "Auth user deletion could not be verified",
+    );
+  });
+
+  it("rejects a thrown targeted read without exposing its details", async () => {
+    mocks.getUserById.mockRejectedValue(new Error("targeted read failed"));
+    const { ports } = await createSupabaseAuthAdapter();
+
+    await expect(ports.deleteAuthUser("user-1")).rejects.toThrow(
+      "Auth user deletion could not be verified",
+    );
   });
 
   it("signs in natively with email and password", async () => {

@@ -28,6 +28,29 @@ function isInvalidCredentialsError(error: SupabaseError) {
   return error.code === "invalid_credentials";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function hasOwn(value: Record<string, unknown>, key: string) {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function isSuccessfulDeleteResult(value: unknown) {
+  return isRecord(value) && hasOwn(value, "error") && value.error === null;
+}
+
+function isMissingUserResult(value: unknown) {
+  if (!isRecord(value) || !hasOwn(value, "data") || !isRecord(value.data) || !hasOwn(value.data, "user")) {
+    return false;
+  }
+  if (value.data.user !== null || !hasOwn(value, "error") || !isRecord(value.error)) return false;
+  return hasOwn(value.error, "status")
+    && value.error.status === 404
+    && hasOwn(value.error, "code")
+    && value.error.code === "user_not_found";
+}
+
 function bytea(value: Uint8Array) {
   return `\\x${Buffer.from(value).toString("hex")}`;
 }
@@ -79,8 +102,18 @@ export async function createSupabaseAuthAdapter() {
       return { id: data.user.id };
     },
     async deleteAuthUser(userId) {
-      const { error } = await admin.auth.admin.deleteUser(userId);
-      throwIfError(error);
+      try {
+        const deleted = await admin.auth.admin.deleteUser(userId);
+        if (!isSuccessfulDeleteResult(deleted)) {
+          throw new Error("Auth user deletion could not be verified");
+        }
+        const absent = await admin.auth.admin.getUserById(userId);
+        if (!isMissingUserResult(absent)) {
+          throw new Error("Auth user deletion could not be verified");
+        }
+      } catch {
+        throw new Error("Auth user deletion could not be verified");
+      }
     },
     async completeRegistration(input) {
       const { data, error } = await admin.rpc("complete_registration", {

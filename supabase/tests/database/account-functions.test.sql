@@ -1,5 +1,12 @@
 begin;
-select plan(60);
+select plan(61);
+
+select results_eq(
+  $$ select last_value, is_called
+     from private.attention_display_name_seq $$,
+  $$ values (1::bigint, false) $$,
+  'clean-slate email migration resets the display-name sequence'
+);
 
 select function_privs_are(
   'public',

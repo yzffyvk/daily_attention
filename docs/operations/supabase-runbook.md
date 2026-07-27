@@ -41,6 +41,17 @@ For a `REGISTRATION_COMPENSATION_FAILED` alert:
 5. Obtain destructive-action authorization, hard-delete that exact ID, and verify targeted `getUserById` returns `404 / user_not_found`.
 6. Resume registration and let the user retry.
 
+## Recovery Rollback Failure
+
+For a `RECOVERY_ROLLBACK_FAILED` alert:
+
+1. Pause the recovery and recovery-code rotation routes.
+2. Correlate the incident by request ID and time without recording request bodies.
+3. Never request the user's password or recovery code.
+4. Identify the exact account only in a secure Admin session, then invalidate its active sessions.
+5. Choose only a reviewed forward repair or a verified full restore.
+6. Do not guess which password or recovery digest committed, and do not directly overwrite either value.
+
 To stop only a Supabase stack started for this repository:
 
 ```sh
@@ -107,6 +118,13 @@ The result must contain both `profiles_id_fkey` with `FOREIGN KEY (id) REFERENCE
 4. Quiesce every application writer before apply: block check-in writes and image uploads, stop background writers, and disable the server-side Admin registration path as well as any other process that can create Auth users. This begins one continuous cutover window; keep every writer stopped through reset, migration, exact-release deployment, schema verification, and production smoke testing.
 5. Re-run the dry-run while writers are quiesced, review the four aggregate counts, and independently reconfirm the target and authorization.
 
+Before the legacy reset, query and record only the sequence state:
+
+```sql
+select last_value, is_called
+from private.attention_display_name_seq;
+```
+
 Only then use the destructive form:
 
 ```sh
@@ -118,10 +136,11 @@ Apply freezes a deduplicated paginated Auth user snapshot, empties the private `
 While writers remain quiesced, complete the cutover in this order:
 
 1. Apply all committed pending email-password migrations in order and verify linked migration history, the expected email/profile/recovery schema, RPC grants, and RLS policies.
-2. Verify the hosted Auth prerequisites above and confirm that all five Sites runtime variables below are present and non-empty.
-3. Build, save, and deploy the exact reviewed release commit. Do not deploy a different source revision into this cutover.
-4. Run the email-password registration, login, profile, check-in, and recovery smoke test against that deployment.
-5. Resume writers and public traffic only after reset, migration, exact-release deployment, schema verification, and smoke testing have all succeeded and their sanitized evidence has been reviewed.
+2. Immediately after the email migrations and before the first registration, require `private.attention_display_name_seq` to report `last_value = 1` and `is_called = false`. `202607280002_reset_display_name_sequence.sql` is a one-time clean-slate cutover migration; never rerun or copy it to reset a live sequence after registrations begin.
+3. Verify the hosted Auth prerequisites above and confirm that all five Sites runtime variables below are present and non-empty.
+4. Build, save, and deploy the exact reviewed release commit. Do not deploy a different source revision into this cutover.
+5. Run the email-password registration, login, profile, check-in, and recovery smoke test against that deployment.
+6. Resume writers and public traffic only after reset, migration, exact-release deployment, schema verification, and smoke testing have all succeeded and their sanitized evidence has been reviewed.
 
 If apply exits with `RESET_INCOMPLETE` or `RESET_FAILED`, assume partial mutation:
 
@@ -131,7 +150,7 @@ If apply exits with `RESET_INCOMPLETE` or `RESET_FAILED`, assume partial mutatio
 4. If any `profiles` or `check_ins` rows remain after their Auth users were deleted, stop and investigate the cascade mismatch before any retry.
 5. After the failure cause is resolved and a fresh destructive-action authorization is recorded, re-run apply against the remaining data. If recovery rather than completion is required, restore from the verified backups; the script provides no rollback.
 
-If migration, deployment, schema verification, or smoke testing fails after a successful reset, keep every writer and the Admin registration path stopped. Preserve sanitized evidence, diagnose the failing stage, and either complete a reviewed forward fix or execute the approved restore procedure. Never resume traffic against a partially migrated schema or an unverified web release.
+If migration, deployment, schema verification, or smoke testing fails after a successful reset, keep every writer and the Admin registration path stopped. Preserve sanitized evidence, diagnose the failing stage, and use a schema-compatible reviewed forward fix. Returning to the phone-era web build requires a coordinated full database, Auth, and Storage restore to the pre-cutover state; never use a web-only rollback. Never resume traffic against a partially migrated schema or an unverified web release.
 
 Never record command output together with environment files or secret values.
 
@@ -177,7 +196,7 @@ Once per quarter, perform a restore drill into an isolated Supabase project:
 
 ## Forward-Only Incident Rollback
 
-For a web release incident, stop writes at the managed ingress, redeploy the prior known-good web version, and verify it against the current schema. Database rollback is forward-only: create a new reviewed migration that compensates for the fault; never edit or reverse an applied production migration in place. Preserve backups and incident evidence until the corrective migration and restore plan have been reviewed.
+For a later web release incident, stop writes at the managed ingress and roll back only to an artifact explicitly verified compatible with the current schema. Database rollback is forward-only: create a new reviewed migration that compensates for the fault; never edit or reverse an applied production migration in place. Preserve backups and incident evidence until the corrective migration and restore plan have been reviewed.
 
 ## Redaction Rules
 
