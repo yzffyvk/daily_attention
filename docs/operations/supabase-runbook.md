@@ -28,6 +28,8 @@ git diff --check
 
 A retained local E2E ownership registry can contain runner-owned `deleting` checkpoints after a partial cleanup. Resume cleanup only by running the standard `npm run test:e2e` command again after resolving the original failure. Do not edit or discard the registry manually: the runner removes each checkpoint only after it proves that the exact owned Auth user and Storage objects are absent. Integration cleanup revalidates the exact current `(userId, email)` owner immediately before each individual delete. GoTrue hard-delete success bodies are non-authoritative and may be empty; cleanup requires a valid SDK result object with its own `error` field exactly `null`, then a fresh targeted Admin `getUserById` for the deleted ID. Absence is proven only by a structurally valid result with an own `data.user` equal to `null` and own error fields `status: 404` and `code: "user_not_found"`. A returned user, any other error, or any malformed result fails closed; cleanup never infers target absence from a global Auth list or from identity fields in the delete response.
 
+Recovery uses one fixed-shape service-role `resolve_recovery_challenge` RPC. It always returns one row containing either the account ID and stored recovery digest or a null account ID with a 32-byte sentinel digest. The sentinel digest is an internal comparison value only: never log it or return it to the browser. Keep `resolve_email` and `read_recovery_digest` limited to authenticated recovery-code rotation.
+
 To stop only a Supabase stack started for this repository:
 
 ```sh

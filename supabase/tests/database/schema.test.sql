@@ -1,5 +1,5 @@
 begin;
-select plan(44);
+select plan(46);
 
 select has_schema('private', 'private schema exists');
 select has_table('public', 'profiles', 'profiles exists');
@@ -20,6 +20,26 @@ select col_is_unique('public', 'profiles', 'email', 'email is unique');
 select col_type_is('public', 'profiles', 'email', 'character varying(254)', 'email has a 254-character maximum');
 select hasnt_column('public', 'profiles', 'phone', 'profiles no longer have a phone');
 select hasnt_function('public', 'resolve_phone', array['text'], 'resolve_phone no longer exists');
+select has_function(
+  'public',
+  'resolve_recovery_challenge',
+  array['text'],
+  'fixed-shape recovery challenge function exists'
+);
+select is(
+  (
+    select setting
+    from pg_catalog.pg_proc procedure
+    join pg_catalog.pg_namespace namespace on namespace.oid = procedure.pronamespace
+    cross join lateral pg_catalog.unnest(procedure.proconfig) as config(setting)
+    where namespace.nspname = 'public'
+      and procedure.proname = 'resolve_recovery_challenge'
+      and pg_catalog.oidvectortypes(procedure.proargtypes) = 'text'
+      and setting = 'search_path=""'
+  ),
+  'search_path=""',
+  'recovery challenge has an empty search path'
+);
 select function_returns(
   'public',
   'complete_registration',

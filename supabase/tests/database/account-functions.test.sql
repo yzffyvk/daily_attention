@@ -1,5 +1,5 @@
 begin;
-select plan(54);
+select plan(60);
 
 select function_privs_are(
   'public',
@@ -16,6 +16,22 @@ select function_privs_are(
   'anon',
   array[]::text[],
   'anon cannot resolve emails'
+);
+select function_privs_are(
+  'public',
+  'resolve_recovery_challenge',
+  array['text'],
+  'public',
+  array[]::text[],
+  'public cannot resolve recovery challenges'
+);
+select function_privs_are(
+  'public',
+  'resolve_recovery_challenge',
+  array['text'],
+  'anon',
+  array[]::text[],
+  'anon cannot resolve recovery challenges'
 );
 select function_privs_are(
   'public',
@@ -64,6 +80,22 @@ select function_privs_are(
   'authenticated',
   array[]::text[],
   'authenticated cannot resolve emails'
+);
+select function_privs_are(
+  'public',
+  'resolve_recovery_challenge',
+  array['text'],
+  'authenticated',
+  array[]::text[],
+  'authenticated cannot resolve recovery challenges'
+);
+select function_privs_are(
+  'public',
+  'resolve_recovery_challenge',
+  array['text'],
+  'service_role',
+  array['EXECUTE'],
+  'only service role can resolve recovery challenges'
 );
 select function_privs_are(
   'public',
@@ -147,6 +179,15 @@ values (
   '00000000-0000-4000-8000-000000000004',
   decode('01020304', 'hex')
 );
+
+insert into auth.users (id)
+values ('00000000-0000-4000-8000-000000000001');
+
+insert into public.profiles (id, email, display_name, avatar_key)
+values ('00000000-0000-4000-8000-000000000001', 'known@example.com', 'Known account', 1);
+
+insert into private.account_recovery_credentials (user_id, recovery_code_digest)
+values ('00000000-0000-4000-8000-000000000001', decode(repeat('ab', 32), 'hex'));
 
 insert into private.auth_rate_limits (bucket_digest, action, window_started_at, attempt_count)
 values (decode('aabbccdd', 'hex'), 'login', now(), 1);
@@ -319,6 +360,19 @@ select throws_ok(
 reset role;
 select setval('private.attention_display_name_seq', 1, false);
 set local role service_role;
+
+select results_eq(
+  $$ select user_id, encode(recovery_code_digest, 'hex')
+     from public.resolve_recovery_challenge('known@example.com') $$,
+  $$ values ('00000000-0000-4000-8000-000000000001'::uuid, repeat('ab', 32)) $$,
+  'known email returns its user and digest'
+);
+select results_eq(
+  $$ select user_id is null, octet_length(recovery_code_digest)
+     from public.resolve_recovery_challenge('missing@example.com') $$,
+  $$ values (true, 32) $$,
+  'missing email returns one fixed-shape sentinel row'
+);
 
 select results_eq(
   $$select email, display_name, avatar_key

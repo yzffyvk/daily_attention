@@ -15,6 +15,14 @@ const databaseProfileSchema = z.object({
   avatar_key: z.number().int().min(1).max(5),
 });
 const emailResolutionSchema = z.array(z.object({ user_id: z.string().min(1) })).max(1);
+const recoveryChallengeSchema = z
+  .array(
+    z.object({
+      user_id: z.string().uuid().nullable(),
+      recovery_code_digest: z.string(),
+    }),
+  )
+  .length(1);
 
 function isInvalidCredentialsError(error: SupabaseError) {
   return error.code === "invalid_credentials";
@@ -94,6 +102,19 @@ export async function createSupabaseAuthAdapter() {
       if (!parsed.success) throw new Error("Malformed email resolution response");
       const account = parsed.data[0];
       return account ? { userId: account.user_id } : null;
+    },
+    async resolveRecoveryChallenge(email) {
+      const { data, error } = await admin.rpc("resolve_recovery_challenge", {
+        target_email: email,
+      });
+      throwIfError(error);
+      const parsed = recoveryChallengeSchema.safeParse(data);
+      if (!parsed.success) throw new Error("Malformed recovery challenge response");
+      const challenge = parsed.data[0];
+      return {
+        userId: challenge.user_id,
+        recoveryDigest: bytes(challenge.recovery_code_digest),
+      };
     },
     async readProfile(userId) {
       const { data, error } = await admin.rpc("read_profile", {

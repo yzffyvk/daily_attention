@@ -81,31 +81,31 @@ export async function recoverAccount(
   ports: AuthPorts,
 ): Promise<RecoveryResult> {
   await ports.rateLimit({ action: "recover", bucket: input.bucket });
-  const account = await ports.resolveEmail(input.email);
-  if (!account) throw new Error("INVALID_RECOVERY");
-  const expected = await ports.readRecoveryDigest(account.userId);
+  const challenge = await ports.resolveRecoveryChallenge(input.email);
   const supplied = await digest(input.recoveryCode);
-  if (!sameDigest(expected, supplied)) throw new Error("INVALID_RECOVERY");
-  const profile = await ports.readProfile(account.userId);
-  if (profile.id !== account.userId || profile.email !== input.email) {
+  if (!sameDigest(challenge.recoveryDigest, supplied) || !challenge.userId) {
+    throw new Error("INVALID_RECOVERY");
+  }
+  const profile = await ports.readProfile(challenge.userId);
+  if (profile.id !== challenge.userId || profile.email !== input.email) {
     throw new Error("PROFILE_NOT_FOUND");
   }
 
   const recoveryCode = randomRecoveryCode();
   const next = await digest(recoveryCode);
-  const replaced = await ports.replaceRecoveryDigest(account.userId, expected, next);
+  const replaced = await ports.replaceRecoveryDigest(challenge.userId, challenge.recoveryDigest, next);
   if (!replaced) throw new Error("RECOVERY_ALREADY_USED");
 
   try {
-    await ports.updatePassword(account.userId, input.newPassword);
+    await ports.updatePassword(challenge.userId, input.newPassword);
   } catch (passwordError) {
-    await restoreRecoveryDigest(ports, account.userId, next, expected, passwordError);
+    await restoreRecoveryDigest(ports, challenge.userId, next, challenge.recoveryDigest, passwordError);
   }
 
   try {
     await ports.signIn(input.email, input.newPassword);
   } catch (signInError) {
-    await restoreRecoveryDigest(ports, account.userId, next, expected, signInError);
+    await restoreRecoveryDigest(ports, challenge.userId, next, challenge.recoveryDigest, signInError);
   }
   return { profile, recoveryCode };
 }

@@ -196,6 +196,13 @@ export type Database = {
           user_id: string
         }[]
       }
+      resolve_recovery_challenge: {
+        Args: { target_email: string }
+        Returns: {
+          recovery_code_digest: string
+          user_id: string
+        }[]
+      }
       update_profile: {
         Args: {
           target_avatar_key: number

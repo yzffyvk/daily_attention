@@ -16,6 +16,7 @@ export type AuthPorts = {
     recoveryDigest: Uint8Array;
   }): Promise<AccountProfile>;
   resolveEmail(email: string): Promise<{ userId: string } | null>;
+  resolveRecoveryChallenge(email: string): Promise<{ userId: string | null; recoveryDigest: Uint8Array }>;
   readProfile(userId: string): Promise<AccountProfile>;
   readRecoveryDigest(userId: string): Promise<Uint8Array>;
   replaceRecoveryDigest(userId: string, expected: Uint8Array, next: Uint8Array): Promise<boolean>;

@@ -171,6 +171,75 @@ describe("Supabase auth adapter", () => {
     expect(mocks.rpc).toHaveBeenCalledWith("resolve_email", { target_email: "user@example.com" });
   });
 
+  it("reads one known recovery challenge through the fixed-shape RPC", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [{
+        user_id: "00000000-0000-4000-8000-000000000001",
+        recovery_code_digest: `\\x${"ab".repeat(32)}`,
+      }],
+      error: null,
+    });
+    const { ports } = await createSupabaseAuthAdapter();
+
+    await expect(ports.resolveRecoveryChallenge("user@example.com")).resolves.toEqual({
+      userId: "00000000-0000-4000-8000-000000000001",
+      recoveryDigest: new Uint8Array(32).fill(0xab),
+    });
+    expect(mocks.rpc).toHaveBeenCalledWith("resolve_recovery_challenge", {
+      target_email: "user@example.com",
+    });
+  });
+
+  it("accepts a null user ID for a missing-account recovery challenge", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [{ user_id: null, recovery_code_digest: `\\x${"00".repeat(32)}` }],
+      error: null,
+    });
+    const { ports } = await createSupabaseAuthAdapter();
+
+    await expect(ports.resolveRecoveryChallenge("missing@example.com")).resolves.toEqual({
+      userId: null,
+      recoveryDigest: new Uint8Array(32),
+    });
+  });
+
+  it.each([
+    { data: [], description: "zero rows" },
+    {
+      data: [
+        { user_id: null, recovery_code_digest: `\\x${"00".repeat(32)}` },
+        { user_id: null, recovery_code_digest: `\\x${"00".repeat(32)}` },
+      ],
+      description: "multiple rows",
+    },
+    {
+      data: [{ user_id: "not-a-uuid", recovery_code_digest: `\\x${"00".repeat(32)}` }],
+      description: "a malformed user ID",
+    },
+  ])("rejects a recovery challenge response with $description", async ({ data }) => {
+    mocks.rpc.mockResolvedValue({ data, error: null });
+    const { ports } = await createSupabaseAuthAdapter();
+
+    await expect(ports.resolveRecoveryChallenge("user@example.com")).rejects.toThrow(
+      "Malformed recovery challenge response",
+    );
+  });
+
+  it.each(["", "not-bytea", `\\x${"ab".repeat(31)}`, `\\x${"zz".repeat(32)}`])(
+    "rejects a recovery challenge response with a malformed digest",
+    async (recovery_code_digest) => {
+      mocks.rpc.mockResolvedValue({
+        data: [{ user_id: null, recovery_code_digest }],
+        error: null,
+      });
+      const { ports } = await createSupabaseAuthAdapter();
+
+      await expect(ports.resolveRecoveryChallenge("user@example.com")).rejects.toThrow(
+        "Malformed recovery digest",
+      );
+    },
+  );
+
   it("reads and validates a recovery profile through the service-role RPC", async () => {
     mocks.rpc.mockResolvedValue({ data: databaseProfile, error: null });
     const { ports } = await createSupabaseAuthAdapter();

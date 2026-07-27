@@ -16,6 +16,7 @@ function ports(): AuthPorts {
     deleteAuthUser: vi.fn().mockResolvedValue(undefined),
     completeRegistration: vi.fn().mockResolvedValue(profile),
     resolveEmail: vi.fn().mockResolvedValue({ userId: "user-1" }),
+    resolveRecoveryChallenge: vi.fn(),
     readProfile: vi.fn().mockResolvedValue(profile),
     readRecoveryDigest: vi.fn(),
     replaceRecoveryDigest: vi.fn().mockResolvedValue(true),
@@ -102,7 +103,10 @@ describe("auth service", () => {
 
   it("claims the recovery digest before changing the password", async () => {
     const adapter = ports();
-    vi.mocked(adapter.readRecoveryDigest).mockResolvedValue(await recoveryDigest());
+    vi.mocked(adapter.resolveRecoveryChallenge).mockResolvedValue({
+      userId: "user-1",
+      recoveryDigest: await recoveryDigest(),
+    });
     const result = await recoverAccount(recoveryInput(), adapter);
     const replaceRecoveryDigest = vi.mocked(adapter.replaceRecoveryDigest);
     const updatePassword = vi.mocked(adapter.updatePassword);
@@ -111,16 +115,42 @@ describe("auth service", () => {
       updatePassword.mock.invocationCallOrder[0],
     );
     expect(adapter.updatePassword).toHaveBeenCalledWith("user-1", "newpassword123");
-    expect(adapter.resolveEmail).toHaveBeenCalledWith("user@example.com");
+    expect(adapter.resolveRecoveryChallenge).toHaveBeenCalledWith("user@example.com");
+    expect(adapter.resolveRecoveryChallenge).toHaveBeenCalledOnce();
+    expect(adapter.resolveEmail).not.toHaveBeenCalled();
+    expect(adapter.readRecoveryDigest).not.toHaveBeenCalled();
     expect(adapter.replaceRecoveryDigest).toHaveBeenCalledOnce();
     expect(result.profile).toMatchObject({ id: "user-1", email: "user@example.com" });
     expect(result.recoveryCode.replace(/-/g, "")).toHaveLength(26);
   });
 
+  it("hashes a missing-account recovery code before rejecting the fixed-shape sentinel", async () => {
+    const adapter = ports();
+    const sentinel = await recoveryDigest();
+    const digestSpy = vi.spyOn(crypto.subtle, "digest");
+    vi.mocked(adapter.resolveRecoveryChallenge).mockResolvedValue({
+      userId: null,
+      recoveryDigest: sentinel,
+    });
+
+    await expect(recoverAccount(recoveryInput(), adapter)).rejects.toThrow("INVALID_RECOVERY");
+
+    expect(adapter.resolveRecoveryChallenge).toHaveBeenCalledWith("user@example.com");
+    expect(adapter.resolveRecoveryChallenge).toHaveBeenCalledOnce();
+    expect(adapter.resolveEmail).not.toHaveBeenCalled();
+    expect(adapter.readRecoveryDigest).not.toHaveBeenCalled();
+    expect(digestSpy).toHaveBeenCalledOnce();
+    expect(adapter.readProfile).not.toHaveBeenCalled();
+    expect(adapter.replaceRecoveryDigest).not.toHaveBeenCalled();
+  });
+
   it("performs zero recovery mutations when the profile lookup fails", async () => {
     const adapter = ports();
     const profileFailure = new Error("profile lookup failed");
-    vi.mocked(adapter.readRecoveryDigest).mockResolvedValue(await recoveryDigest());
+    vi.mocked(adapter.resolveRecoveryChallenge).mockResolvedValue({
+      userId: "user-1",
+      recoveryDigest: await recoveryDigest(),
+    });
     vi.mocked(adapter.readProfile).mockRejectedValue(profileFailure);
 
     await expect(recoverAccount(recoveryInput(), adapter)).rejects.toThrow(profileFailure);
@@ -132,7 +162,10 @@ describe("auth service", () => {
 
   it("does not change the password when another recovery claims the digest", async () => {
     const adapter = ports();
-    vi.mocked(adapter.readRecoveryDigest).mockResolvedValue(await recoveryDigest());
+    vi.mocked(adapter.resolveRecoveryChallenge).mockResolvedValue({
+      userId: "user-1",
+      recoveryDigest: await recoveryDigest(),
+    });
     vi.mocked(adapter.replaceRecoveryDigest).mockResolvedValue(false);
 
     await expect(recoverAccount(recoveryInput(), adapter)).rejects.toThrow("RECOVERY_ALREADY_USED");
@@ -145,7 +178,10 @@ describe("auth service", () => {
     const adapter = ports();
     const expected = await recoveryDigest();
     const passwordFailure = new Error("password update failed");
-    vi.mocked(adapter.readRecoveryDigest).mockResolvedValue(expected);
+    vi.mocked(adapter.resolveRecoveryChallenge).mockResolvedValue({
+      userId: "user-1",
+      recoveryDigest: expected,
+    });
     vi.mocked(adapter.updatePassword).mockRejectedValue(passwordFailure);
     vi.mocked(adapter.replaceRecoveryDigest).mockResolvedValueOnce(true).mockResolvedValueOnce(true);
 
@@ -164,7 +200,10 @@ describe("auth service", () => {
 
   it("reports a failed recovery rollback without signing in", async () => {
     const adapter = ports();
-    vi.mocked(adapter.readRecoveryDigest).mockResolvedValue(await recoveryDigest());
+    vi.mocked(adapter.resolveRecoveryChallenge).mockResolvedValue({
+      userId: "user-1",
+      recoveryDigest: await recoveryDigest(),
+    });
     vi.mocked(adapter.updatePassword).mockRejectedValue(new Error("password update failed"));
     vi.mocked(adapter.replaceRecoveryDigest).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
 
@@ -178,7 +217,10 @@ describe("auth service", () => {
     const adapter = ports();
     const expected = await recoveryDigest();
     const signInFailure = new Error("INVALID_CREDENTIALS");
-    vi.mocked(adapter.readRecoveryDigest).mockResolvedValue(expected);
+    vi.mocked(adapter.resolveRecoveryChallenge).mockResolvedValue({
+      userId: "user-1",
+      recoveryDigest: expected,
+    });
     vi.mocked(adapter.signIn).mockRejectedValue(signInFailure);
     vi.mocked(adapter.replaceRecoveryDigest).mockResolvedValueOnce(true).mockResolvedValueOnce(true);
 
@@ -192,7 +234,10 @@ describe("auth service", () => {
 
   it("reports rollback failure when sign-in after recovery fails", async () => {
     const adapter = ports();
-    vi.mocked(adapter.readRecoveryDigest).mockResolvedValue(await recoveryDigest());
+    vi.mocked(adapter.resolveRecoveryChallenge).mockResolvedValue({
+      userId: "user-1",
+      recoveryDigest: await recoveryDigest(),
+    });
     vi.mocked(adapter.signIn).mockRejectedValue(new Error("INVALID_CREDENTIALS"));
     vi.mocked(adapter.replaceRecoveryDigest).mockResolvedValueOnce(true).mockRejectedValue(new Error("rollback failed"));
 
