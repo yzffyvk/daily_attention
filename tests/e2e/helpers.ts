@@ -18,58 +18,58 @@ export async function waitForClient(page: Page) {
   await page.waitForTimeout(700);
 }
 
-const projectPhoneIds: Record<string, number> = {
+const projectEmailIds: Record<string, number> = {
   "flows-desktop": 1,
   desktop: 2,
   tablet: 3,
   mobile: 4,
 };
-const reservedE2EPhone = /^139[1-4][0-9]{7}$/u;
+const reservedE2EEmail = /^email-[1-4]-[0-9]{4}-[0-9]+-[0-9]+-[0-9]+@e2e\.daily-attention\.invalid$/u;
 const userIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const registryDirectoryName = "ai-learning-checkin-phone-auth-e2e-registry";
+const registryDirectoryName = "ai-learning-checkin-email-auth-e2e-registry";
 
-function phonePart(value: number, width: number, label: string) {
+function emailPart(value: number, width: number, label: string) {
   if (!Number.isSafeInteger(value) || value < 0 || value >= 10 ** width) {
     throw new Error(`${label} must fit in ${width} decimal digits`);
   }
   return String(value).padStart(width, "0");
 }
 
-export function uniquePhone(
+export function uniqueEmail(
   projectName: string,
   workerIndex: number,
   retry: number,
   invocation: number,
   runScope: number,
 ) {
-  const projectId = projectPhoneIds[projectName];
+  const projectId = projectEmailIds[projectName];
   if (projectId === undefined) throw new Error(`Unknown E2E project: ${projectName}`);
-  return `139${projectId}${phonePart(runScope, 4, "runScope")}${phonePart(workerIndex, 1, "workerIndex")}${phonePart(retry, 1, "retry")}${phonePart(invocation, 1, "invocation")}`;
+  return `email-${projectId}-${emailPart(runScope, 4, "runScope")}-${emailPart(workerIndex, 1, "workerIndex")}-${emailPart(retry, 1, "retry")}-${emailPart(invocation, 1, "invocation")}@e2e.daily-attention.invalid`;
 }
 
-export function recordE2EOwnership(userId: string, phone: string) {
+export function recordE2EEmailOwnership(userId: string, email: string) {
   if (!userIdPattern.test(userId)) {
     throw new Error("Cannot record invalid E2E user ownership");
   }
-  if (!reservedE2EPhone.test(phone)) {
-    throw new Error(`Cannot record non-reserved E2E phone: ${phone}`);
+  if (!reservedE2EEmail.test(email)) {
+    throw new Error("Cannot record non-reserved E2E email");
   }
-  const registry = process.env.E2E_PHONE_REGISTRY_FILE;
+  const registry = process.env.E2E_EMAIL_REGISTRY_FILE;
   const registryDirectory = join(tmpdir(), registryDirectoryName);
-  const expectedRegistry = join(registryDirectory, "phones");
+  const expectedRegistry = join(registryDirectory, "emails");
   if (!registry || registry !== expectedRegistry) {
-    throw new Error("E2E phone registry path is unavailable");
+    throw new Error("E2E email registry path is unavailable");
   }
   const directoryMetadata = lstatSync(registryDirectory);
   if (!directoryMetadata.isDirectory() || directoryMetadata.isSymbolicLink()) {
-    throw new Error("E2E phone registry directory is invalid");
+    throw new Error("E2E email registry directory is invalid");
   }
   const registryMetadata = lstatSync(registry);
   if (!registryMetadata.isFile() || registryMetadata.isSymbolicLink()) {
-    throw new Error("E2E phone registry file is invalid");
+    throw new Error("E2E email registry file is invalid");
   }
   if (typeof fsConstants.O_NOFOLLOW !== "number" || fsConstants.O_NOFOLLOW === 0) {
-    throw new Error("Safe E2E phone registry writes are unavailable");
+    throw new Error("Safe E2E email registry writes are unavailable");
   }
 
   let descriptor: number | null = null;
@@ -79,11 +79,11 @@ export function recordE2EOwnership(userId: string, phone: string) {
       fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_NOFOLLOW,
     );
     if (!fstatSync(descriptor).isFile()) {
-      throw new Error("E2E phone registry descriptor is invalid");
+      throw new Error("E2E email registry descriptor is invalid");
     }
     writeSync(
       descriptor,
-      `${JSON.stringify({ userId, phone })}\n`,
+      `${JSON.stringify({ userId, email })}\n`,
       null,
       "utf8",
     );
@@ -112,9 +112,9 @@ function hashValue(value: string) {
   return hash >>> 0;
 }
 
-function e2eClientIp(phone: string) {
+function e2eClientIp(email: string) {
   for (let collision = 0; collision < 256; collision += 1) {
-    const hash = hashValue(`${phone}:${collision}`);
+    const hash = hashValue(`${email}:${collision}`);
     const ip = `10.${1 + (hash >>> 16) % 254}.${1 + (hash >>> 8) % 254}.${1 + hash % 254}`;
     if (!assignedClientIps.has(ip)) {
       assignedClientIps.add(ip);
@@ -124,23 +124,23 @@ function e2eClientIp(phone: string) {
   throw new Error("Unable to allocate an isolated E2E client address");
 }
 
-export async function register(page: Page, phone?: string) {
+export async function register(page: Page, email?: string) {
   const testInfo = test.info();
-  const allocatedPhone = phone ?? uniquePhone(
+  const allocatedEmail = email ?? uniqueEmail(
     testInfo.project.name,
     testInfo.workerIndex,
     testInfo.retry,
     registrationSequence++,
     currentRunScope(),
   );
-  await page.context().setExtraHTTPHeaders({ "CF-Connecting-IP": e2eClientIp(allocatedPhone) });
+  await page.context().setExtraHTTPHeaders({ "CF-Connecting-IP": e2eClientIp(allocatedEmail) });
   await page.goto("/register", { waitUntil: "load" });
   await waitForClient(page);
   await page.getByRole("link", { name: "返回登录" }).click();
   await expect(page).toHaveURL(/\/login$/);
   await page.goto("/register", { waitUntil: "load" });
   await waitForClient(page);
-  await page.getByLabel("手机号").fill(allocatedPhone);
+  await page.getByLabel("邮箱").fill(allocatedEmail);
   await page.getByLabel("头像 4").check();
   await page.getByLabel("密码", { exact: true }).fill(password);
   await page.getByLabel("确认密码").fill(password);
@@ -155,17 +155,17 @@ export async function register(page: Page, phone?: string) {
   }
   const body = await response.json() as {
     ok?: unknown;
-    data?: { profile?: { id?: unknown; phone?: unknown } };
+    data?: { profile?: { id?: unknown; email?: unknown } };
   };
   const profile = body.data?.profile;
   if (
     body.ok !== true
     || typeof profile?.id !== "string"
-    || profile.phone !== allocatedPhone
+    || profile.email !== allocatedEmail
   ) {
     throw new Error("E2E registration returned invalid ownership");
   }
-  recordE2EOwnership(profile.id, allocatedPhone);
+  recordE2EEmailOwnership(profile.id, allocatedEmail);
 
   const recoveryCode = page.locator('output[aria-label="恢复码"]');
   await expect(page.getByRole("heading", { name: "恢复码只显示这一次" })).toBeVisible();
@@ -173,7 +173,7 @@ export async function register(page: Page, phone?: string) {
   if (!code) throw new Error("The registration dialog did not show a recovery code");
   await page.getByRole("button", { name: "我已保存" }).click();
   await expect(page.getByRole("button", { name: "打开账户菜单" })).toBeVisible();
-  return { code, phone: allocatedPhone };
+  return { code, email: allocatedEmail };
 }
 
 export async function logout(page: Page) {

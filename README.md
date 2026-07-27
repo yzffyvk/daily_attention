@@ -37,7 +37,7 @@ value of at least 32 bytes. `.dev.vars` is ignored and must not be committed.
 
 Production values belong in `.env.production.local`, which is also ignored.
 The active environment template is `.dev.vars.example`; it contains no WeChat
-configuration because the current application uses phone-and-password accounts
+configuration because the current application uses email-and-password accounts
 backed by Supabase.
 
 The formal schema and data APIs are Supabase-owned. Apply all local migrations
@@ -58,16 +58,19 @@ npm run supabase:types
 
 ```bash
 npm run test:unit
-npm run test:rendered
+npm run supabase:test
 npm run test:integration
+npm run test:rendered
+npm run test:e2e
 npm run lint
 npm run typecheck
 npm run build
 ```
 
-`npm run test:integration` starts the local application with bindings from the
-local Supabase instance. Stop local services with `npm run supabase:stop` when
-you are finished.
+`npm run test:integration` and `npm run test:e2e` use local Supabase bindings;
+the E2E runner creates only reserved `e2e.daily-attention.invalid` accounts and
+cleans them up only after exact Auth email ownership verification. Stop local
+services with `npm run supabase:stop` when you are finished.
 
 ## Account And Draft Behavior
 

@@ -4,11 +4,11 @@ import {
   cleanupIntegrationFixtures,
   trackIntegrationRateBucket,
   trackIntegrationUser,
-  uniquePhone,
+  uniqueEmail,
 } from "../helpers/integration-fixtures";
 
 const date = "2026-07-23";
-let phoneSeed = 20_000;
+let emailSeed = 20_000;
 
 function entry(version: number | null) {
   return {
@@ -27,13 +27,15 @@ async function registeredSession() {
   const session = new ApiSession(undefined, { "CF-Connecting-IP": ip });
   trackIntegrationRateBucket("register", ip);
   const response = await session.post("/api/auth/register", {
-    phone: uniquePhone(phoneSeed++),
+    email: uniqueEmail(emailSeed++),
     password: "password123",
     avatarKey: 1,
   });
   if (response.status === 201) {
-    const userId = response.body?.data?.profile?.id;
-    if (typeof userId === "string") trackIntegrationUser(userId);
+    const profile = response.body?.data?.profile;
+    if (typeof profile?.id === "string" && typeof profile.email === "string") {
+      trackIntegrationUser(profile.id, profile.email);
+    }
   }
   expect(response.status).toBe(201);
   return session;

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { logout, password, register, waitForClient } from "./helpers";
 
 test("registers, rotates its recovery code, logs in, and recovers", async ({ page }) => {
-  const { code: originalCode, phone } = await register(page);
+  const { code: originalCode, email } = await register(page);
 
   await page.getByRole("button", { name: "打开账户菜单" }).click();
   await page.getByRole("menuitem", { name: "更新恢复码" }).click();
@@ -16,7 +16,7 @@ test("registers, rotates its recovery code, logs in, and recovers", async ({ pag
   await page.getByRole("button", { name: "我已保存" }).click();
 
   await logout(page);
-  await page.getByLabel("手机号").fill(phone);
+  await page.getByLabel("邮箱").fill(email);
   await page.getByLabel("密码", { exact: true }).fill(password);
   await page.getByRole("button", { name: "登录" }).click();
   await expect(page.getByRole("button", { name: "打开账户菜单" })).toBeVisible();
@@ -25,12 +25,12 @@ test("registers, rotates its recovery code, logs in, and recovers", async ({ pag
   await page.getByRole("link", { name: "忘记密码？" }).click();
   await expect(page).toHaveURL(/\/recover$/);
   await waitForClient(page);
-  await page.getByLabel("手机号").fill(phone);
+  await page.getByLabel("邮箱").fill(email);
   await page.getByLabel("恢复码").fill(originalCode);
   await page.getByRole("textbox", { name: "新密码", exact: true }).fill("new-password123");
   await page.getByLabel("确认新密码").fill("new-password123");
   await page.getByRole("button", { name: "重设密码" }).click();
-  await expect(page.getByRole("alert")).toHaveText("手机号或恢复码不正确");
+  await expect(page.getByRole("alert")).toHaveText("邮箱或恢复码不正确");
 
   await page.getByLabel("恢复码").fill(rotatedCode);
   await page.getByRole("button", { name: "重设密码" }).click();
@@ -42,10 +42,10 @@ test("registers, rotates its recovery code, logs in, and recovers", async ({ pag
   await page.getByRole("link", { name: "忘记密码？" }).click();
   await expect(page).toHaveURL(/\/recover$/);
   await waitForClient(page);
-  await page.getByLabel("手机号").fill(phone);
+  await page.getByLabel("邮箱").fill(email);
   await page.getByLabel("恢复码").fill(rotatedCode);
   await page.getByRole("textbox", { name: "新密码", exact: true }).fill("another-password123");
   await page.getByLabel("确认新密码").fill("another-password123");
   await page.getByRole("button", { name: "重设密码" }).click();
-  await expect(page.getByRole("alert")).toHaveText("手机号或恢复码不正确");
+  await expect(page.getByRole("alert")).toHaveText("邮箱或恢复码不正确");
 });

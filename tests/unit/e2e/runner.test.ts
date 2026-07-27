@@ -29,17 +29,17 @@ appendFileSync(process.env.FAKE_NPX_LOG, JSON.stringify(args) + "\\n");
     if (process.env.FAKE_RUN_SCOPE_LOG) {
       appendFileSync(process.env.FAKE_RUN_SCOPE_LOG, process.env.E2E_RUN_SCOPE + "\\n");
     }
-    if (process.env.FAKE_REGISTER_PHONE) {
+    if (process.env.FAKE_REGISTER_EMAIL) {
       const response = await fetch(process.env.FAKE_API_URL + "/test/register", {
-        body: JSON.stringify({ phone: process.env.FAKE_REGISTER_PHONE }),
+        body: JSON.stringify({ email: process.env.FAKE_REGISTER_EMAIL }),
         headers: { "content-type": "application/json" },
         method: "POST",
       });
       if (!response.ok) process.exit(12);
       const { id } = await response.json();
       appendFileSync(
-        process.env.E2E_PHONE_REGISTRY_FILE,
-        JSON.stringify({ userId: id, phone: process.env.FAKE_REGISTER_PHONE }) + "\\n",
+        process.env.E2E_EMAIL_REGISTRY_FILE,
+        JSON.stringify({ userId: id, email: process.env.FAKE_REGISTER_EMAIL }) + "\\n",
       );
     }
     if (process.env.FAKE_PLAYWRIGHT_MARKER) {
@@ -59,21 +59,20 @@ appendFileSync(process.env.FAKE_NPX_LOG, JSON.stringify(args) + "\\n");
 `;
 
 type RunnerResult = { code: number | null; signal: NodeJS.Signals | null; stderr: string; stdout: string };
-type FakeUser = { id: string; phone: string };
+type FakeUser = { id: string; email: string };
 
 const staleUser: FakeUser = {
   id: "00000000-0000-4000-8000-000000000001",
-  phone: "8613910000000",
+  email: "email-1-0000-0-0-0@e2e.daily-attention.invalid",
 };
 const localDeveloper: FakeUser = {
   id: "00000000-0000-4000-8000-000000000002",
-  phone: "8613988888888",
+  email: "local-developer@integration.daily-attention.invalid",
 };
 const createdUserId = "00000000-0000-4000-8000-000000000010";
 
 function ownershipLine(user: FakeUser) {
-  const phone = user.phone.replace(/^86/u, "");
-  return `${JSON.stringify({ userId: user.id, phone })}\n`;
+  return `${JSON.stringify({ userId: user.id, email: user.email })}\n`;
 }
 
 async function fixture(initialUsers: FakeUser[] = []) {
@@ -82,7 +81,7 @@ async function fixture(initialUsers: FakeUser[] = []) {
   const bin = join(directory, "bin");
   const npx = join(bin, "npx");
   const users = new Map(initialUsers.map((user) => [user.id, user]));
-  const deletedPhones: string[] = [];
+  const deletedEmails: string[] = [];
   const cleanup = {
     delayMs: 0,
     marker: "",
@@ -109,7 +108,7 @@ async function fixture(initialUsers: FakeUser[] = []) {
       const id = url.pathname.split("/").at(-1) ?? "";
       const user = users.get(id);
       if (user) {
-        deletedPhones.push(user.phone);
+        deletedEmails.push(user.email);
         users.delete(id);
       }
       response.writeHead(200, { "content-type": "application/json" });
@@ -121,15 +120,15 @@ async function fixture(initialUsers: FakeUser[] = []) {
       request.setEncoding("utf8");
       request.on("data", (chunk) => { body += chunk; });
       request.on("end", () => {
-        const phone = (JSON.parse(body) as { phone: string }).phone;
-        const collision = [...users.values()].some((user) => user.phone === `86${phone}`);
+        const email = (JSON.parse(body) as { email: string }).email;
+        const collision = [...users.values()].some((user) => user.email === email);
         if (collision) {
           response.writeHead(409, { "content-type": "application/json" });
           response.end("{}");
           return;
         }
         const id = `00000000-0000-4000-8000-${String(users.size + 10).padStart(12, "0")}`;
-        users.set(id, { id, phone: `86${phone}` });
+        users.set(id, { id, email });
         response.writeHead(201, { "content-type": "application/json" });
         response.end(JSON.stringify({ id }));
       });
@@ -147,17 +146,17 @@ async function fixture(initialUsers: FakeUser[] = []) {
   await mkdir(bin);
   await writeFile(npx, fakeNpx);
   await chmod(npx, 0o755);
-  const registryDirectory = join(directory, "ai-learning-checkin-phone-auth-e2e-registry");
+  const registryDirectory = join(directory, "ai-learning-checkin-email-auth-e2e-registry");
   return {
     apiUrl,
     cleanup,
-    deletedPhones,
+    deletedEmails,
     directory,
-    lock: join(directory, "ai-learning-checkin-phone-auth-e2e.lock"),
+    lock: join(directory, "ai-learning-checkin-email-auth-e2e.lock"),
     log: join(directory, "npx.log"),
     marker: join(directory, "playwright.pid"),
     registryDirectory,
-    registryFile: join(registryDirectory, "phones"),
+    registryFile: join(registryDirectory, "emails"),
     scopeLog: join(directory, "run-scopes.log"),
     users,
     env: {
@@ -259,17 +258,17 @@ describe("E2E runner isolation", () => {
     expect(scopes[1]).not.toBe(scopes[0]);
   });
 
-  it("fails closed on an unconfirmed reserved-phone collision", async () => {
+  it("fails closed on an unconfirmed reserved-email collision", async () => {
     const setup = await fixture([staleUser]);
-    await writeRegistry(setup, "13910000000\n");
+    await writeRegistry(setup, "email-1-0000-0-0-0@e2e.daily-attention.invalid\n");
 
     const result = await runRunner(setup.env);
 
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain("unconfirmed E2E ownership");
-    expect(setup.deletedPhones).toEqual([]);
+    expect(setup.deletedEmails).toEqual([]);
     expect([...setup.users.values()]).toEqual([staleUser]);
-    expect(await readFile(setup.registryFile, "utf8")).toBe("13910000000\n");
+    expect(await readFile(setup.registryFile, "utf8")).toBe("email-1-0000-0-0-0@e2e.daily-attention.invalid\n");
     expect(await commandLog(setup.log)).toEqual([["supabase", "status", "-o", "env"]]);
   });
 
@@ -279,7 +278,7 @@ describe("E2E runner isolation", () => {
 
     const result = await runRunner({
       ...setup.env,
-      FAKE_REGISTER_PHONE: "13910000001",
+      FAKE_REGISTER_EMAIL: "email-1-0000-0-0-1@e2e.daily-attention.invalid",
     });
 
     expect(result).toMatchObject({ code: 0, signal: null });
@@ -287,7 +286,10 @@ describe("E2E runner isolation", () => {
       ["supabase", "status", "-o", "env"],
       ["playwright", "test"],
     ]);
-    expect(setup.deletedPhones).toEqual(["8613910000000", "8613910000001"]);
+    expect(setup.deletedEmails).toEqual([
+      "email-1-0000-0-0-0@e2e.daily-attention.invalid",
+      "email-1-0000-0-0-1@e2e.daily-attention.invalid",
+    ]);
     expect([...setup.users.values()]).toEqual([localDeveloper]);
     expect(existsSync(setup.registryFile)).toBe(false);
   });
@@ -315,13 +317,72 @@ describe("E2E runner isolation", () => {
 
     expect(rejected.code).not.toBe(0);
     expect(rejected.stderr).toContain("Invalid E2E ownership registry");
-    expect(setup.deletedPhones).toEqual([]);
+    expect(setup.deletedEmails).toEqual([]);
     expect([...setup.users.values()]).toEqual([staleUser, localDeveloper]);
     expect(await commandLog(setup.log)).toEqual([["supabase", "status", "-o", "env"]]);
     expect(await readFile(setup.registryFile, "utf8")).toBe(contents);
 
     await writeRegistry(setup, "");
     expect((await runRunner(setup.env)).code).toBe(0);
+  });
+
+  it("fails closed when one userId is recorded with multiple reserved emails", async () => {
+    const setup = await fixture([staleUser]);
+    await writeRegistry(
+      setup,
+      ownershipLine(staleUser) +
+      '{"userId":"00000000-0000-4000-8000-000000000001","email":"email-1-0000-0-0-1@e2e.daily-attention.invalid"}\n',
+    );
+
+    const rejected = await runRunner(setup.env);
+
+    expect(rejected.code).not.toBe(0);
+    expect(rejected.stderr).toContain("Conflicting E2E ownership registry");
+    expect(setup.deletedEmails).toEqual([]);
+    expect([...setup.users.values()]).toEqual([staleUser]);
+  });
+
+  it("fails closed on a duplicate ownership record", async () => {
+    const setup = await fixture([staleUser]);
+    await writeRegistry(setup, ownershipLine(staleUser) + ownershipLine(staleUser));
+
+    const rejected = await runRunner(setup.env);
+
+    expect(rejected.code).not.toBe(0);
+    expect(rejected.stderr).toContain("Conflicting E2E ownership registry");
+    expect(setup.deletedEmails).toEqual([]);
+    expect([...setup.users.values()]).toEqual([staleUser]);
+  });
+
+  it("fails closed when one reserved email is recorded for multiple userIds", async () => {
+    const setup = await fixture([staleUser]);
+    await writeRegistry(
+      setup,
+      ownershipLine(staleUser) +
+      '{"userId":"00000000-0000-4000-8000-000000000003","email":"email-1-0000-0-0-0@e2e.daily-attention.invalid"}\n',
+    );
+
+    const rejected = await runRunner(setup.env);
+
+    expect(rejected.code).not.toBe(0);
+    expect(rejected.stderr).toContain("Conflicting E2E ownership registry");
+    expect(setup.deletedEmails).toEqual([]);
+    expect([...setup.users.values()]).toEqual([staleUser]);
+  });
+
+  it("fails closed when a registry userId no longer owns its recorded Auth email", async () => {
+    const setup = await fixture([staleUser]);
+    await writeRegistry(
+      setup,
+      '{"userId":"00000000-0000-4000-8000-000000000001","email":"email-1-0000-0-0-1@e2e.daily-attention.invalid"}\n',
+    );
+
+    const rejected = await runRunner(setup.env);
+
+    expect(rejected.code).not.toBe(0);
+    expect(rejected.stderr).toContain("ownership no longer matches");
+    expect(setup.deletedEmails).toEqual([]);
+    expect([...setup.users.values()]).toEqual([staleUser]);
   });
 
   it("rejects a concurrent run before status or cleanup", async () => {
@@ -350,17 +411,17 @@ describe("E2E runner isolation", () => {
     const failed = await runRunner({
       ...setup.env,
       FAKE_PLAYWRIGHT_EXIT: "8",
-      FAKE_REGISTER_PHONE: "13910000000",
+      FAKE_REGISTER_EMAIL: "email-1-0000-0-0-0@e2e.daily-attention.invalid",
     });
 
     expect(failed.code).toBe(8);
     expect(await readFile(setup.registryFile, "utf8")).toBe(
-      ownershipLine({ id: createdUserId, phone: "8613910000000" }),
+      ownershipLine({ id: createdUserId, email: "email-1-0000-0-0-0@e2e.daily-attention.invalid" }),
     );
-    expect([...setup.users.values()].map((user) => user.phone)).toEqual(["8613910000000"]);
+    expect([...setup.users.values()].map((user) => user.email)).toEqual(["email-1-0000-0-0-0@e2e.daily-attention.invalid"]);
 
     expect((await runRunner(setup.env)).code).toBe(0);
-    expect(setup.deletedPhones).toEqual(["8613910000000"]);
+    expect(setup.deletedEmails).toEqual(["email-1-0000-0-0-0@e2e.daily-attention.invalid"]);
     expect(setup.users.size).toBe(0);
     expect(existsSync(setup.registryFile)).toBe(false);
   });
@@ -402,7 +463,7 @@ describe("E2E runner isolation", () => {
       ...setup.env,
       FAKE_PLAYWRIGHT_HOLD_MS: "10000",
       FAKE_PLAYWRIGHT_MARKER: setup.marker,
-      FAKE_REGISTER_PHONE: "13910000000",
+      FAKE_REGISTER_EMAIL: "email-1-0000-0-0-0@e2e.daily-attention.invalid",
     });
     await waitForFile(setup.marker);
     const childPid = Number(await readFile(setup.marker, "utf8"));
@@ -416,7 +477,7 @@ describe("E2E runner isolation", () => {
       expect(isAlive(childPid)).toBe(false);
       expect(existsSync(setup.lock)).toBe(false);
       expect(await readFile(setup.registryFile, "utf8")).toBe(
-        ownershipLine({ id: createdUserId, phone: "8613910000000" }),
+        ownershipLine({ id: createdUserId, email: "email-1-0000-0-0-0@e2e.daily-attention.invalid" }),
       );
       expect((await runRunner(setup.env)).code).toBe(0);
     } finally {

@@ -5,24 +5,24 @@ import {
   cleanupIntegrationFixtures,
   trackIntegrationRateBucket,
   trackIntegrationUser,
-  uniquePhone,
+  uniqueEmail,
 } from "../helpers/integration-fixtures";
 
 const date = "2026-07-23";
-let phoneSeed = 30_000;
+let emailSeed = 30_000;
 
 async function registeredSession() {
   const ip = `storage-${crypto.randomUUID()}`;
   const session = new ApiSession(undefined, { "CF-Connecting-IP": ip });
   trackIntegrationRateBucket("register", ip);
   const response = await session.post("/api/auth/register", {
-    phone: uniquePhone(phoneSeed++),
+    email: uniqueEmail(emailSeed++),
     password: "password123",
     avatarKey: 1,
   });
   expect(response.status).toBe(201);
   const userId = response.body.data.profile.id as string;
-  trackIntegrationUser(userId);
+  trackIntegrationUser(userId, response.body.data.profile.email as string);
   return { session, userId };
 }
 

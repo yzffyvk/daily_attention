@@ -11,10 +11,14 @@ npx supabase status || npm run supabase:start
 npm run supabase:reset
 npm run supabase:types
 git diff --exit-code -- lib/supabase/database.types.ts
-npm test
 npm run lint
 npm run typecheck
+npm run test:unit
+npm run supabase:test
+npm run test:integration
+npm run test:rendered
 npm run test:e2e
+npm run build
 git diff --check
 ```
 
@@ -42,15 +46,15 @@ npx supabase migration list --linked
 
 Read the dry-run output before applying it. Apply only the ordered migrations in `supabase/migrations`; do not modify an already-applied migration or use destructive reset commands against production. Follow a database change with the RLS checks below before directing traffic to the web release.
 
-Before a hosted phone-password release, verify the target project's Auth configuration:
+Before a hosted email-password release, verify the target project's Auth configuration:
 
-1. Enable the Phone provider so existing confirmed phone users can sign in with a password.
-2. Disable public project sign-ups, set the minimum password length to at least 8, and disable anonymous sign-ins.
-3. Do not expose an SMS/OTP registration, verification, resend, or recovery path in the application. Registration must remain exclusively on the server-side Admin API, which creates the phone user with `phone_confirm: true` before completing the profile and recovery-code transaction.
-4. Inspect `GET <NEXT_PUBLIC_SUPABASE_URL>/auth/v1/settings` with the publishable API key as appropriate for the hosted project. Confirm that the public settings report the Phone provider enabled and project sign-ups disabled; do not place the secret key in this request or its evidence.
+1. Enable the Email provider and disable the Phone provider. Phone and SMS are not used by this application; do not configure an SMS provider.
+2. Disable public project sign-ups, set the minimum password length to at least 8, and disable anonymous sign-ins. No SMTP configuration is required because the application does not send account email.
+3. Do not expose an email-confirmation, magic-link, or password-reset-email path in the application. Registration remains exclusively on the server-side Admin API, which creates the email user with `email_confirm: true` before completing the profile and recovery-code transaction.
+4. Inspect `GET <NEXT_PUBLIC_SUPABASE_URL>/auth/v1/settings` with the publishable API key as appropriate for the hosted project. Confirm that the public settings report email enabled, phone disabled, and project sign-ups disabled; do not place the secret key in this request or its evidence.
 5. Repeat the dashboard and settings checks after project cloning, restore, or any Auth configuration change.
 
-The public settings response does not prove every dashboard-only password or anonymous-user control. Record those values from the Auth dashboard separately, retaining no keys, phone numbers, or other credentials.
+The public settings response does not prove every dashboard-only password or anonymous-user control. Record those values from the Auth dashboard separately, retaining no keys or other credentials.
 
 ## Guarded Legacy Account Reset
 
@@ -96,10 +100,10 @@ Apply freezes a deduplicated paginated Auth user snapshot, empties the private `
 
 While writers remain quiesced, complete the cutover in this order:
 
-1. Apply all committed pending phone-password migrations in order and verify linked migration history, the expected phone/profile/recovery schema, RPC grants, and RLS policies.
+1. Apply all committed pending email-password migrations in order and verify linked migration history, the expected email/profile/recovery schema, RPC grants, and RLS policies.
 2. Verify the hosted Auth prerequisites above and confirm that all five Sites runtime variables below are present and non-empty.
 3. Build, save, and deploy the exact reviewed release commit. Do not deploy a different source revision into this cutover.
-4. Run the phone-password registration, login, profile, check-in, and recovery smoke test against that deployment.
+4. Run the email-password registration, login, profile, check-in, and recovery smoke test against that deployment.
 5. Resume writers and public traffic only after reset, migration, exact-release deployment, schema verification, and smoke testing have all succeeded and their sanitized evidence has been reviewed.
 
 If apply exits with `RESET_INCOMPLETE` or `RESET_FAILED`, assume partial mutation:

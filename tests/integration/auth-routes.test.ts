@@ -5,11 +5,11 @@ import {
   cleanupIntegrationFixtures,
   trackIntegrationRateBucket,
   trackIntegrationUser,
-  uniquePhone,
+  uniqueEmail,
 } from "../helpers/integration-fixtures";
 
 const validWrongRecoveryCode = "00000-00000-00000-00000-000000";
-let phoneSeed = 10_000;
+let emailSeed = 10_000;
 
 function fixtureSession() {
   const ip = `integration-${crypto.randomUUID()}`;
@@ -19,15 +19,15 @@ function fixtureSession() {
   };
 }
 
-async function register(session: ApiSession, ip: string, phone: string, avatarKey: number) {
+async function register(session: ApiSession, ip: string, email: string, avatarKey: number) {
   trackIntegrationRateBucket("register", ip);
-  const response = await session.post("/api/auth/register", { phone, password: "password123", avatarKey });
-  if (response.status === 201) trackIntegrationUser(response.body.data.profile.id as string);
+  const response = await session.post("/api/auth/register", { email, password: "password123", avatarKey });
+  if (response.status === 201) trackIntegrationUser(response.body.data.profile.id as string, email);
   return response;
 }
 
-function trackPhoneBucket(action: "login" | "recover", ip: string, phone: string) {
-  trackIntegrationRateBucket(action, `${ip}:${phone}`);
+function trackEmailBucket(action: "login" | "recover", ip: string, email: string) {
+  trackIntegrationRateBucket(action, `${ip}:${email}`);
 }
 
 afterAll(async () => {
@@ -48,7 +48,7 @@ describe("authentication routes", () => {
     });
 
     const { data, error } = await directClient.auth.signUp({
-      email: `${crypto.randomUUID()}@example.test`,
+      email: `integration-${crypto.randomUUID()}@integration.daily-attention.invalid`,
       password: "password123",
     });
 
@@ -59,31 +59,31 @@ describe("authentication routes", () => {
 
   it("registers, logs out, logs in, updates a profile, and rotates recovery credentials", async () => {
     const { ip, session } = fixtureSession();
-    const phone = uniquePhone(phoneSeed++);
-    const registered = await register(session, ip, phone, 4);
+    const email = uniqueEmail(emailSeed++);
+    const registered = await register(session, ip, email, 4);
     expect(registered.status).toBe(201);
     expect(registered.headers.get("Cache-Control")).toBe("private, no-store");
     expect(registered.body.data.recoveryCode.replace(/-/g, "")).toHaveLength(26);
     expect(registered.body.data.profile).toEqual(expect.objectContaining({
-      phone,
+      email,
       displayName: expect.stringMatching(/^Attention_[0-9]{3}$/),
     }));
     const originalRecoveryCode = registered.body.data.recoveryCode as string;
 
     expect((await session.request("/api/me")).status).toBe(200);
-    const duplicatePhone = await register(new ApiSession(undefined, { "CF-Connecting-IP": ip }), ip, phone, 1);
-    expect(duplicatePhone.status).toBe(409);
-    expect(duplicatePhone.headers.get("Cache-Control")).toBe("private, no-store");
-    expect(duplicatePhone.body.error).toMatchObject({
-      code: "PHONE_TAKEN",
-      details: { field: "phone" },
+    const duplicateEmail = await register(new ApiSession(undefined, { "CF-Connecting-IP": ip }), ip, email, 1);
+    expect(duplicateEmail.status).toBe(409);
+    expect(duplicateEmail.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(duplicateEmail.body.error).toMatchObject({
+      code: "EMAIL_TAKEN",
+      details: { field: "email" },
     });
 
     expect((await session.post("/api/auth/logout", {})).status).toBe(200);
-    trackPhoneBucket("login", ip, phone);
-    expect((await session.post("/api/auth/login", { phone, password: "not-the-password" })).status).toBe(401);
-    trackPhoneBucket("login", ip, phone);
-    expect((await session.post("/api/auth/login", { phone, password: "password123" })).status).toBe(200);
+    trackEmailBucket("login", ip, email);
+    expect((await session.post("/api/auth/login", { email, password: "not-the-password" })).status).toBe(401);
+    trackEmailBucket("login", ip, email);
+    expect((await session.post("/api/auth/login", { email, password: "password123" })).status).toBe(200);
 
     const renamed = "测试用户新名称";
     expect(
@@ -103,13 +103,13 @@ describe("authentication routes", () => {
     });
     expect(avatarOnlyAfterRename.status).toBe(200);
     expect(avatarOnlyAfterRename.body.data.profile).toMatchObject({
-      phone,
+      email,
       displayName: renamed,
       avatarKey: 1,
     });
     await session.post("/api/auth/logout", {});
-    trackPhoneBucket("login", ip, phone);
-    expect((await session.post("/api/auth/login", { phone, password: "password123" })).status).toBe(200);
+    trackEmailBucket("login", ip, email);
+    expect((await session.post("/api/auth/login", { email, password: "password123" })).status).toBe(200);
 
     trackIntegrationRateBucket("rotate", registered.body.data.profile.id as string);
     const rotated = await session.post("/api/auth/recovery-code/rotate", { currentPassword: "password123" });
@@ -118,29 +118,29 @@ describe("authentication routes", () => {
     const rotatedRecoveryCode = rotated.body.data.recoveryCode as string;
     await session.post("/api/auth/logout", {});
 
-    trackPhoneBucket("recover", ip, phone);
+    trackEmailBucket("recover", ip, email);
     expect((await session.post("/api/auth/recover", {
-      phone,
+      email,
       recoveryCode: originalRecoveryCode,
       newPassword: "newpassword123",
     })).status).toBe(401);
-    trackPhoneBucket("recover", ip, phone);
+    trackEmailBucket("recover", ip, email);
     expect((await session.post("/api/auth/recover", {
-      phone,
+      email,
       recoveryCode: validWrongRecoveryCode,
       newPassword: "newpassword123",
     })).status).toBe(401);
-    trackPhoneBucket("recover", ip, phone);
+    trackEmailBucket("recover", ip, email);
     const recovered = await session.post("/api/auth/recover", {
-      phone,
+      email,
       recoveryCode: rotatedRecoveryCode,
       newPassword: "newpassword123",
     });
     expect(recovered.status).toBe(200);
     expect(recovered.body.data.recoveryCode.replace(/-/g, "")).toHaveLength(26);
     expect((await session.post("/api/auth/logout", {})).status).toBe(200);
-    trackPhoneBucket("login", ip, phone);
-    expect((await session.post("/api/auth/login", { phone, password: "newpassword123" })).status).toBe(200);
+    trackEmailBucket("login", ip, email);
+    expect((await session.post("/api/auth/login", { email, password: "newpassword123" })).status).toBe(200);
   });
 
   it("validates requests before service calls", async () => {
@@ -167,13 +167,13 @@ describe("authentication routes", () => {
     expect(malformed.body.error).toMatchObject({ code: "VALIDATION_ERROR", details: {} });
     expect(malformed.headers.get("Cache-Control")).toBe("private, no-store");
 
-    const phone = uniquePhone(phoneSeed++);
-    const registered = await register(session, ip, phone, 2);
+    const email = uniqueEmail(emailSeed++);
+    const registered = await register(session, ip, email, 2);
     expect(registered.status).toBe(201);
     const profile = await session.request("/api/me");
     expect(profile.status).toBe(200);
     expect(profile.body.data.profile).toEqual(expect.objectContaining({
-      phone,
+      email,
       displayName: expect.stringMatching(/^Attention_[0-9]{3}$/),
       avatarKey: 2,
     }));
@@ -187,7 +187,7 @@ describe("authentication routes", () => {
     expect(missingPassword.status).toBe(200);
     expect(missingPassword.body.data.profile).toMatchObject({
       id: profile.body.data.profile.id,
-      phone,
+      email,
       displayName,
       avatarKey: 3,
     });
@@ -206,7 +206,7 @@ describe("authentication routes", () => {
     expect(changedAvatar.status).toBe(200);
     expect(changedAvatar.body.data.profile).toMatchObject({
       id: profile.body.data.profile.id,
-      phone,
+      email,
       displayName,
       avatarKey: 4,
     });
@@ -222,20 +222,20 @@ describe("authentication routes", () => {
         method: "POST",
         headers: { ...headers, "X-Forwarded-For": `198.51.100.${attempt}` },
         body: JSON.stringify({
-          phone: uniquePhone(phoneSeed++),
+          email: uniqueEmail(emailSeed++),
           password: "password123",
           avatarKey: 1,
         }),
       });
       expect(response.status).toBe(201);
-      if (response.status === 201) trackIntegrationUser(response.body.data.profile.id as string);
+      if (response.status === 201) trackIntegrationUser(response.body.data.profile.id as string, response.body.data.profile.email as string);
     }
 
     trackIntegrationRateBucket("register", cloudflareIp);
     const spoofedXff = await session.request("/api/auth/register", {
       method: "POST",
       headers: { ...headers, "X-Forwarded-For": "203.0.113.99" },
-      body: JSON.stringify({ phone: uniquePhone(phoneSeed++), password: "password123", avatarKey: 1 }),
+      body: JSON.stringify({ email: uniqueEmail(emailSeed++), password: "password123", avatarKey: 1 }),
     });
     expect(spoofedXff.status).toBe(429);
     expect(spoofedXff.body.error.code).toBe("RATE_LIMITED");
@@ -245,9 +245,9 @@ describe("authentication routes", () => {
     const differentVerifiedIp = await session.request("/api/auth/register", {
       method: "POST",
       headers: { "CF-Connecting-IP": `${cloudflareIp}-different`, "X-Forwarded-For": "203.0.113.99" },
-      body: JSON.stringify({ phone: uniquePhone(phoneSeed++), password: "password123", avatarKey: 1 }),
+      body: JSON.stringify({ email: uniqueEmail(emailSeed++), password: "password123", avatarKey: 1 }),
     });
     expect(differentVerifiedIp.status).toBe(201);
-    if (differentVerifiedIp.status === 201) trackIntegrationUser(differentVerifiedIp.body.data.profile.id as string);
+    if (differentVerifiedIp.status === 201) trackIntegrationUser(differentVerifiedIp.body.data.profile.id as string, differentVerifiedIp.body.data.profile.email as string);
   });
 });

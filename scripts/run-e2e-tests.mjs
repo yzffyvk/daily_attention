@@ -16,11 +16,11 @@ import { localSupabaseBindings } from "./local-supabase-env.mjs";
 
 const command = process.platform === "win32" ? "npx.cmd" : "npx";
 const managedSignals = ["SIGINT", "SIGTERM"];
-const reservedE2EPhone = /^139[1-4][0-9]{7}$/u;
+const reservedE2EEmail = /^email-[1-4]-[0-9]{4}-[0-9]+-[0-9]+-[0-9]+@e2e\.daily-attention\.invalid$/u;
 const userIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const lockPath = join(tmpdir(), "ai-learning-checkin-phone-auth-e2e.lock");
-const registryDirectory = join(tmpdir(), "ai-learning-checkin-phone-auth-e2e-registry");
-const registryFile = join(registryDirectory, "phones");
+const lockPath = join(tmpdir(), "ai-learning-checkin-email-auth-e2e.lock");
+const registryDirectory = join(tmpdir(), "ai-learning-checkin-email-auth-e2e-registry");
+const registryFile = join(registryDirectory, "emails");
 const runScopeFile = join(registryDirectory, "run-scope");
 
 function localApiUrl(value) {
@@ -96,7 +96,7 @@ function ensureRegistryDirectory() {
   mkdirSync(registryDirectory, { mode: 0o700, recursive: true });
   const metadata = lstatSync(registryDirectory);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-    throw new Error(`Invalid E2E phone registry directory: ${registryDirectory}`);
+    throw new Error(`Invalid E2E email registry directory: ${registryDirectory}`);
   }
   chmodSync(registryDirectory, 0o700);
 }
@@ -106,7 +106,7 @@ function readRegistryOwnership() {
   try {
     const metadata = lstatSync(registryFile);
     if (!metadata.isFile() || metadata.isSymbolicLink()) {
-      throw new Error(`Invalid E2E phone registry file: ${registryFile}`);
+      throw new Error(`Invalid E2E email registry file: ${registryFile}`);
     }
     contents = readFileSync(registryFile, "utf8");
   } catch (error) {
@@ -116,7 +116,7 @@ function readRegistryOwnership() {
   if (contents.length === 0) return [];
   const body = contents.endsWith("\n") ? contents.slice(0, -1) : contents;
   const ownership = body.split("\n").map((line) => {
-    if (reservedE2EPhone.test(line)) {
+    if (reservedE2EEmail.test(line)) {
       throw new Error(`Found unconfirmed E2E ownership in registry: ${registryFile}`);
     }
     let value;
@@ -129,29 +129,29 @@ function readRegistryOwnership() {
       !value
       || typeof value !== "object"
       || Array.isArray(value)
-      || Object.keys(value).sort().join(",") !== "phone,userId"
+      || Object.keys(value).sort().join(",") !== "email,userId"
       || typeof value.userId !== "string"
       || !userIdPattern.test(value.userId)
-      || typeof value.phone !== "string"
-      || !reservedE2EPhone.test(value.phone)
+      || typeof value.email !== "string"
+      || !reservedE2EEmail.test(value.email)
     ) {
       throw new Error(`Invalid E2E ownership registry contents: ${registryFile}`);
     }
-    return { userId: value.userId, phone: value.phone };
+    return { userId: value.userId, email: value.email };
   });
   const byUserId = new Map();
-  const byPhone = new Map();
+  const byEmail = new Map();
   for (const entry of ownership) {
     if (
-      (byUserId.has(entry.userId) && byUserId.get(entry.userId) !== entry.phone)
-      || (byPhone.has(entry.phone) && byPhone.get(entry.phone) !== entry.userId)
+      byUserId.has(entry.userId)
+      || byEmail.has(entry.email)
     ) {
       throw new Error(`Conflicting E2E ownership registry contents: ${registryFile}`);
     }
-    byUserId.set(entry.userId, entry.phone);
-    byPhone.set(entry.phone, entry.userId);
+    byUserId.set(entry.userId, entry.email);
+    byEmail.set(entry.email, entry.userId);
   }
-  return [...byUserId].map(([userId, phone]) => ({ userId, phone }));
+  return [...byUserId].map(([userId, email]) => ({ userId, email }));
 }
 
 function removeRegistryFile() {
@@ -198,11 +198,8 @@ function allocateRunScope() {
   return value;
 }
 
-function normalizedReservedPhone(value) {
-  if (typeof value !== "string") return null;
-  const raw = value.startsWith("+") ? value.slice(1) : value;
-  const phone = raw.startsWith("86") ? raw.slice(2) : raw;
-  return reservedE2EPhone.test(phone) ? phone : null;
+function reservedE2EAuthEmail(value) {
+  return typeof value === "string" && reservedE2EEmail.test(value) ? value : null;
 }
 
 async function deleteRegisteredUsers(bindings, apiUrl, ownership) {
@@ -230,8 +227,8 @@ async function deleteRegisteredUsers(bindings, apiUrl, ownership) {
   for (const entry of ownership) {
     const user = usersById.get(entry.userId);
     if (!user) continue;
-    const phone = normalizedReservedPhone(user.phone);
-    if (phone !== entry.phone) {
+    const email = reservedE2EAuthEmail(user.email);
+    if (email !== entry.email) {
       throw new Error(`Local E2E ownership no longer matches user ${entry.userId}.`);
     }
     ownedUsers.push(user);
@@ -308,7 +305,7 @@ async function run() {
     const playwright = await runPlaywright({
       ...process.env,
       ...bindings,
-      E2E_PHONE_REGISTRY_FILE: registryFile,
+      E2E_EMAIL_REGISTRY_FILE: registryFile,
       E2E_RUN_SCOPE: runScope,
       INTEGRATION_TEST_BINDINGS: "true",
     });

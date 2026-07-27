@@ -4,17 +4,17 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import * as e2eHelpers from "../../e2e/helpers";
 
-const { recordE2EOwnership, uniquePhone } = e2eHelpers;
-const registryDirectoryName = "ai-learning-checkin-phone-auth-e2e-registry";
+const { recordE2EEmailOwnership, uniqueEmail } = e2eHelpers;
+const registryDirectoryName = "ai-learning-checkin-email-auth-e2e-registry";
 
 async function registryFixture() {
   const root = await mkdtemp(join(tmpdir(), "e2e-helper-registry-"));
   const registryDirectory = join(root, registryDirectoryName);
-  const registry = join(registryDirectory, "phones");
+  const registry = join(registryDirectory, "emails");
   const previousTmpdir = process.env.TMPDIR;
-  const previousRegistry = process.env.E2E_PHONE_REGISTRY_FILE;
+  const previousRegistry = process.env.E2E_EMAIL_REGISTRY_FILE;
   process.env.TMPDIR = root;
-  process.env.E2E_PHONE_REGISTRY_FILE = registry;
+  process.env.E2E_EMAIL_REGISTRY_FILE = registry;
 
   return {
     registry,
@@ -23,49 +23,51 @@ async function registryFixture() {
     async cleanup() {
       if (previousTmpdir === undefined) delete process.env.TMPDIR;
       else process.env.TMPDIR = previousTmpdir;
-      if (previousRegistry === undefined) delete process.env.E2E_PHONE_REGISTRY_FILE;
-      else process.env.E2E_PHONE_REGISTRY_FILE = previousRegistry;
+      if (previousRegistry === undefined) delete process.env.E2E_EMAIL_REGISTRY_FILE;
+      else process.env.E2E_EMAIL_REGISTRY_FILE = previousRegistry;
       await rm(root, { force: true, recursive: true });
     },
   };
 }
 
-describe("E2E phone allocation", () => {
-  it("assigns non-overlapping legal phones across projects, workers, retries, and calls", () => {
-    const phones = [
-      uniquePhone("flows-desktop", 0, 0, 0, 0),
-      uniquePhone("desktop", 0, 0, 0, 0),
-      uniquePhone("tablet", 0, 0, 0, 0),
-      uniquePhone("mobile", 0, 0, 0, 0),
-      uniquePhone("flows-desktop", 1, 0, 0, 0),
-      uniquePhone("flows-desktop", 0, 1, 0, 0),
-      uniquePhone("flows-desktop", 0, 0, 1, 0),
+describe("E2E email allocation", () => {
+  it("assigns non-overlapping reserved emails across projects, workers, retries, calls, and run scopes", () => {
+    const emails = [
+      uniqueEmail("flows-desktop", 0, 0, 0, 0),
+      uniqueEmail("desktop", 0, 0, 0, 0),
+      uniqueEmail("tablet", 0, 0, 0, 0),
+      uniqueEmail("mobile", 0, 0, 0, 0),
+      uniqueEmail("flows-desktop", 1, 0, 0, 0),
+      uniqueEmail("flows-desktop", 0, 1, 0, 0),
+      uniqueEmail("flows-desktop", 0, 0, 1, 0),
+      uniqueEmail("flows-desktop", 0, 0, 0, 1),
     ];
 
-    expect(phones).toEqual([
-      "13910000000",
-      "13920000000",
-      "13930000000",
-      "13940000000",
-      "13910000100",
-      "13910000010",
-      "13910000001",
+    expect(emails).toEqual([
+      "email-1-0000-0-0-0@e2e.daily-attention.invalid",
+      "email-2-0000-0-0-0@e2e.daily-attention.invalid",
+      "email-3-0000-0-0-0@e2e.daily-attention.invalid",
+      "email-4-0000-0-0-0@e2e.daily-attention.invalid",
+      "email-1-0000-1-0-0@e2e.daily-attention.invalid",
+      "email-1-0000-0-1-0@e2e.daily-attention.invalid",
+      "email-1-0000-0-0-1@e2e.daily-attention.invalid",
+      "email-1-0001-0-0-0@e2e.daily-attention.invalid",
     ]);
-    expect(new Set(phones)).toHaveLength(phones.length);
-    phones.forEach((phone) => expect(phone).toMatch(/^139[0-9]{8}$/));
+    expect(new Set(emails)).toHaveLength(emails.length);
+    emails.forEach((email) => expect(email).toMatch(/^email-[1-4]-[0-9]{4}-[0-9]+-[0-9]+-[0-9]+@e2e\.daily-attention\.invalid$/u));
   });
 
   it("rejects allocation dimensions that cannot fit without overlap", () => {
-    expect(() => uniquePhone("unknown", 0, 0, 0, 0)).toThrow("Unknown E2E project");
-    expect(() => uniquePhone("desktop", 10, 0, 0, 0)).toThrow("workerIndex");
-    expect(() => uniquePhone("desktop", 0, 10, 0, 0)).toThrow("retry");
-    expect(() => uniquePhone("desktop", 0, 0, 10, 0)).toThrow("invocation");
-    expect(() => uniquePhone("desktop", 0, 0, 0, 10_000)).toThrow("runScope");
+    expect(() => uniqueEmail("unknown", 0, 0, 0, 0)).toThrow("Unknown E2E project");
+    expect(() => uniqueEmail("desktop", 10, 0, 0, 0)).toThrow("workerIndex");
+    expect(() => uniqueEmail("desktop", 0, 10, 0, 0)).toThrow("retry");
+    expect(() => uniqueEmail("desktop", 0, 0, 10, 0)).toThrow("invocation");
+    expect(() => uniqueEmail("desktop", 0, 0, 0, 10_000)).toThrow("runScope");
   });
 
   it("isolates the same test allocation across consecutive run scopes", () => {
-    expect(uniquePhone("flows-desktop", 0, 0, 0, 1)).toBe("13910001000");
-    expect(uniquePhone("flows-desktop", 0, 0, 0, 2)).toBe("13910002000");
+    expect(uniqueEmail("flows-desktop", 0, 0, 0, 1)).toBe("email-1-0001-0-0-0@e2e.daily-attention.invalid");
+    expect(uniqueEmail("flows-desktop", 0, 0, 0, 2)).toBe("email-1-0002-0-0-0@e2e.daily-attention.invalid");
   });
 
   it("rejects a symlink registry without changing its target", async () => {
@@ -77,7 +79,7 @@ describe("E2E phone allocation", () => {
       await symlink(target, fixture.registry);
       let failedClosed = false;
       try {
-        recordE2EOwnership("00000000-0000-4000-8000-000000000001", "13910000000");
+        recordE2EEmailOwnership("00000000-0000-4000-8000-000000000001", "email-1-0000-0-0-0@e2e.daily-attention.invalid");
       } catch {
         failedClosed = true;
       }
@@ -93,9 +95,9 @@ describe("E2E phone allocation", () => {
     const fixture = await registryFixture();
     try {
       await mkdir(fixture.registryDirectory);
-      expect(() => recordE2EOwnership(
+      expect(() => recordE2EEmailOwnership(
         "00000000-0000-4000-8000-000000000001",
-        "13910000000",
+        "email-1-0000-0-0-0@e2e.daily-attention.invalid",
       )).toThrow();
       await expect(lstat(fixture.registry)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
@@ -106,12 +108,12 @@ describe("E2E phone allocation", () => {
   it("rejects a registry path outside the runner-owned location", async () => {
     const fixture = await registryFixture();
     const outside = join(fixture.root, "outside");
-    process.env.E2E_PHONE_REGISTRY_FILE = outside;
+    process.env.E2E_EMAIL_REGISTRY_FILE = outside;
     try {
       await writeFile(outside, "unchanged\n");
       let failedClosed = false;
       try {
-        recordE2EOwnership("00000000-0000-4000-8000-000000000001", "13910000000");
+        recordE2EEmailOwnership("00000000-0000-4000-8000-000000000001", "email-1-0000-0-0-0@e2e.daily-attention.invalid");
       } catch {
         failedClosed = true;
       }
@@ -128,12 +130,12 @@ describe("E2E phone allocation", () => {
     try {
       await mkdir(fixture.registryDirectory);
       await writeFile(fixture.registry, "");
-      recordE2EOwnership("00000000-0000-4000-8000-000000000001", "13910000000");
-      recordE2EOwnership("00000000-0000-4000-8000-000000000002", "13920000000");
+      recordE2EEmailOwnership("00000000-0000-4000-8000-000000000001", "email-1-0000-0-0-0@e2e.daily-attention.invalid");
+      recordE2EEmailOwnership("00000000-0000-4000-8000-000000000002", "email-2-0000-0-0-0@e2e.daily-attention.invalid");
 
       expect(await readFile(fixture.registry, "utf8")).toBe(
-        '{"userId":"00000000-0000-4000-8000-000000000001","phone":"13910000000"}\n' +
-        '{"userId":"00000000-0000-4000-8000-000000000002","phone":"13920000000"}\n',
+        '{"userId":"00000000-0000-4000-8000-000000000001","email":"email-1-0000-0-0-0@e2e.daily-attention.invalid"}\n' +
+        '{"userId":"00000000-0000-4000-8000-000000000002","email":"email-2-0000-0-0-0@e2e.daily-attention.invalid"}\n',
       );
     } finally {
       await fixture.cleanup();
@@ -145,15 +147,15 @@ describe("E2E phone allocation", () => {
     try {
       await mkdir(fixture.registryDirectory);
       await writeFile(fixture.registry, "");
-      expect(() => recordE2EOwnership("not-a-user", "13910000000")).toThrow("user ownership");
-      expect(() => recordE2EOwnership(
+      expect(() => recordE2EEmailOwnership("not-a-user", "email-1-0000-0-0-0@e2e.daily-attention.invalid")).toThrow("user ownership");
+      expect(() => recordE2EEmailOwnership(
         "00000000-0000-4000-8000-000000000003",
-        "13988888888",
-      )).toThrow("reserved E2E phone");
-      delete process.env.E2E_PHONE_REGISTRY_FILE;
-      expect(() => recordE2EOwnership(
+        "not-reserved@example.test",
+      )).toThrow("reserved E2E email");
+      delete process.env.E2E_EMAIL_REGISTRY_FILE;
+      expect(() => recordE2EEmailOwnership(
         "00000000-0000-4000-8000-000000000003",
-        "13910000000",
+        "email-1-0000-0-0-0@e2e.daily-attention.invalid",
       )).toThrow("registry");
     } finally {
       await fixture.cleanup();
