@@ -8,9 +8,12 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
+const integrationRunLockHost = "127.0.0.1";
+const integrationRunLockPort = 47653;
 const reservedIntegrationEmail =
   /^integration-[0-9a-f]{16}-[0-9]+@integration\.daily-attention\.invalid$/u;
 const userIdPattern =
@@ -26,7 +29,6 @@ export function integrationRegistryPaths() {
     "ai-learning-checkin-email-auth-integration-registry",
   );
   return {
-    lockPath: join(tmpdir(), "ai-learning-checkin-email-auth-integration.lock"),
     registryDirectory,
     registryFile: join(registryDirectory, "users"),
   };
@@ -48,21 +50,57 @@ export function localIntegrationApiUrl(value) {
   return url;
 }
 
-export function acquireIntegrationRunLock(lockPath) {
+export async function acquireIntegrationRunLock() {
+  const listener = createServer((socket) => socket.destroy());
+  let listenerFailed = false;
+
   try {
-    mkdirSync(lockPath, { mode: 0o700 });
+    await new Promise((resolve, reject) => {
+      const onError = (error) => {
+        listener.off("listening", onListening);
+        reject(error);
+      };
+      const onListening = () => {
+        listener.off("error", onError);
+        listener.on("error", () => {
+          listenerFailed = true;
+        });
+        listener.unref();
+        resolve();
+      };
+
+      listener.once("error", onError);
+      listener.once("listening", onListening);
+      listener.listen({
+        exclusive: true,
+        host: integrationRunLockHost,
+        port: integrationRunLockPort,
+      });
+    });
   } catch (error) {
-    if (error && typeof error === "object" && error.code === "EEXIST") {
+    if (error && typeof error === "object" && error.code === "EADDRINUSE") {
       throw new Error("An integration test run is already active.");
     }
-    throw error;
+    throw new Error("Unable to acquire the integration test run lock.");
   }
 
-  let released = false;
+  let releasePromise;
   return () => {
-    if (released) return;
-    released = true;
-    rmSync(lockPath, { force: true, recursive: true });
+    if (releasePromise) return releasePromise;
+    releasePromise = new Promise((resolve, reject) => {
+      try {
+        listener.close((error) => {
+          if (error || listenerFailed) {
+            reject(new Error("Unable to release the integration test run lock."));
+            return;
+          }
+          resolve();
+        });
+      } catch {
+        reject(new Error("Unable to release the integration test run lock."));
+      }
+    });
+    return releasePromise;
   };
 }
 

@@ -70,8 +70,8 @@ async function waitForServer(url, timeoutMs = 60_000) {
 }
 
 async function main() {
-  const { lockPath, registryFile } = integrationRegistryPaths();
-  const releaseLock = acquireIntegrationRunLock(lockPath);
+  const { registryFile } = integrationRegistryPaths();
+  const releaseLock = await acquireIntegrationRunLock();
   let bindingDirectory;
   let devServer;
   let devServerExited;
@@ -126,10 +126,13 @@ async function main() {
     await cleanupIntegrationUserRegistry(admin, registryFile);
     return exitCode;
   } finally {
-    if (devServer?.exitCode === null) devServer.kill("SIGTERM");
-    if (devServerExited) await devServerExited;
-    if (bindingDirectory) await rm(bindingDirectory, { force: true, recursive: true });
-    releaseLock();
+    try {
+      if (devServer?.exitCode === null) devServer.kill("SIGTERM");
+      if (devServerExited) await devServerExited;
+      if (bindingDirectory) await rm(bindingDirectory, { force: true, recursive: true });
+    } finally {
+      await releaseLock();
+    }
   }
 }
 

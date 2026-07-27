@@ -4,7 +4,9 @@ import { spawn } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { acquireIntegrationRunLock } from "../../scripts/integration-user-registry.mjs";
 
 const temporaryDirectories = new Set<string>();
 
@@ -22,11 +24,14 @@ async function waitForFile(path: string, timeoutMs = 10_000) {
 }
 
 function childResult(child: ReturnType<typeof spawn>) {
-  return new Promise<{ code: number | null; stderr: string }>((resolve) => {
+  return new Promise<{ code: number | null; stderr: string; stdout: string }>((resolve) => {
     let stderr = "";
+    let stdout = "";
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk) => { stderr += chunk; });
-    child.once("exit", (code) => resolve({ code, stderr }));
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => { stdout += chunk; });
+    child.once("exit", (code) => resolve({ code, stderr, stdout }));
   });
 }
 
@@ -182,5 +187,84 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
     expect(secondOutcome.code).toBe(1);
     expect(secondOutcome.stderr).toContain("An integration test run is already active.");
     expect(secondOutcome.stderr).not.toContain("@integration.daily-attention.invalid");
+    expect(secondOutcome.stderr).not.toContain("local-secret");
+  });
+
+  it("awaits integration lock release and makes repeated release idempotent", async () => {
+    const release = await acquireIntegrationRunLock();
+
+    await Promise.all([release(), release()]);
+
+    const releaseNext = await acquireIntegrationRunLock();
+    await releaseNext();
+  });
+
+  it("releases the integration lock when its process exits without cleanup", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "integration-runner-exit-lock-test-"));
+    temporaryDirectories.add(directory);
+    const bin = join(directory, "bin");
+    await mkdir(bin);
+    await writeFile(join(bin, "npx"), `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[0] === "supabase" && args[1] === "status") {
+  console.log('API_URL="http://127.0.0.1:54321"');
+  console.log('PUBLISHABLE_KEY="local-publishable"');
+  console.log('SECRET_KEY="local-secret"');
+  process.exit(0);
+}
+if (args[0] === "vitest") process.exit(0);
+process.exit(2);
+`);
+    await writeFile(join(bin, "npm"), `#!/usr/bin/env node
+const { createServer } = require("node:http");
+const server = createServer((_request, response) => {
+  response.writeHead(200);
+  response.end("ready");
+});
+server.listen(3100, "127.0.0.1");
+process.on("SIGTERM", () => server.close(() => process.exit(0)));
+`);
+    await Promise.all([
+      chmod(join(bin, "npx"), 0o755),
+      chmod(join(bin, "npm"), 0o755),
+    ]);
+
+    const registryModuleUrl = pathToFileURL(
+      join(process.cwd(), "scripts/integration-user-registry.mjs"),
+    ).href;
+    const abandonedHolder = spawn(process.execPath, [
+      "--input-type=module",
+      "-e",
+      `import { acquireIntegrationRunLock } from ${JSON.stringify(registryModuleUrl)}; await acquireIntegrationRunLock();`,
+    ], {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const abandonedOutcome = await childResult(abandonedHolder);
+
+    expect(abandonedOutcome.code).toBe(0);
+    expect(`${abandonedOutcome.stdout}${abandonedOutcome.stderr}`).not.toContain(
+      "@integration.daily-attention.invalid",
+    );
+    expect(`${abandonedOutcome.stdout}${abandonedOutcome.stderr}`).not.toContain("local-secret");
+
+    const nextRun = spawn(process.execPath, ["scripts/run-integration-tests.mjs"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH ?? ""}`,
+        TMPDIR: directory,
+        TMP: directory,
+        TEMP: directory,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const nextOutcome = await childResult(nextRun);
+
+    expect(nextOutcome.code).toBe(0);
+    expect(`${nextOutcome.stdout}${nextOutcome.stderr}`).not.toContain(
+      "@integration.daily-attention.invalid",
+    );
+    expect(`${nextOutcome.stdout}${nextOutcome.stderr}`).not.toContain("local-secret");
   });
 });
