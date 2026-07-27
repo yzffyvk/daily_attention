@@ -28,6 +28,12 @@ const reservedE2EEmail = /^email-[1-4]-[0-9]{4}-[0-9]+-[0-9]+-[0-9]+@e2e\.daily-
 const userIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const registryDirectoryName = "ai-learning-checkin-email-auth-e2e-registry";
 
+export function assertReservedE2EEmail(email: string) {
+  if (!reservedE2EEmail.test(email)) {
+    throw new Error("Cannot use a non-reserved E2E email");
+  }
+}
+
 function emailPart(value: number, width: number, label: string) {
   if (!Number.isSafeInteger(value) || value < 0 || value >= 10 ** width) {
     throw new Error(`${label} must fit in ${width} decimal digits`);
@@ -51,9 +57,7 @@ export function recordE2EEmailOwnership(userId: string, email: string) {
   if (!userIdPattern.test(userId)) {
     throw new Error("Cannot record invalid E2E user ownership");
   }
-  if (!reservedE2EEmail.test(email)) {
-    throw new Error("Cannot record non-reserved E2E email");
-  }
+  assertReservedE2EEmail(email);
   const registry = process.env.E2E_EMAIL_REGISTRY_FILE;
   const registryDirectory = join(tmpdir(), registryDirectoryName);
   const expectedRegistry = join(registryDirectory, "emails");
@@ -125,14 +129,17 @@ function e2eClientIp(email: string) {
 }
 
 export async function register(page: Page, email?: string) {
-  const testInfo = test.info();
-  const allocatedEmail = email ?? uniqueEmail(
-    testInfo.project.name,
-    testInfo.workerIndex,
-    testInfo.retry,
-    registrationSequence++,
-    currentRunScope(),
-  );
+  const allocatedEmail = email ?? (() => {
+    const testInfo = test.info();
+    return uniqueEmail(
+      testInfo.project.name,
+      testInfo.workerIndex,
+      testInfo.retry,
+      registrationSequence++,
+      currentRunScope(),
+    );
+  })();
+  assertReservedE2EEmail(allocatedEmail);
   await page.context().setExtraHTTPHeaders({ "CF-Connecting-IP": e2eClientIp(allocatedEmail) });
   await page.goto("/register", { waitUntil: "load" });
   await waitForClient(page);

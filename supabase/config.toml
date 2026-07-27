@@ -231,6 +231,10 @@ otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 3600
 
+[auth.sms]
+enable_signup = false
+enable_confirmations = false
+
 # Use a production-ready SMTP server
 # [auth.email.smtp]
 # enabled = true

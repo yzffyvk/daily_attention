@@ -86,9 +86,21 @@ async function fixture(initialUsers: FakeUser[] = []) {
     delayMs: 0,
     marker: "",
   };
+  const authSettings = {
+    disable_signup: true,
+    external: {
+      email: true,
+      phone: false,
+    },
+  };
 
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    if (request.method === "GET" && url.pathname === "/auth/v1/settings") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(authSettings));
+      return;
+    }
     if (request.method === "GET" && url.pathname === "/auth/v1/admin/users") {
       if (cleanup.marker) void writeFile(cleanup.marker, "cleanup");
       const page = Number(url.searchParams.get("page") || 1);
@@ -150,6 +162,7 @@ async function fixture(initialUsers: FakeUser[] = []) {
   return {
     apiUrl,
     cleanup,
+    authSettings,
     deletedEmails,
     directory,
     lock: join(directory, "ai-learning-checkin-email-auth-e2e.lock"),
@@ -308,6 +321,21 @@ describe("E2E runner isolation", () => {
     expect((await runRunner(setup.env)).code).toBe(0);
   });
 
+  it("fails closed before cleanup or Playwright when local Auth settings enable phone or signups", async () => {
+    const setup = await fixture([staleUser]);
+    setup.authSettings.external.phone = true;
+    setup.authSettings.disable_signup = false;
+    await writeRegistry(setup, ownershipLine(staleUser));
+
+    const rejected = await runRunner(setup.env);
+
+    expect(rejected.code).not.toBe(0);
+    expect(rejected.stderr).toContain("Local Supabase Auth settings do not meet the E2E release gate");
+    expect(setup.deletedEmails).toEqual([]);
+    expect([...setup.users.values()]).toEqual([staleUser]);
+    expect(await commandLog(setup.log)).toEqual([["supabase", "status", "-o", "env"]]);
+  });
+
   it("fails closed on a corrupted registry without deleting users or starting Playwright", async () => {
     const setup = await fixture([staleUser, localDeveloper]);
     const contents = `${ownershipLine(staleUser)}not-an-ownership-record\n`;
@@ -372,15 +400,19 @@ describe("E2E runner isolation", () => {
 
   it("fails closed when a registry userId no longer owns its recorded Auth email", async () => {
     const setup = await fixture([staleUser]);
+    const mismatchedEmail = "email-1-0000-0-0-1@e2e.daily-attention.invalid";
     await writeRegistry(
       setup,
-      '{"userId":"00000000-0000-4000-8000-000000000001","email":"email-1-0000-0-0-1@e2e.daily-attention.invalid"}\n',
+      `{"userId":"${staleUser.id}","email":"${mismatchedEmail}"}\n`,
     );
 
     const rejected = await runRunner(setup.env);
 
     expect(rejected.code).not.toBe(0);
     expect(rejected.stderr).toContain("ownership no longer matches");
+    expect(rejected.stderr).not.toContain(staleUser.id);
+    expect(rejected.stderr).not.toContain(staleUser.email);
+    expect(rejected.stderr).not.toContain(mismatchedEmail);
     expect(setup.deletedEmails).toEqual([]);
     expect([...setup.users.values()]).toEqual([staleUser]);
   });

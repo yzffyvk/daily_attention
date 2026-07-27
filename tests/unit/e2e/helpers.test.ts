@@ -1,10 +1,11 @@
 import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Page } from "@playwright/test";
 import { describe, expect, it } from "vitest";
 import * as e2eHelpers from "../../e2e/helpers";
 
-const { recordE2EEmailOwnership, uniqueEmail } = e2eHelpers;
+const { recordE2EEmailOwnership, register, uniqueEmail } = e2eHelpers;
 const registryDirectoryName = "ai-learning-checkin-email-auth-e2e-registry";
 
 async function registryFixture() {
@@ -160,5 +161,11 @@ describe("E2E email allocation", () => {
     } finally {
       await fixture.cleanup();
     }
+  });
+
+  it("rejects a non-reserved email before it touches the page or registry", async () => {
+    await expect(register({} as Page, "not-a-reserved-shape@e2e.daily-attention.invalid"))
+      .rejects
+      .toThrow("reserved E2E email");
   });
 });

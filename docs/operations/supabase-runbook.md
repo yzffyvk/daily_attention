@@ -4,10 +4,12 @@ This service uses Supabase for authentication, PostgreSQL records, and private S
 
 ## Local Release Gate
 
-From the repository root, start the local stack when it is not already running:
+From the repository root, after any `supabase/config.toml` Auth change, stop and
+start the local stack so Auth does not retain stale provider settings:
 
 ```sh
-npx supabase status || npm run supabase:start
+npx supabase stop --no-backup
+npm run supabase:start
 npm run supabase:reset
 npm run supabase:types
 git diff --exit-code -- lib/supabase/database.types.ts
@@ -22,7 +24,7 @@ npm run build
 git diff --check
 ```
 
-`supabase:reset` reapplies every migration and `supabase/seed.sql`. `supabase:types` must produce a deterministic update; inspect and commit a changed `lib/supabase/database.types.ts` only when the migration schema requires it. The E2E runner reads local credentials from `supabase status -o env`, starts its own application server on `127.0.0.1:3200`, and stops that server when finished. It never reuses or stops a process on port 3000.
+`supabase:reset` reapplies every migration and `supabase/seed.sql`, but does not reload Auth provider configuration. `supabase:types` must produce a deterministic update; inspect and commit a changed `lib/supabase/database.types.ts` only when the migration schema requires it. Before Playwright starts, `npm run test:e2e` makes a sanitized local `/auth/v1/settings` assertion using the locally sourced publishable key: Email ON, Phone OFF, and public signup OFF. It prints neither the key nor the response body. The E2E runner starts its own application server on `127.0.0.1:3200`, and stops that server when finished. It never reuses or stops a process on port 3000.
 
 To stop only a Supabase stack started for this repository:
 

@@ -37,6 +37,38 @@ function localApiUrl(value) {
   return url;
 }
 
+async function verifyLocalAuthSettings(bindings, apiUrl) {
+  let response;
+  try {
+    response = await fetch(new URL("/auth/v1/settings", apiUrl), {
+      headers: { apikey: bindings.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY },
+    });
+  } catch {
+    throw new Error("Unable to verify local Supabase Auth settings.");
+  }
+  if (!response.ok) {
+    throw new Error("Unable to verify local Supabase Auth settings.");
+  }
+
+  let settings;
+  try {
+    settings = await response.json();
+  } catch {
+    throw new Error("Unable to verify local Supabase Auth settings.");
+  }
+  if (
+    !settings
+    || typeof settings !== "object"
+    || !settings.external
+    || typeof settings.external !== "object"
+    || settings.external.email !== true
+    || settings.external.phone !== false
+    || settings.disable_signup !== true
+  ) {
+    throw new Error("Local Supabase Auth settings do not meet the E2E release gate.");
+  }
+}
+
 function processIsAlive(pid) {
   try {
     process.kill(pid, 0);
@@ -229,7 +261,7 @@ async function deleteRegisteredUsers(bindings, apiUrl, ownership) {
     if (!user) continue;
     const email = reservedE2EAuthEmail(user.email);
     if (email !== entry.email) {
-      throw new Error(`Local E2E ownership no longer matches user ${entry.userId}.`);
+      throw new Error("Local E2E ownership no longer matches the current Auth email.");
     }
     ownedUsers.push(user);
   }
@@ -292,6 +324,7 @@ async function run() {
 
     const bindings = localSupabaseBindings();
     const apiUrl = localApiUrl(bindings.NEXT_PUBLIC_SUPABASE_URL);
+    await verifyLocalAuthSettings(bindings, apiUrl);
     if (receivedSignal) return signalExitCode(receivedSignal);
 
     ensureRegistryDirectory();
