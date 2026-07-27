@@ -26,6 +26,8 @@ git diff --check
 
 `supabase:reset` reapplies every migration and `supabase/seed.sql`, but does not reload Auth provider configuration. `supabase:types` must produce a deterministic update; inspect and commit a changed `lib/supabase/database.types.ts` only when the migration schema requires it. Before Playwright starts, `npm run test:e2e` makes a sanitized local `/auth/v1/settings` assertion using the locally sourced publishable key: Email ON, Phone OFF, and public signup OFF. It prints neither the key nor the response body. The E2E runner starts its own application server on `127.0.0.1:3200`, and stops that server when finished. It never reuses or stops a process on port 3000.
 
+A retained local E2E ownership registry can contain runner-owned `deleting` checkpoints after a partial cleanup. Resume cleanup only by running the standard `npm run test:e2e` command again after resolving the original failure. Do not edit or discard the registry manually: the runner removes each checkpoint only after it proves that the exact owned Auth user and Storage objects are absent.
+
 To stop only a Supabase stack started for this repository:
 
 ```sh

@@ -5,6 +5,7 @@ import * as integrationFixtures from "../helpers/integration-fixtures";
 const runScope = "0000000000000001";
 const expectedEmail = `integration-${runScope}-10000@integration.daily-attention.invalid`;
 const userId = "00000000-0000-4000-8000-000000000001";
+const otherUserId = "00000000-0000-4000-8000-000000000002";
 let previousScope: string | undefined;
 
 beforeEach(() => {
@@ -18,7 +19,7 @@ afterEach(() => {
 });
 
 function fixtureExports() {
-  return integrationFixtures as typeof integrationFixtures & {
+  return integrationFixtures as unknown as {
     confirmIntegrationAuthOwnership?: (
       user: { id?: unknown; email?: unknown },
       email: string,
@@ -31,12 +32,45 @@ function fixtureExports() {
               data: { user: { id: string; email: string } | null };
               error: null;
             }>;
-            deleteUser: (ownedUserId: string) => Promise<{ error: null }>;
+            deleteUser: (ownedUserId: string) => Promise<{
+              data: { user: { id: string; email?: string } | null } | null;
+              error: null;
+            }>;
+            listUsers: (parameters: { page: number; perPage: number }) => Promise<{
+              data: { users: Array<{ id: string; email?: string }> };
+              error: null;
+            }>;
           };
         };
       },
       ownership: ReadonlyArray<{ userId: string; email: string }>,
     ) => Promise<void>;
+  };
+}
+
+type DeleteResponse = {
+  data: { user: { id: string; email?: string } | null } | null;
+  error: null;
+};
+
+function cleanupAdmin(
+  deleteResponse: DeleteResponse,
+  usersAfterDelete: Array<{ id: string; email?: string }> = [],
+) {
+  return {
+    auth: {
+      admin: {
+        getUserById: vi.fn().mockResolvedValue({
+          data: { user: { id: userId, email: expectedEmail } },
+          error: null,
+        }),
+        deleteUser: vi.fn().mockResolvedValue(deleteResponse),
+        listUsers: vi.fn().mockResolvedValue({
+          data: { users: usersAfterDelete },
+          error: null,
+        }),
+      },
+    },
   };
 }
 
@@ -67,25 +101,12 @@ describe("integration fixture ownership", () => {
     expect(typeof deleteOwnedUsers).toBe("function");
     if (!deleteOwnedUsers) return;
 
-    let deleteCount = 0;
-    const admin = {
-      auth: {
-        admin: {
-          getUserById: vi.fn().mockResolvedValue({
-            data: { user: { id: userId, email: expectedEmail } },
-            error: null,
-          }),
-          deleteUser: vi.fn().mockImplementation(async () => {
-            deleteCount += 1;
-            return { error: null };
-          }),
-        },
-      },
-    };
+    const admin = cleanupAdmin({
+      data: { user: { id: userId, email: expectedEmail } },
+      error: null,
+    });
 
     await deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]);
-
-    expect(deleteCount).toBe(1);
   });
 
   it("refuses deletion when Admin readback does not exactly match ownership", async () => {
@@ -108,8 +129,12 @@ describe("integration fixture ownership", () => {
           }),
           deleteUser: vi.fn().mockImplementation(async () => {
             deleteCount += 1;
-            return { error: null };
+            return {
+              data: { user: { id: userId, email: expectedEmail } },
+              error: null,
+            };
           }),
+          listUsers: vi.fn().mockResolvedValue({ data: { users: [] }, error: null }),
         },
       },
     };
@@ -118,6 +143,78 @@ describe("integration fixture ownership", () => {
       deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),
     ).rejects.toThrow("Integration cleanup ownership does not match the current Auth user");
     expect(deleteCount).toBe(0);
+  });
+
+  it("rejects a successful integration delete response with a null user", async () => {
+    const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
+    expect(typeof deleteOwnedUsers).toBe("function");
+    if (!deleteOwnedUsers) return;
+    const admin = cleanupAdmin({ data: { user: null }, error: null });
+
+    await expect(
+      deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),
+    ).rejects.toThrow("Integration Auth delete response does not match verified ownership");
+  });
+
+  it("rejects a malformed successful integration delete response", async () => {
+    const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
+    expect(typeof deleteOwnedUsers).toBe("function");
+    if (!deleteOwnedUsers) return;
+    const admin = cleanupAdmin({ data: null, error: null });
+
+    await expect(
+      deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),
+    ).rejects.toThrow("Integration Auth delete response does not match verified ownership");
+  });
+
+  it("rejects a successful integration delete response with a different user ID", async () => {
+    const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
+    expect(typeof deleteOwnedUsers).toBe("function");
+    if (!deleteOwnedUsers) return;
+    const admin = cleanupAdmin({
+      data: { user: { id: otherUserId, email: expectedEmail } },
+      error: null,
+    });
+
+    await expect(
+      deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),
+    ).rejects.toThrow("Integration Auth delete response does not match verified ownership");
+  });
+
+  it("rejects a successful integration delete response with a different email", async () => {
+    const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
+    expect(typeof deleteOwnedUsers).toBe("function");
+    if (!deleteOwnedUsers) return;
+    const admin = cleanupAdmin({
+      data: {
+        user: {
+          id: userId,
+          email: `integration-${runScope}-10001@integration.daily-attention.invalid`,
+        },
+      },
+      error: null,
+    });
+
+    await expect(
+      deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),
+    ).rejects.toThrow("Integration Auth delete response does not match verified ownership");
+  });
+
+  it("rejects integration cleanup when a fresh Admin list still contains the deleted user", async () => {
+    const deleteOwnedUsers = fixtureExports().deleteOwnedIntegrationUsers;
+    expect(typeof deleteOwnedUsers).toBe("function");
+    if (!deleteOwnedUsers) return;
+    const admin = cleanupAdmin(
+      {
+        data: { user: { id: userId, email: expectedEmail } },
+        error: null,
+      },
+      [{ id: userId, email: expectedEmail }],
+    );
+
+    await expect(
+      deleteOwnedUsers(admin, [{ userId, email: expectedEmail }]),
+    ).rejects.toThrow("Integration Auth cleanup did not complete");
   });
 
   it("isolates the same counter across runner-provided scopes", () => {

@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { randomInt } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import {
   chmodSync,
   lstatSync,
@@ -165,7 +165,13 @@ function readRegistryOwnership() {
       !value
       || typeof value !== "object"
       || Array.isArray(value)
-      || Object.keys(value).sort().join(",") !== "email,userId"
+      || (
+        Object.keys(value).sort().join(",") !== "email,userId"
+        && (
+          Object.keys(value).sort().join(",") !== "email,state,userId"
+          || value.state !== "deleting"
+        )
+      )
       || typeof value.userId !== "string"
       || !userIdPattern.test(value.userId)
       || typeof value.email !== "string"
@@ -173,7 +179,9 @@ function readRegistryOwnership() {
     ) {
       throw new Error(`Invalid E2E ownership registry contents: ${registryFile}`);
     }
-    return { userId: value.userId, email: value.email };
+    return value.state === "deleting"
+      ? { userId: value.userId, email: value.email, state: "deleting" }
+      : { userId: value.userId, email: value.email };
   });
   const byUserId = new Map();
   const byEmail = new Map();
@@ -187,11 +195,57 @@ function readRegistryOwnership() {
     byUserId.set(entry.userId, entry.email);
     byEmail.set(entry.email, entry.userId);
   }
-  return [...byUserId].map(([userId, email]) => ({ userId, email }));
+  return ownership;
 }
 
 function removeRegistryFile() {
-  rmSync(registryFile, { force: true });
+  try {
+    const metadata = lstatSync(registryFile);
+    if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      throw new Error(`Invalid E2E email registry file: ${registryFile}`);
+    }
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return;
+    throw error;
+  }
+  rmSync(registryFile);
+}
+
+function serializeRegistryOwnership(ownership) {
+  return `${ownership.map((entry) => JSON.stringify(
+    entry.state === "deleting"
+      ? { userId: entry.userId, email: entry.email, state: "deleting" }
+      : { userId: entry.userId, email: entry.email },
+  )).join("\n")}\n`;
+}
+
+function checkpointRegistryOwnership(ownership) {
+  if (ownership.length === 0) {
+    removeRegistryFile();
+    return;
+  }
+
+  ensureRegistryDirectory();
+  const temporaryFile = join(
+    registryDirectory,
+    `emails.${process.pid}.${randomUUID()}.tmp`,
+  );
+  try {
+    writeFileSync(temporaryFile, serializeRegistryOwnership(ownership), {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+    chmodSync(temporaryFile, 0o600);
+
+    const metadata = lstatSync(registryFile);
+    if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      throw new Error(`Invalid E2E email registry file: ${registryFile}`);
+    }
+    renameSync(temporaryFile, registryFile);
+  } finally {
+    rmSync(temporaryFile, { force: true });
+  }
 }
 
 function createRegistryFile() {
@@ -335,8 +389,60 @@ async function removeOwnedStoragePaths(admin, paths) {
   }
 }
 
+async function listLocalE2EUsers(admin) {
+  const users = [];
+  for (let page = 1; ; page += 1) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw new Error("Unable to list local E2E users.");
+    if (
+      !data
+      || !Array.isArray(data.users)
+      || data.users.some((user) => (
+        !user
+        || typeof user !== "object"
+        || Array.isArray(user)
+        || typeof user.id !== "string"
+        || !userIdPattern.test(user.id)
+      ))
+    ) {
+      throw new Error("Local Supabase returned an invalid E2E user list.");
+    }
+    users.push(...data.users);
+    if (data.users.length < 1000) return users;
+  }
+}
+
+function confirmCurrentAuthUser(users, entry, allowMissing) {
+  const user = users.find((candidate) => candidate?.id === entry.userId);
+  if (!user) {
+    if (allowMissing) return null;
+    throw new Error("Local E2E ownership cannot be verified against Auth.");
+  }
+  const email = reservedE2EAuthEmail(user.email);
+  if (email !== entry.email) {
+    throw new Error("Local E2E ownership no longer matches the current Auth email.");
+  }
+  return user;
+}
+
+function confirmDeleteResponse(response, entry) {
+  if (response?.error) throw new Error("Unable to delete a local E2E user.");
+  const deletedUser = response?.data?.user;
+  if (
+    !deletedUser
+    || deletedUser.id !== entry.userId
+    || reservedE2EAuthEmail(deletedUser.email) !== entry.email
+  ) {
+    throw new Error("Local E2E Auth delete response did not match verified ownership.");
+  }
+}
+
 async function deleteRegisteredUsers(bindings, apiUrl, ownership, shouldStop) {
-  if (ownership.length === 0) return !shouldStop();
+  if (ownership.length === 0) {
+    if (shouldStop()) return false;
+    checkpointRegistryOwnership(ownership);
+    return true;
+  }
   const admin = createClient(apiUrl.origin, bindings.SUPABASE_SECRET_KEY, {
     auth: {
       autoRefreshToken: false,
@@ -344,52 +450,55 @@ async function deleteRegisteredUsers(bindings, apiUrl, ownership, shouldStop) {
       persistSession: false,
     },
   });
-  const users = [];
-  for (let page = 1; ; page += 1) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
-    if (error) throw new Error("Unable to list local E2E users.");
-    if (!data || !Array.isArray(data.users)) {
-      throw new Error("Local Supabase returned an invalid E2E user list.");
-    }
-    users.push(...data.users);
+  let remaining = ownership;
+  while (remaining.length > 0) {
     if (shouldStop()) return false;
-    if (data.users.length < 1000) break;
-  }
+    let entry = remaining[0];
 
-  const usersById = new Map(users.map((user) => [user.id, user]));
-  const ownedUsers = [];
-  for (const entry of ownership) {
-    const user = usersById.get(entry.userId);
-    if (!user) {
-      throw new Error("Local E2E ownership cannot be verified against Auth.");
-    }
-    const email = reservedE2EAuthEmail(user.email);
-    if (email !== entry.email) {
-      throw new Error("Local E2E ownership no longer matches the current Auth email.");
-    }
-    ownedUsers.push(user);
-  }
-  if (shouldStop()) return false;
+    if (entry.state !== "deleting") {
+      confirmCurrentAuthUser(await listLocalE2EUsers(admin), entry, false);
+      if (shouldStop()) return false;
 
-  const storagePathsByUserId = new Map();
-  for (const user of ownedUsers) {
-    storagePathsByUserId.set(user.id, await listOwnedStoragePaths(user.id));
-    if (shouldStop()) return false;
-  }
-  for (const user of ownedUsers) {
-    if (shouldStop()) return false;
-    const paths = storagePathsByUserId.get(user.id);
-    await removeOwnedStoragePaths(admin, paths);
-    if ((await listOwnedStoragePaths(user.id)).length !== 0) {
-      throw new Error("Local E2E Storage cleanup did not complete.");
-    }
-    if (shouldStop()) return false;
-  }
+      const paths = await listOwnedStoragePaths(entry.userId);
+      if (shouldStop()) return false;
+      await removeOwnedStoragePaths(admin, paths);
+      if ((await listOwnedStoragePaths(entry.userId)).length !== 0) {
+        throw new Error("Local E2E Storage cleanup did not complete.");
+      }
+      if (shouldStop()) return false;
 
-  if (shouldStop()) return false;
-  for (const user of ownedUsers) {
-    const { error } = await admin.auth.admin.deleteUser(user.id);
-    if (error) throw new Error("Unable to delete a local E2E user.");
+      entry = { userId: entry.userId, email: entry.email, state: "deleting" };
+      remaining = [entry, ...remaining.slice(1)];
+      checkpointRegistryOwnership(remaining);
+    } else {
+      if ((await listOwnedStoragePaths(entry.userId)).length !== 0) {
+        throw new Error("Local E2E Storage cleanup did not complete.");
+      }
+      if (shouldStop()) return false;
+    }
+
+    const currentUser = confirmCurrentAuthUser(
+      await listLocalE2EUsers(admin),
+      entry,
+      true,
+    );
+    if (shouldStop()) return false;
+    if (currentUser) {
+      let response;
+      try {
+        response = await admin.auth.admin.deleteUser(entry.userId);
+      } catch {
+        throw new Error("Local E2E Auth delete response did not match verified ownership.");
+      }
+      confirmDeleteResponse(response, entry);
+      const usersAfterDelete = await listLocalE2EUsers(admin);
+      if (usersAfterDelete.some((user) => user?.id === entry.userId)) {
+        throw new Error("Local E2E Auth cleanup did not complete.");
+      }
+    }
+
+    remaining = remaining.slice(1);
+    checkpointRegistryOwnership(remaining);
   }
   return true;
 }
@@ -459,7 +568,6 @@ async function run() {
       () => Boolean(receivedSignal),
     );
     if (!staleCleanupComplete) return signalExitCode(receivedSignal);
-    removeRegistryFile();
     if (receivedSignal) return signalExitCode(receivedSignal);
     createRegistryFile();
 
@@ -483,7 +591,6 @@ async function run() {
       () => Boolean(receivedSignal),
     );
     if (!currentCleanupComplete) return signalExitCode(receivedSignal);
-    removeRegistryFile();
     if (receivedSignal) return signalExitCode(receivedSignal);
     return 0;
   } finally {

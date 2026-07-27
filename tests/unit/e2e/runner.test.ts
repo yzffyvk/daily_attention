@@ -2,7 +2,7 @@
 
 import { spawn } from "node:child_process";
 import { constants, existsSync } from "node:fs";
-import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -84,6 +84,10 @@ const staleUser: FakeUser = {
   id: "00000000-0000-4000-8000-000000000001",
   email: "email-1-0000-0-0-0@e2e.daily-attention.invalid",
 };
+const secondStaleUser: FakeUser = {
+  id: "00000000-0000-4000-8000-000000000003",
+  email: "email-1-0000-0-0-1@e2e.daily-attention.invalid",
+};
 const localDeveloper: FakeUser = {
   id: "00000000-0000-4000-8000-000000000002",
   email: "local-developer@integration.daily-attention.invalid",
@@ -92,6 +96,10 @@ const createdUserId = "00000000-0000-4000-8000-000000000010";
 
 function ownershipLine(user: FakeUser) {
   return `${JSON.stringify({ userId: user.id, email: user.email })}\n`;
+}
+
+function deletingOwnershipLine(user: FakeUser) {
+  return `${JSON.stringify({ userId: user.id, email: user.email, state: "deleting" })}\n`;
 }
 
 async function fixture(
@@ -108,7 +116,12 @@ async function fixture(
   const cleanup = {
     ambiguousStorageRemoval: false,
     delayMs: 0,
+    deleteFailureIds: new Set<string>(),
+    deleteResponseUser: undefined as FakeUser | null | undefined,
+    failPostDeleteList: false,
+    malformedPostDeleteList: false,
     marker: "",
+    retainDeletedUserIds: new Set<string>(),
   };
   const authSettings = {
     disable_signup: true,
@@ -127,9 +140,16 @@ async function fixture(
     }
     if (request.method === "GET" && url.pathname === "/auth/v1/admin/users") {
       if (cleanup.marker) void writeFile(cleanup.marker, "cleanup");
+      if (deletedEmails.length > 0 && cleanup.failPostDeleteList) {
+        response.writeHead(500, { "content-type": "application/json" });
+        response.end(JSON.stringify({ message: "test post-delete list failure" }));
+        return;
+      }
       const page = Number(url.searchParams.get("page") || 1);
       const perPage = Number(url.searchParams.get("per_page") || 1000);
-      const allUsers = [...users.values()];
+      const allUsers = deletedEmails.length > 0 && cleanup.malformedPostDeleteList
+        ? [{}]
+        : [...users.values()];
       const selected = allUsers.slice((page - 1) * perPage, page * perPage);
       setTimeout(() => {
         response.writeHead(200, {
@@ -142,13 +162,22 @@ async function fixture(
     }
     if (request.method === "DELETE" && url.pathname.startsWith("/auth/v1/admin/users/")) {
       const id = url.pathname.split("/").at(-1) ?? "";
+      if (cleanup.deleteFailureIds.has(id)) {
+        response.writeHead(500, { "content-type": "application/json" });
+        response.end(JSON.stringify({ message: "test delete failure" }));
+        return;
+      }
       const user = users.get(id);
       if (user) {
         deletedEmails.push(user.email);
-        users.delete(id);
+        if (!cleanup.retainDeletedUserIds.has(id)) users.delete(id);
       }
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify(user ?? { id }));
+      response.end(JSON.stringify(
+        cleanup.deleteResponseUser === undefined
+          ? (user ?? { id })
+          : cleanup.deleteResponseUser,
+      ));
       return;
     }
     if (request.method === "POST" && url.pathname === "/test/storage-query") {
@@ -471,6 +500,135 @@ describe("E2E runner isolation", () => {
     expect(result.code).not.toBe(0);
     expect(setup.storageObjects.size).toBe(1);
     expect(existsSync(setup.registryFile)).toBe(true);
+  });
+
+  it("rejects a successful delete response with a null user and retains a deleting checkpoint", async () => {
+    const setup = await fixture([staleUser]);
+    setup.cleanup.deleteResponseUser = null;
+    await writeRegistry(setup, ownershipLine(staleUser));
+
+    const result = await runRunner(setup.env);
+
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("delete response");
+    expect(result.stderr).not.toContain(staleUser.id);
+    expect(result.stderr).not.toContain(staleUser.email);
+    expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
+  });
+
+  it("rejects a successful delete response with a different user ID", async () => {
+    const setup = await fixture([staleUser]);
+    setup.cleanup.deleteResponseUser = { id: localDeveloper.id, email: staleUser.email };
+    await writeRegistry(setup, ownershipLine(staleUser));
+
+    const result = await runRunner(setup.env);
+
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("delete response");
+    expect(result.stderr).not.toContain(staleUser.id);
+    expect(result.stderr).not.toContain(staleUser.email);
+    expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
+  });
+
+  it("rejects a successful delete response with a different email", async () => {
+    const setup = await fixture([staleUser]);
+    setup.cleanup.deleteResponseUser = { id: staleUser.id, email: secondStaleUser.email };
+    await writeRegistry(setup, ownershipLine(staleUser));
+
+    const result = await runRunner(setup.env);
+
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("delete response");
+    expect(result.stderr).not.toContain(staleUser.id);
+    expect(result.stderr).not.toContain(staleUser.email);
+    expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
+  });
+
+  it("rejects an exact delete response when a fresh Admin list still contains the user", async () => {
+    const setup = await fixture([staleUser]);
+    setup.cleanup.retainDeletedUserIds.add(staleUser.id);
+    await writeRegistry(setup, ownershipLine(staleUser));
+
+    const result = await runRunner(setup.env);
+
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("Auth cleanup did not complete");
+    expect(result.stderr).not.toContain(staleUser.id);
+    expect(result.stderr).not.toContain(staleUser.email);
+    expect(setup.users.get(staleUser.id)).toEqual(staleUser);
+    expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
+  });
+
+  it("rejects a malformed fresh Admin list as proof of Auth absence", async () => {
+    const setup = await fixture([staleUser]);
+    setup.cleanup.malformedPostDeleteList = true;
+    await writeRegistry(setup, ownershipLine(staleUser));
+
+    const result = await runRunner(setup.env);
+
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("invalid E2E user list");
+    expect(result.stderr).not.toContain(staleUser.id);
+    expect(result.stderr).not.toContain(staleUser.email);
+    expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
+  });
+
+  it("checkpoints each completed user so a partial multi-user failure resumes safely", async () => {
+    const setup = await fixture([staleUser, secondStaleUser]);
+    setup.cleanup.deleteFailureIds.add(secondStaleUser.id);
+    await writeRegistry(setup, ownershipLine(staleUser) + ownershipLine(secondStaleUser));
+
+    const failed = await runRunner(setup.env);
+
+    expect(failed.code).not.toBe(0);
+    expect(setup.users.has(staleUser.id)).toBe(false);
+    expect(setup.users.get(secondStaleUser.id)).toEqual(secondStaleUser);
+    expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(secondStaleUser));
+    expect((await stat(setup.registryFile)).mode & 0o777).toBe(0o600);
+
+    setup.cleanup.deleteFailureIds.clear();
+    const retried = await runRunner(setup.env);
+
+    expect(retried.code).toBe(0);
+    expect(setup.users.size).toBe(0);
+    expect(existsSync(setup.registryFile)).toBe(false);
+  });
+
+  it("resumes a deleting checkpoint left before the Auth delete request mutates the user", async () => {
+    const setup = await fixture([staleUser]);
+    setup.cleanup.deleteFailureIds.add(staleUser.id);
+    await writeRegistry(setup, ownershipLine(staleUser));
+    const interrupted = await runRunner(setup.env);
+
+    expect(interrupted.code).not.toBe(0);
+    expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
+    expect(setup.users.get(staleUser.id)).toEqual(staleUser);
+
+    setup.cleanup.deleteFailureIds.clear();
+    const retried = await runRunner(setup.env);
+
+    expect(retried.code).toBe(0);
+    expect(setup.users.size).toBe(0);
+    expect(existsSync(setup.registryFile)).toBe(false);
+  });
+
+  it("removes a deleting checkpoint only after retry proves Auth and Storage absence", async () => {
+    const setup = await fixture([staleUser]);
+    setup.cleanup.failPostDeleteList = true;
+    await writeRegistry(setup, ownershipLine(staleUser));
+    const interrupted = await runRunner(setup.env);
+
+    expect(interrupted.code).not.toBe(0);
+    expect(setup.users.has(staleUser.id)).toBe(false);
+    expect(await readFile(setup.registryFile, "utf8")).toBe(deletingOwnershipLine(staleUser));
+
+    setup.cleanup.failPostDeleteList = false;
+    const retried = await runRunner(setup.env);
+
+    expect(retried.code).toBe(0);
+    expect(setup.users.size).toBe(0);
+    expect(setup.storageObjects.size).toBe(0);
+    expect(existsSync(setup.registryFile)).toBe(false);
   });
 
   it("fails closed on a non-local URL and releases the lock", async () => {

@@ -18,7 +18,14 @@ type IntegrationAdmin = {
         data: { user: { id: string; email?: string } | null };
         error: unknown;
       }>;
-      deleteUser(userId: string): Promise<{ error: unknown }>;
+      deleteUser(userId: string): Promise<{
+        data: { user: { id: string; email?: string } | null } | null;
+        error: unknown;
+      }>;
+      listUsers(parameters: { page: number; perPage: number }): Promise<{
+        data: { users: Array<{ id: string; email?: string }> };
+        error: unknown;
+      }>;
     };
   };
 };
@@ -69,7 +76,7 @@ export async function deleteOwnedIntegrationUsers(
   admin: IntegrationAdmin,
   ownership: ReadonlyArray<IntegrationOwnership>,
 ) {
-  const verifiedUserIds: string[] = [];
+  const verifiedOwnership: IntegrationOwnership[] = [];
   for (const entry of ownership) {
     if (!userIdPattern.test(entry.userId) || !reservedIntegrationEmail.test(entry.email)) {
       throw new Error("Refusing to clean up invalid integration ownership");
@@ -83,12 +90,44 @@ export async function deleteOwnedIntegrationUsers(
     ) {
       throw new Error("Integration cleanup ownership does not match the current Auth user");
     }
-    verifiedUserIds.push(entry.userId);
+    verifiedOwnership.push(entry);
   }
 
-  for (const userId of verifiedUserIds) {
-    const { error } = await admin.auth.admin.deleteUser(userId);
-    if (error) throw new Error("Unable to delete an owned integration user");
+  for (const entry of verifiedOwnership) {
+    let response;
+    try {
+      response = await admin.auth.admin.deleteUser(entry.userId);
+    } catch {
+      throw new Error("Integration Auth delete response does not match verified ownership");
+    }
+    if (response.error) throw new Error("Unable to delete an owned integration user");
+    if (
+      !response.data?.user
+      || response.data.user.id !== entry.userId
+      || response.data.user.email !== entry.email
+    ) {
+      throw new Error("Integration Auth delete response does not match verified ownership");
+    }
+
+    for (let page = 1; ; page += 1) {
+      const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+      if (
+        error
+        || !data
+        || !Array.isArray(data.users)
+        || data.users.some((user) => (
+          !user
+          || typeof user.id !== "string"
+          || !userIdPattern.test(user.id)
+        ))
+      ) {
+        throw new Error("Unable to verify integration Auth cleanup");
+      }
+      if (data.users.some((user) => user.id === entry.userId)) {
+        throw new Error("Integration Auth cleanup did not complete");
+      }
+      if (data.users.length < 1000) break;
+    }
   }
 }
 
