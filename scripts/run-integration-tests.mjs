@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -62,6 +63,7 @@ async function waitForServer(url, timeoutMs = 60_000) {
 }
 
 const bindings = statusEnvironment();
+const integrationRunScope = randomBytes(8).toString("hex");
 const bindingDirectory = await mkdtemp(join(tmpdir(), "task-5-integration-"));
 await writeFile(join(bindingDirectory, "wrangler.json"), '{"name":"task-5-integration"}\n');
 await writeFile(
@@ -73,6 +75,7 @@ const environment = {
   ...bindings,
   TEST_SUPABASE_URL: bindings.NEXT_PUBLIC_SUPABASE_URL,
   TEST_SUPABASE_SECRET_KEY: bindings.SUPABASE_SECRET_KEY,
+  INTEGRATION_RUN_SCOPE: integrationRunScope,
   INTEGRATION_TEST_BINDINGS: "true",
   CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH: join(bindingDirectory, "wrangler.json"),
 };

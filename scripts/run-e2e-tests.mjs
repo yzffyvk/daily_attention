@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { randomInt } from "node:crypto";
 import {
   chmodSync,
@@ -11,13 +11,17 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { createClient } from "@supabase/supabase-js";
 import { localSupabaseBindings } from "./local-supabase-env.mjs";
 
 const command = process.platform === "win32" ? "npx.cmd" : "npx";
+const execFileAsync = promisify(execFile);
 const managedSignals = ["SIGINT", "SIGTERM"];
+const checkInImageBucket = "checkin-images";
 const reservedE2EEmail = /^email-[1-4]-[0-9]{4}-[0-9]+-[0-9]+-[0-9]+@e2e\.daily-attention\.invalid$/u;
 const userIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const storageBatchSize = 100;
 const lockPath = join(tmpdir(), "ai-learning-checkin-email-auth-e2e.lock");
 const registryDirectory = join(tmpdir(), "ai-learning-checkin-email-auth-e2e-registry");
 const registryFile = join(registryDirectory, "emails");
@@ -234,8 +238,105 @@ function reservedE2EAuthEmail(value) {
   return typeof value === "string" && reservedE2EEmail.test(value) ? value : null;
 }
 
-async function deleteRegisteredUsers(bindings, apiUrl, ownership) {
-  if (ownership.length === 0) return;
+async function listOwnedStoragePaths(userId) {
+  if (!userIdPattern.test(userId)) {
+    throw new Error("Invalid E2E Storage ownership.");
+  }
+  const query = `
+    select bucket_id, name, owner_id
+    from storage.objects
+    where bucket_id = '${checkInImageBucket}'
+      and (
+        owner_id = '${userId}'
+        or name like '${userId}/%'
+      )
+    order by name;
+  `;
+  let stdout;
+  try {
+    ({ stdout } = await execFileAsync(
+      command,
+      ["supabase", "db", "query", "--local", "--output-format", "json", query],
+      { cwd: process.cwd(), encoding: "utf8", maxBuffer: 4 * 1024 * 1024 },
+    ));
+  } catch {
+    throw new Error("Unable to list local E2E Storage ownership.");
+  }
+
+  let result;
+  try {
+    result = JSON.parse(stdout);
+  } catch {
+    throw new Error("Local Supabase returned an invalid E2E Storage listing.");
+  }
+  if (!result || typeof result !== "object" || !Array.isArray(result.rows)) {
+    throw new Error("Local Supabase returned an invalid E2E Storage listing.");
+  }
+
+  const expectedPrefix = `${userId}/`;
+  const ownedPathPattern = new RegExp(
+    `^${userId}/[0-9]{4}-[0-9]{2}-[0-9]{2}/` +
+    "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}[.](jpg|png|webp)$",
+    "iu",
+  );
+  const paths = [];
+  const seenPaths = new Set();
+  for (const row of result.rows) {
+    if (
+      !row
+      || typeof row !== "object"
+      || Array.isArray(row)
+      || Object.keys(row).sort().join(",") !== "bucket_id,name,owner_id"
+      || row.bucket_id !== checkInImageBucket
+      || row.owner_id !== userId
+      || typeof row.name !== "string"
+      || !row.name.startsWith(expectedPrefix)
+      || !ownedPathPattern.test(row.name)
+      || seenPaths.has(row.name)
+    ) {
+      throw new Error("Local E2E Storage ownership is ambiguous.");
+    }
+    seenPaths.add(row.name);
+    paths.push(row.name);
+  }
+  return paths;
+}
+
+async function removeOwnedStoragePaths(admin, paths) {
+  const storage = admin.storage.from(checkInImageBucket);
+  for (let offset = 0; offset < paths.length; offset += storageBatchSize) {
+    const batch = paths.slice(offset, offset + storageBatchSize);
+    let response;
+    try {
+      response = await storage.remove(batch);
+    } catch {
+      throw new Error("Unable to remove local E2E Storage objects.");
+    }
+    if (response.error || !Array.isArray(response.data)) {
+      throw new Error("Unable to remove local E2E Storage objects.");
+    }
+    const removedPaths = new Set();
+    for (const row of response.data) {
+      if (
+        !row
+        || typeof row !== "object"
+        || row.bucket_id !== checkInImageBucket
+        || typeof row.name !== "string"
+        || !batch.includes(row.name)
+        || removedPaths.has(row.name)
+      ) {
+        throw new Error("Local E2E Storage removal is ambiguous.");
+      }
+      removedPaths.add(row.name);
+    }
+    if (removedPaths.size !== batch.length) {
+      throw new Error("Local E2E Storage removal is ambiguous.");
+    }
+  }
+}
+
+async function deleteRegisteredUsers(bindings, apiUrl, ownership, shouldStop) {
+  if (ownership.length === 0) return !shouldStop();
   const admin = createClient(apiUrl.origin, bindings.SUPABASE_SECRET_KEY, {
     auth: {
       autoRefreshToken: false,
@@ -246,11 +347,12 @@ async function deleteRegisteredUsers(bindings, apiUrl, ownership) {
   const users = [];
   for (let page = 1; ; page += 1) {
     const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
-    if (error) throw new Error(`Unable to list local E2E users: ${error.message}`);
+    if (error) throw new Error("Unable to list local E2E users.");
     if (!data || !Array.isArray(data.users)) {
       throw new Error("Local Supabase returned an invalid E2E user list.");
     }
     users.push(...data.users);
+    if (shouldStop()) return false;
     if (data.users.length < 1000) break;
   }
 
@@ -258,18 +360,38 @@ async function deleteRegisteredUsers(bindings, apiUrl, ownership) {
   const ownedUsers = [];
   for (const entry of ownership) {
     const user = usersById.get(entry.userId);
-    if (!user) continue;
+    if (!user) {
+      throw new Error("Local E2E ownership cannot be verified against Auth.");
+    }
     const email = reservedE2EAuthEmail(user.email);
     if (email !== entry.email) {
       throw new Error("Local E2E ownership no longer matches the current Auth email.");
     }
     ownedUsers.push(user);
   }
+  if (shouldStop()) return false;
 
+  const storagePathsByUserId = new Map();
+  for (const user of ownedUsers) {
+    storagePathsByUserId.set(user.id, await listOwnedStoragePaths(user.id));
+    if (shouldStop()) return false;
+  }
+  for (const user of ownedUsers) {
+    if (shouldStop()) return false;
+    const paths = storagePathsByUserId.get(user.id);
+    await removeOwnedStoragePaths(admin, paths);
+    if ((await listOwnedStoragePaths(user.id)).length !== 0) {
+      throw new Error("Local E2E Storage cleanup did not complete.");
+    }
+    if (shouldStop()) return false;
+  }
+
+  if (shouldStop()) return false;
   for (const user of ownedUsers) {
     const { error } = await admin.auth.admin.deleteUser(user.id);
-    if (error) throw new Error(`Unable to delete local E2E user ${user.id}: ${error.message}`);
+    if (error) throw new Error("Unable to delete a local E2E user.");
   }
+  return true;
 }
 
 function waitForChild(child) {
@@ -330,9 +452,15 @@ async function run() {
     ensureRegistryDirectory();
     const runScope = allocateRunScope();
     const staleOwnership = readRegistryOwnership();
-    await deleteRegisteredUsers(bindings, apiUrl, staleOwnership);
-    if (receivedSignal) return signalExitCode(receivedSignal);
+    const staleCleanupComplete = await deleteRegisteredUsers(
+      bindings,
+      apiUrl,
+      staleOwnership,
+      () => Boolean(receivedSignal),
+    );
+    if (!staleCleanupComplete) return signalExitCode(receivedSignal);
     removeRegistryFile();
+    if (receivedSignal) return signalExitCode(receivedSignal);
     createRegistryFile();
 
     const playwright = await runPlaywright({
@@ -348,9 +476,15 @@ async function run() {
     }
 
     const currentOwnership = readRegistryOwnership();
-    await deleteRegisteredUsers(bindings, apiUrl, currentOwnership);
-    if (receivedSignal) return signalExitCode(receivedSignal);
+    const currentCleanupComplete = await deleteRegisteredUsers(
+      bindings,
+      apiUrl,
+      currentOwnership,
+      () => Boolean(receivedSignal),
+    );
+    if (!currentCleanupComplete) return signalExitCode(receivedSignal);
     removeRegistryFile();
+    if (receivedSignal) return signalExitCode(receivedSignal);
     return 0;
   } finally {
     if (activeChild?.exitCode === null) activeChild.kill("SIGTERM");

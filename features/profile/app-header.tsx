@@ -141,7 +141,7 @@ function ProfileDialog({
         <form className="profile-form" onSubmit={submit}>
           <div className="auth-field">
             <span>邮箱</span>
-            <span id="profile-email">{profile.email}</span>
+            <span className="profile-email-value" id="profile-email">{profile.email}</span>
           </div>
           <label className="auth-field" htmlFor="profile-name">
             <span>名称</span>

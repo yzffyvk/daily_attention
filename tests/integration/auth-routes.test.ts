@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { ApiSession } from "../helpers/api-session";
 import {
   cleanupIntegrationFixtures,
+  confirmIntegrationAuthOwnership,
   trackIntegrationRateBucket,
   trackIntegrationUser,
   uniqueEmail,
@@ -47,14 +48,20 @@ describe("authentication routes", () => {
       },
     });
 
+    const email = uniqueEmail(emailSeed++);
     const { data, error } = await directClient.auth.signUp({
-      email: `integration-${crypto.randomUUID()}@integration.daily-attention.invalid`,
+      email,
       password: "password123",
     });
+    if (data.user) {
+      const ownership = confirmIntegrationAuthOwnership(data.user, email);
+      trackIntegrationUser(ownership.userId, ownership.email);
+    }
 
-    expect(data.user).toBeNull();
-    expect(data.session).toBeNull();
-    expect(error).toMatchObject({ code: "signup_disabled", status: 422 });
+    expect(data.user === null).toBe(true);
+    expect(data.session === null).toBe(true);
+    expect(error?.code === "signup_disabled").toBe(true);
+    expect(error?.status === 422).toBe(true);
   });
 
   it("registers, logs out, logs in, updates a profile, and rotates recovery credentials", async () => {

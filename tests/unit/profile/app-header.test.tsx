@@ -192,6 +192,54 @@ describe("profile header", () => {
     expect(screen.queryByRole("dialog", { name: "编辑资料" })).not.toBeInTheDocument();
   });
 
+  it("marks a long read-only email for wrapping in a narrow profile dialog", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 320 });
+    window.dispatchEvent(new Event("resize"));
+    const profile = {
+      id: "profile-1",
+      email: `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.invalid`,
+      avatarKey: 1,
+      displayName: "Attention_001",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => (
+        String(input).startsWith("/api/checkins/stats?")
+          ? Promise.resolve(response({
+              ok: true,
+              data: { totalCount: 0, currentStreak: 0, hasTodayRecord: false },
+              requestId: "stats-request",
+            }))
+          : Promise.resolve(response({
+              ok: true,
+              data: { profile },
+              requestId: "profile-request",
+            }))
+      )),
+    );
+
+    render(
+      <TestQueryProvider>
+        <AppHeader
+          initialProfile={profile}
+          isCelebrating={false}
+          isMuted={false}
+          onRequestLogout={vi.fn()}
+          onSelectToday={vi.fn()}
+          onToggleMuted={vi.fn()}
+          today="2026-07-23"
+        />
+      </TestQueryProvider>,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "打开账户菜单" }));
+    await user.click(screen.getByRole("menuitem", { name: "编辑资料" }));
+
+    const emailValue = document.getElementById("profile-email");
+    expect(emailValue).not.toBeNull();
+    expect(emailValue?.classList.contains("profile-email-value")).toBe(true);
+  });
+
   it("keeps a duplicate profile name as its meaningful 409 error", async () => {
     const profile = { id: "profile-1", email: "learner@example.com", avatarKey: 1, displayName: "学习者" };
     vi.stubGlobal(

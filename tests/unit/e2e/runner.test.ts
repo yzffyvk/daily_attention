@@ -15,13 +15,31 @@ const children = new Set<ReturnType<typeof spawn>>();
 const fakeNpx = `#!/usr/bin/env node
 const { appendFileSync, writeFileSync } = require("node:fs");
 const args = process.argv.slice(2);
-appendFileSync(process.env.FAKE_NPX_LOG, JSON.stringify(args) + "\\n");
+const loggedArgs = args[0] === "supabase" && args[1] === "db" && args[2] === "query"
+  ? args.slice(0, 3)
+  : args;
+appendFileSync(process.env.FAKE_NPX_LOG, JSON.stringify(loggedArgs) + "\\n");
 
 (async () => {
   if (args[0] === "supabase" && args[1] === "status") {
     console.log("API_URL=" + JSON.stringify(process.env.FAKE_API_URL));
     console.log('PUBLISHABLE_KEY="local-publishable"');
     console.log('SECRET_KEY="local-secret"');
+    process.exit(0);
+  }
+
+  if (args[0] === "supabase" && args[1] === "db" && args[2] === "query") {
+    const sql = args.at(-1) || "";
+    const userId = sql.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i)?.[0];
+    if (!userId) process.exit(14);
+    const response = await fetch(process.env.FAKE_API_URL + "/test/storage-query", {
+      body: JSON.stringify({ userId }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    if (!response.ok) process.exit(15);
+    const rows = await response.json();
+    console.log(JSON.stringify({ boundary: "test-boundary", rows, warning: "test-warning" }));
     process.exit(0);
   }
 
@@ -60,6 +78,7 @@ appendFileSync(process.env.FAKE_NPX_LOG, JSON.stringify(args) + "\\n");
 
 type RunnerResult = { code: number | null; signal: NodeJS.Signals | null; stderr: string; stdout: string };
 type FakeUser = { id: string; email: string };
+type FakeStorageObject = { bucketId: string; ownerId: string | null; path: string };
 
 const staleUser: FakeUser = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -75,14 +94,19 @@ function ownershipLine(user: FakeUser) {
   return `${JSON.stringify({ userId: user.id, email: user.email })}\n`;
 }
 
-async function fixture(initialUsers: FakeUser[] = []) {
+async function fixture(
+  initialUsers: FakeUser[] = [],
+  initialStorageObjects: FakeStorageObject[] = [],
+) {
   const directory = await mkdtemp(join(tmpdir(), "e2e-runner-test-"));
   temporaryDirectories.add(directory);
   const bin = join(directory, "bin");
   const npx = join(bin, "npx");
   const users = new Map(initialUsers.map((user) => [user.id, user]));
+  const storageObjects = new Map(initialStorageObjects.map((object) => [object.path, object]));
   const deletedEmails: string[] = [];
   const cleanup = {
+    ambiguousStorageRemoval: false,
     delayMs: 0,
     marker: "",
   };
@@ -125,6 +149,58 @@ async function fixture(initialUsers: FakeUser[] = []) {
       }
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify(user ?? { id }));
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/test/storage-query") {
+      let body = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => {
+        const userId = (JSON.parse(body) as { userId: string }).userId;
+        const rows = [...storageObjects.values()]
+          .filter((object) => (
+            object.bucketId === "checkin-images"
+            && (object.ownerId === userId || object.path.startsWith(`${userId}/`))
+          ))
+          .map((object) => ({
+            bucket_id: object.bucketId,
+            name: object.path,
+            owner_id: object.ownerId,
+          }));
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify(rows));
+      });
+      return;
+    }
+    if (request.method === "DELETE" && url.pathname === "/storage/v1/object/checkin-images") {
+      let body = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => {
+        const prefixes = (JSON.parse(body) as { prefixes?: unknown }).prefixes;
+        if (!Array.isArray(prefixes) || prefixes.some((path) => typeof path !== "string")) {
+          response.writeHead(422, { "content-type": "application/json" });
+          response.end("{}");
+          return;
+        }
+        if (cleanup.ambiguousStorageRemoval) {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end("[]");
+          return;
+        }
+        const removed = prefixes.flatMap((path) => {
+          const object = storageObjects.get(path);
+          if (!object) return [];
+          storageObjects.delete(path);
+          return [{
+            bucket_id: object.bucketId,
+            id: `storage-${storageObjects.size}`,
+            name: object.path,
+          }];
+        });
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify(removed));
+      });
       return;
     }
     if (request.method === "POST" && url.pathname === "/test/register") {
@@ -171,6 +247,7 @@ async function fixture(initialUsers: FakeUser[] = []) {
     registryDirectory,
     registryFile: join(registryDirectory, "emails"),
     scopeLog: join(directory, "run-scopes.log"),
+    storageObjects,
     users,
     env: {
       ...process.env,
@@ -297,7 +374,11 @@ describe("E2E runner isolation", () => {
     expect(result).toMatchObject({ code: 0, signal: null });
     expect(await commandLog(setup.log)).toEqual([
       ["supabase", "status", "-o", "env"],
+      ["supabase", "db", "query"],
+      ["supabase", "db", "query"],
       ["playwright", "test"],
+      ["supabase", "db", "query"],
+      ["supabase", "db", "query"],
     ]);
     expect(setup.deletedEmails).toEqual([
       "email-1-0000-0-0-0@e2e.daily-attention.invalid",
@@ -305,6 +386,91 @@ describe("E2E runner isolation", () => {
     ]);
     expect([...setup.users.values()]).toEqual([localDeveloper]);
     expect(existsSync(setup.registryFile)).toBe(false);
+  });
+
+  it("removes stale owned images before deleting the verified Auth user", async () => {
+    const image = {
+      bucketId: "checkin-images",
+      ownerId: staleUser.id,
+      path: `${staleUser.id}/2026-07-27/00000000-0000-4000-8000-000000000020.png`,
+    };
+    const setup = await fixture([staleUser], [image]);
+    await writeRegistry(setup, ownershipLine(staleUser));
+
+    const result = await runRunner(setup.env);
+
+    expect(result.code).toBe(0);
+    expect(setup.storageObjects.size).toBe(0);
+    expect(setup.users.has(staleUser.id)).toBe(false);
+    expect(existsSync(setup.registryFile)).toBe(false);
+  });
+
+  it("refuses stale cleanup when a path-prefix object has a different owner", async () => {
+    const image = {
+      bucketId: "checkin-images",
+      ownerId: localDeveloper.id,
+      path: `${staleUser.id}/2026-07-27/00000000-0000-4000-8000-000000000020.png`,
+    };
+    const setup = await fixture([staleUser, localDeveloper], [image]);
+    await writeRegistry(setup, ownershipLine(staleUser));
+
+    const result = await runRunner(setup.env);
+
+    expect(result.code).not.toBe(0);
+    expect(setup.storageObjects.size).toBe(1);
+    expect(setup.users.has(staleUser.id)).toBe(true);
+    expect(existsSync(setup.registryFile)).toBe(true);
+  });
+
+  it("refuses stale cleanup when an owner object is outside the user path prefix", async () => {
+    const image = {
+      bucketId: "checkin-images",
+      ownerId: staleUser.id,
+      path: `${localDeveloper.id}/2026-07-27/00000000-0000-4000-8000-000000000020.png`,
+    };
+    const setup = await fixture([staleUser, localDeveloper], [image]);
+    await writeRegistry(setup, ownershipLine(staleUser));
+
+    const result = await runRunner(setup.env);
+
+    expect(result.code).not.toBe(0);
+    expect(setup.storageObjects.size).toBe(1);
+    expect(setup.users.has(staleUser.id)).toBe(true);
+    expect(existsSync(setup.registryFile)).toBe(true);
+  });
+
+  it("retains Auth ownership and the registry on an ambiguous Storage removal", async () => {
+    const image = {
+      bucketId: "checkin-images",
+      ownerId: staleUser.id,
+      path: `${staleUser.id}/2026-07-27/00000000-0000-4000-8000-000000000020.png`,
+    };
+    const setup = await fixture([staleUser], [image]);
+    setup.cleanup.ambiguousStorageRemoval = true;
+    await writeRegistry(setup, ownershipLine(staleUser));
+
+    const result = await runRunner(setup.env);
+
+    expect(result.code).not.toBe(0);
+    expect(setup.storageObjects.size).toBe(1);
+    expect(setup.users.has(staleUser.id)).toBe(true);
+    expect(existsSync(setup.registryFile)).toBe(true);
+  });
+
+  it("retains the registry when its Auth owner is missing", async () => {
+    const image = {
+      bucketId: "checkin-images",
+      ownerId: staleUser.id,
+      path: `${staleUser.id}/2026-07-27/00000000-0000-4000-8000-000000000020.png`,
+    };
+    const setup = await fixture([], [image]);
+    await writeRegistry(setup, ownershipLine(staleUser));
+
+    const result = await runRunner(setup.env);
+
+    expect(result.code).not.toBe(0);
+    expect(setup.storageObjects.size).toBe(1);
+    expect(existsSync(setup.registryFile)).toBe(true);
   });
 
   it("fails closed on a non-local URL and releases the lock", async () => {
@@ -472,6 +638,7 @@ describe("E2E runner isolation", () => {
     expect(result).toMatchObject({ code: 143, signal: null });
     expect(existsSync(setup.lock)).toBe(false);
     expect(await readFile(setup.registryFile, "utf8")).toBe(ownershipLine(staleUser));
+    expect(setup.users.has(staleUser.id)).toBe(true);
 
     setup.cleanup.delayMs = 0;
     setup.cleanup.marker = "";

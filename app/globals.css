@@ -1595,6 +1595,11 @@ button.calendar-cell:hover {
   gap: 1.15rem;
 }
 
+.profile-email-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .profile-form .auth-field input {
   min-height: 2.8rem;
 }

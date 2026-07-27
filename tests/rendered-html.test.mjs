@@ -157,6 +157,10 @@ test("defines compact responsive calendar, sticky controls, and reduced-motion f
   assert.match(styles, /\.form-actions\s*\{[^}]*position:\s*sticky/s);
   assert.match(styles, /\.account-menu/);
   assert.match(styles, /\.light-toast/);
+  assert.match(
+    styles,
+    /\.profile-email-value\s*\{[^}]*min-width:\s*0;[^}]*overflow-wrap:\s*anywhere;/s,
+  );
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);
   assert.doesNotMatch(styles, /border-radius:\s*(1[0-9]|[2-9][0-9])px/);
 });
