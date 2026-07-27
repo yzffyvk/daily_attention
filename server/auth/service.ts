@@ -1,5 +1,4 @@
 import { timingSafeEqual } from "node:crypto";
-import { toE164Phone } from "@/lib/domain/user";
 import type { AuthPorts } from "./ports";
 
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -47,22 +46,21 @@ async function restoreRecoveryDigest(
 }
 
 export async function registerAccount(
-  input: { phone: string; password: string; avatarKey: number; bucket: string },
+  input: { email: string; password: string; avatarKey: number; bucket: string },
   ports: AuthPorts,
 ) {
   await ports.rateLimit({ action: "register", bucket: input.bucket });
-  const authPhone = toE164Phone(input.phone);
   const recoveryCode = randomRecoveryCode();
-  const authUser = await ports.createAuthUser({ phone: authPhone, password: input.password });
+  const authUser = await ports.createAuthUser({ email: input.email, password: input.password });
 
   try {
     const profile = await ports.completeRegistration({
       userId: authUser.id,
-      phone: input.phone,
+      email: input.email,
       avatarKey: input.avatarKey,
       recoveryDigest: await digest(recoveryCode),
     });
-    await ports.signIn(authPhone, input.password);
+    await ports.signIn(input.email, input.password);
     return { profile, recoveryCode };
   } catch (error) {
     await ports.deleteAuthUser(authUser.id);
@@ -71,25 +69,25 @@ export async function registerAccount(
 }
 
 export async function loginAccount(
-  input: { phone: string; password: string; bucket: string },
+  input: { email: string; password: string; bucket: string },
   ports: AuthPorts,
 ) {
   await ports.rateLimit({ action: "login", bucket: input.bucket });
-  await ports.signIn(toE164Phone(input.phone), input.password);
+  await ports.signIn(input.email, input.password);
 }
 
 export async function recoverAccount(
-  input: { phone: string; recoveryCode: string; newPassword: string; bucket: string },
+  input: { email: string; recoveryCode: string; newPassword: string; bucket: string },
   ports: AuthPorts,
 ): Promise<RecoveryResult> {
   await ports.rateLimit({ action: "recover", bucket: input.bucket });
-  const account = await ports.resolvePhone(input.phone);
+  const account = await ports.resolveEmail(input.email);
   if (!account) throw new Error("INVALID_RECOVERY");
   const expected = await ports.readRecoveryDigest(account.userId);
   const supplied = await digest(input.recoveryCode);
   if (!sameDigest(expected, supplied)) throw new Error("INVALID_RECOVERY");
   const profile = await ports.readProfile(account.userId);
-  if (profile.id !== account.userId || profile.phone !== input.phone) {
+  if (profile.id !== account.userId || profile.email !== input.email) {
     throw new Error("PROFILE_NOT_FOUND");
   }
 
@@ -105,7 +103,7 @@ export async function recoverAccount(
   }
 
   try {
-    await ports.signIn(toE164Phone(input.phone), input.newPassword);
+    await ports.signIn(input.email, input.newPassword);
   } catch (signInError) {
     await restoreRecoveryDigest(ports, account.userId, next, expected, signInError);
   }
@@ -130,16 +128,16 @@ export async function updateProfile(
 export async function rotateRecoveryCode(
   input: {
     userId: string;
-    phone: string;
+    email: string;
     currentPassword: string;
     bucket: string;
   },
   ports: AuthPorts,
 ): Promise<RecoveryCodeResult> {
   await ports.rateLimit({ action: "rotate", bucket: input.bucket });
-  const account = await ports.resolvePhone(input.phone);
+  const account = await ports.resolveEmail(input.email);
   if (!account || account.userId !== input.userId) throw new Error("INVALID_CREDENTIALS");
-  await ports.signIn(toE164Phone(input.phone), input.currentPassword);
+  await ports.signIn(input.email, input.currentPassword);
   const expected = await ports.readRecoveryDigest(input.userId);
   const recoveryCode = randomRecoveryCode();
   const replaced = await ports.replaceRecoveryDigest(

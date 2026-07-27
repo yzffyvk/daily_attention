@@ -1,21 +1,21 @@
 export type AccountProfile = {
   id: string;
-  phone: string;
+  email: string;
   displayName: string;
   avatarKey: number;
 };
 
 export type AuthPorts = {
   rateLimit(input: { action: "register" | "login" | "recover" | "rotate"; bucket: string }): Promise<void>;
-  createAuthUser(input: { phone: string; password: string }): Promise<{ id: string }>;
+  createAuthUser(input: { email: string; password: string }): Promise<{ id: string }>;
   deleteAuthUser(userId: string): Promise<void>;
   completeRegistration(input: {
     userId: string;
-    phone: string;
+    email: string;
     avatarKey: number;
     recoveryDigest: Uint8Array;
   }): Promise<AccountProfile>;
-  resolvePhone(phone: string): Promise<{ userId: string } | null>;
+  resolveEmail(email: string): Promise<{ userId: string } | null>;
   readProfile(userId: string): Promise<AccountProfile>;
   readRecoveryDigest(userId: string): Promise<Uint8Array>;
   replaceRecoveryDigest(userId: string, expected: Uint8Array, next: Uint8Array): Promise<boolean>;
@@ -25,5 +25,5 @@ export type AuthPorts = {
     avatarKey: number;
   }): Promise<AccountProfile>;
   updatePassword(userId: string, password: string): Promise<void>;
-  signIn(phone: string, password: string): Promise<void>;
+  signIn(email: string, password: string): Promise<void>;
 };

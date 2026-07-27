@@ -9,7 +9,7 @@ describe("check-in API client", () => {
   it("sends only displayName and avatarKey when updating the current profile", async () => {
     const profile = {
       id: "profile-1",
-      phone: "13800138000",
+      email: "user@example.com",
       avatarKey: 1,
       displayName: "今天也学习",
     };

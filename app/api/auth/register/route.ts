@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     const adapter = await createSupabaseAuthAdapter();
     const result = await registerAccount(
       {
-        phone: parsed.data.phone,
+        email: parsed.data.email,
         password: parsed.data.password,
         avatarKey: parsed.data.avatarKey,
         bucket: requestIp(request),

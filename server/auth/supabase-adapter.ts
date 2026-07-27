@@ -10,11 +10,11 @@ type SupabaseError = { code?: string; message?: string };
 
 const databaseProfileSchema = z.object({
   id: z.string().min(1),
-  phone: z.string().regex(/^1[3-9][0-9]{9}$/u),
+  email: z.string().email(),
   display_name: z.string().min(1),
   avatar_key: z.number().int().min(1).max(5),
 });
-const phoneResolutionSchema = z.array(z.object({ user_id: z.string().min(1) })).max(1);
+const emailResolutionSchema = z.array(z.object({ user_id: z.string().min(1) })).max(1);
 
 function isInvalidCredentialsError(error: SupabaseError) {
   return error.code === "invalid_credentials";
@@ -36,7 +36,7 @@ function profile(value: unknown): AccountProfile {
 
   return {
     id: parsed.data.id,
-    phone: parsed.data.phone,
+    email: parsed.data.email,
     displayName: parsed.data.display_name,
     avatarKey: parsed.data.avatar_key,
   };
@@ -60,11 +60,11 @@ export async function createSupabaseAuthAdapter() {
         },
       );
     },
-    async createAuthUser({ phone, password }) {
+    async createAuthUser({ email, password }) {
       const { data, error } = await admin.auth.admin.createUser({
-        phone,
+        email,
         password,
-        phone_confirm: true,
+        email_confirm: true,
       });
       throwIfError(error);
       if (!data.user) throw new Error("Auth user was not created");
@@ -77,7 +77,7 @@ export async function createSupabaseAuthAdapter() {
     async completeRegistration(input) {
       const { data, error } = await admin.rpc("complete_registration", {
         target_user_id: input.userId,
-        target_phone: input.phone,
+        target_email: input.email,
         target_avatar_key: input.avatarKey,
         target_recovery_digest: bytea(input.recoveryDigest),
       });
@@ -85,13 +85,13 @@ export async function createSupabaseAuthAdapter() {
       if (!data) throw new Error("Profile was not created");
       return profile(data);
     },
-    async resolvePhone(phone) {
-      const { data, error } = await admin.rpc("resolve_phone", {
-        target_phone: phone,
+    async resolveEmail(email) {
+      const { data, error } = await admin.rpc("resolve_email", {
+        target_email: email,
       });
       throwIfError(error);
-      const parsed = phoneResolutionSchema.safeParse(data);
-      if (!parsed.success) throw new Error("Malformed phone resolution response");
+      const parsed = emailResolutionSchema.safeParse(data);
+      if (!parsed.success) throw new Error("Malformed email resolution response");
       const account = parsed.data[0];
       return account ? { userId: account.user_id } : null;
     },
@@ -135,8 +135,8 @@ export async function createSupabaseAuthAdapter() {
       const { error } = await admin.auth.admin.updateUserById(userId, { password });
       throwIfError(error);
     },
-    async signIn(phone, password) {
-      const { data, error } = await server.auth.signInWithPassword({ phone, password });
+    async signIn(email, password) {
+      const { data, error } = await server.auth.signInWithPassword({ email, password });
       if (error) {
         if (isInvalidCredentialsError(error)) throw new Error("INVALID_CREDENTIALS");
         throw error;
@@ -159,7 +159,7 @@ export async function createSupabaseAuthAdapter() {
     async currentProfile(userId: string) {
       const { data, error } = await server
         .from("profiles")
-        .select("id, phone, display_name, avatar_key")
+        .select("id, email, display_name, avatar_key")
         .eq("id", userId)
         .maybeSingle();
       throwIfError(error);

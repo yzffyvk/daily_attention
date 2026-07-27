@@ -1,7 +1,7 @@
 import { recoverInputSchema } from "@/lib/domain/user";
 import { recoverAccount } from "@/server/auth/service";
 import { createSupabaseAuthAdapter } from "@/server/auth/supabase-adapter";
-import { parseRequest, phoneRateBucket } from "@/server/auth/request";
+import { emailRateBucket, parseRequest } from "@/server/auth/request";
 import { authFailure, authSuccess } from "@/server/auth/response";
 
 export const dynamic = "force-dynamic";
@@ -14,10 +14,10 @@ export async function POST(request: Request) {
     const adapter = await createSupabaseAuthAdapter();
     const result = await recoverAccount(
       {
-        phone: parsed.data.phone,
+        email: parsed.data.email,
         recoveryCode: parsed.data.recoveryCode,
         newPassword: parsed.data.newPassword,
-        bucket: phoneRateBucket(request, parsed.data.phone),
+        bucket: emailRateBucket(request, parsed.data.email),
       },
       adapter.ports,
     );

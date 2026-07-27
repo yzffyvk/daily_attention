@@ -22,13 +22,13 @@ beforeEach(() => {
   mocks.currentUser.mockResolvedValue({ id: "user-1" });
   mocks.currentProfile.mockResolvedValue({
     id: "user-1",
-    phone: "13800138000",
+    email: "user@example.com",
     displayName: "Attention_001",
     avatarKey: 2,
   });
   mocks.updateProfile.mockResolvedValue({
     id: "user-1",
-    phone: "13800138000",
+    email: "user@example.com",
     displayName: "Attention_001",
     avatarKey: 5,
   });
@@ -54,10 +54,10 @@ describe("PATCH /api/me", () => {
     expect(mocks.currentUser).not.toHaveBeenCalled();
   });
 
-  it("rejects phone changes before touching the authenticated profile", async () => {
+  it("rejects email changes before touching the authenticated profile", async () => {
     const response = await PATCH(new Request("http://example.test/api/me", {
       method: "PATCH",
-      body: JSON.stringify({ phone: "13900139000" }),
+      body: JSON.stringify({ email: "other@example.com" }),
     }));
 
     expect(response.status).toBe(422);
@@ -76,7 +76,7 @@ describe("PATCH /api/me", () => {
       data: {
         profile: {
           id: "user-1",
-          phone: "13800138000",
+          email: "user@example.com",
           displayName: "Attention_001",
           avatarKey: 5,
         },
@@ -89,10 +89,10 @@ describe("PATCH /api/me", () => {
     });
   });
 
-  it("updates displayName without accepting a phone or requiring a password", async () => {
+  it("updates displayName without accepting an email or requiring a password", async () => {
     mocks.updateProfile.mockResolvedValue({
       id: "user-1",
-      phone: "13800138000",
+      email: "user@example.com",
       displayName: "新的名称",
       avatarKey: 2,
     });
@@ -108,6 +108,6 @@ describe("PATCH /api/me", () => {
       displayName: "新的名称",
       avatarKey: 2,
     });
-    expect(mocks.updateProfile).not.toHaveBeenCalledWith(expect.objectContaining({ phone: expect.anything() }));
+    expect(mocks.updateProfile).not.toHaveBeenCalledWith(expect.objectContaining({ email: expect.anything() }));
   });
 });

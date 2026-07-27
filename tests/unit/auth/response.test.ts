@@ -4,23 +4,24 @@ import { authFailure } from "@/server/auth/response";
 describe("auth response mapping", () => {
   it.each([
     [
-      "a duplicate profile phone",
+      "a duplicate profile email identified by its message",
       {
         code: "23505",
-        message: 'duplicate key value violates unique constraint "profiles_phone_key"',
+        message: 'duplicate key value violates unique constraint "profiles_email_key"',
       },
     ],
-    ["a duplicate Supabase Auth phone", { code: "phone_exists" }],
-  ])("maps %s to the phone field", async (_label, error) => {
+    ["a duplicate profile email identified by its constraint", { code: "23505", constraint: "profiles_email_key" }],
+    ["a duplicate Supabase Auth email", { code: "email_exists" }],
+  ])("maps %s to the email field", async (_label, error) => {
     const response = authFailure(error, "request-id");
 
     expect(response.status).toBe(409);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     await expect(response.json()).resolves.toMatchObject({
       error: {
-        code: "PHONE_TAKEN",
-        message: "该手机号已注册",
-        details: { field: "phone" },
+        code: "EMAIL_TAKEN",
+        message: "该邮箱已注册",
+        details: { field: "email" },
       },
     });
   });
@@ -49,26 +50,26 @@ describe("auth response mapping", () => {
     expect(JSON.stringify(body)).not.toContain("Attention_001");
   });
 
-  it("uses the phone-specific invalid login message", async () => {
+  it("uses the email-specific invalid login message", async () => {
     const response = authFailure(new Error("INVALID_CREDENTIALS"), "request-id");
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({
       error: {
         code: "INVALID_CREDENTIALS",
-        message: "手机号或密码不正确",
+        message: "邮箱或密码不正确",
       },
     });
   });
 
-  it("uses the phone-specific invalid recovery message", async () => {
+  it("uses the email-specific invalid recovery message", async () => {
     const response = authFailure(new Error("INVALID_RECOVERY"), "request-id");
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({
       error: {
         code: "INVALID_RECOVERY",
-        message: "手机号或恢复码不正确",
+        message: "邮箱或恢复码不正确",
       },
     });
   });

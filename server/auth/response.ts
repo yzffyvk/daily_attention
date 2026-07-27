@@ -50,23 +50,26 @@ function mapError(error: unknown): MappedError {
       ? (error as { retryAfterSeconds: number }).retryAfterSeconds
       : undefined;
 
-  const isPhoneUniqueConflict =
+  const isEmailUniqueConflict =
     code === "23505"
     && (
-      constraint === "profiles_phone_key"
-      || message.includes('unique constraint "profiles_phone_key"')
+      constraint === "profiles_email_key"
+      || message.includes('unique constraint "profiles_email_key"')
     );
-  if (code === "phone_exists" || isPhoneUniqueConflict) {
+  if (code === "email_exists" || isEmailUniqueConflict) {
+    return { code: "EMAIL_TAKEN", message: "该邮箱已注册", status: 409, field: "email" };
+  }
+  if (code === "phone_exists") {
     return { code: "PHONE_TAKEN", message: "该手机号已注册", status: 409, field: "phone" };
   }
   if (code === "RATE_LIMITED" || message === "RATE_LIMITED") {
     return { code: "RATE_LIMITED", message: "请稍后再试", status: 429, retryAfterSeconds };
   }
   if (message === "INVALID_CREDENTIALS") {
-    return { code: "INVALID_CREDENTIALS", message: "手机号或密码不正确", status: 401 };
+    return { code: "INVALID_CREDENTIALS", message: "邮箱或密码不正确", status: 401 };
   }
   if (message === "INVALID_RECOVERY" || message === "RECOVERY_ALREADY_USED") {
-    return { code: "INVALID_RECOVERY", message: "手机号或恢复码不正确", status: 401 };
+    return { code: "INVALID_RECOVERY", message: "邮箱或恢复码不正确", status: 401 };
   }
   if (message === "UNAUTHORIZED") return { code: "UNAUTHORIZED", message: "请先登录", status: 401 };
   if (message === "PROFILE_NOT_FOUND") return { code: "PROFILE_NOT_FOUND", message: "用户资料不存在", status: 404 };

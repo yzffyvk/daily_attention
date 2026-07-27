@@ -57,7 +57,7 @@ import { createSupabaseAuthAdapter } from "@/server/auth/supabase-adapter";
 
 const databaseProfile = {
   id: "user-1",
-  phone: "13800138000",
+  email: "user@example.com",
   display_name: "Attention_001",
   avatar_key: 2,
 };
@@ -85,50 +85,50 @@ afterEach(() => {
 });
 
 describe("Supabase auth adapter", () => {
-  it("creates a confirmed phone user through the server-only admin client", async () => {
+  it("creates a confirmed email user through the server-only admin client", async () => {
     const { ports } = await createSupabaseAuthAdapter();
 
     await expect(
-      ports.createAuthUser({ phone: "+8613800138000", password: "password123" }),
+      ports.createAuthUser({ email: "user@example.com", password: "password123" }),
     ).resolves.toEqual({ id: "user-1" });
     expect(mocks.createUser).toHaveBeenCalledWith({
-      phone: "+8613800138000",
+      email: "user@example.com",
       password: "password123",
-      phone_confirm: true,
+      email_confirm: true,
     });
   });
 
-  it("signs in natively with phone and password", async () => {
+  it("signs in natively with email and password", async () => {
     const { ports } = await createSupabaseAuthAdapter();
 
-    await ports.signIn("+8613800138000", "password123");
+    await ports.signIn("user@example.com", "password123");
 
     expect(mocks.signInWithPassword).toHaveBeenCalledWith({
-      phone: "+8613800138000",
+      email: "user@example.com",
       password: "password123",
     });
   });
 
-  it("uses the phone registration RPC contract and maps all profile fields", async () => {
+  it("uses the email registration RPC contract and maps all profile fields", async () => {
     mocks.rpc.mockResolvedValue({ data: databaseProfile, error: null });
     const { ports } = await createSupabaseAuthAdapter();
 
     await expect(
       ports.completeRegistration({
         userId: "user-1",
-        phone: "13800138000",
+        email: "user@example.com",
         avatarKey: 2,
         recoveryDigest: new Uint8Array([0xab, 0xcd]),
       }),
     ).resolves.toEqual({
       id: "user-1",
-      phone: "13800138000",
+      email: "user@example.com",
       displayName: "Attention_001",
       avatarKey: 2,
     });
     expect(mocks.rpc).toHaveBeenCalledWith("complete_registration", {
       target_user_id: "user-1",
-      target_phone: "13800138000",
+      target_email: "user@example.com",
       target_avatar_key: 2,
       target_recovery_digest: "\\xabcd",
     });
@@ -142,11 +142,11 @@ describe("Supabase auth adapter", () => {
     await expect(
       ports.completeRegistration({
         userId: "user-1",
-        phone: "13800138000",
+        email: "user@example.com",
         avatarKey: 2,
         recoveryDigest: new Uint8Array([0xab, 0xcd]),
       }),
-    ).resolves.toMatchObject({ id: "user-1", phone: "13800138000" });
+    ).resolves.toMatchObject({ id: "user-1", email: "user@example.com" });
   });
 
   it("rejects an array-shaped registration profile response", async () => {
@@ -156,19 +156,19 @@ describe("Supabase auth adapter", () => {
     await expect(
       ports.completeRegistration({
         userId: "user-1",
-        phone: "13800138000",
+        email: "user@example.com",
         avatarKey: 2,
         recoveryDigest: new Uint8Array([0xab, 0xcd]),
       }),
     ).rejects.toThrow("Malformed profile response");
   });
 
-  it("resolves a local phone through the phone RPC", async () => {
+  it("resolves an email through the email RPC", async () => {
     mocks.rpc.mockResolvedValue({ data: [{ user_id: "user-1" }], error: null });
     const { ports } = await createSupabaseAuthAdapter();
 
-    await expect(ports.resolvePhone("13800138000")).resolves.toEqual({ userId: "user-1" });
-    expect(mocks.rpc).toHaveBeenCalledWith("resolve_phone", { target_phone: "13800138000" });
+    await expect(ports.resolveEmail("user@example.com")).resolves.toEqual({ userId: "user-1" });
+    expect(mocks.rpc).toHaveBeenCalledWith("resolve_email", { target_email: "user@example.com" });
   });
 
   it("reads and validates a recovery profile through the service-role RPC", async () => {
@@ -177,7 +177,7 @@ describe("Supabase auth adapter", () => {
 
     await expect(ports.readProfile("user-1")).resolves.toEqual({
       id: "user-1",
-      phone: "13800138000",
+      email: "user@example.com",
       displayName: "Attention_001",
       avatarKey: 2,
     });
@@ -187,12 +187,12 @@ describe("Supabase auth adapter", () => {
     expect(mocks.adminFrom).not.toHaveBeenCalled();
   });
 
-  it("rejects a malformed phone resolution response", async () => {
+  it("rejects a malformed email resolution response", async () => {
     mocks.rpc.mockResolvedValue({ data: [{ user_id: undefined }], error: null });
     const { ports } = await createSupabaseAuthAdapter();
 
-    await expect(ports.resolvePhone("13800138000")).rejects.toThrow(
-      "Malformed phone resolution response",
+    await expect(ports.resolveEmail("user@example.com")).rejects.toThrow(
+      "Malformed email resolution response",
     );
   });
 
@@ -207,7 +207,7 @@ describe("Supabase auth adapter", () => {
       ports.updateProfile({ userId: "user-1", displayName: "新的名称", avatarKey: 5 }),
     ).resolves.toMatchObject({
       id: "user-1",
-      phone: "13800138000",
+      email: "user@example.com",
       displayName: "新的名称",
       avatarKey: 5,
     });
@@ -218,10 +218,8 @@ describe("Supabase auth adapter", () => {
     });
   });
 
-  it("rejects an updated profile response with a missing phone", async () => {
-    const profileWithoutPhone: Partial<typeof databaseProfile> = { ...databaseProfile };
-    delete profileWithoutPhone.phone;
-    mocks.rpc.mockResolvedValue({ data: profileWithoutPhone, error: null });
+  it("rejects an updated profile response with the old phone field shape", async () => {
+    mocks.rpc.mockResolvedValue({ data: { ...databaseProfile, phone: "13800138000", email: undefined }, error: null });
     const { ports } = await createSupabaseAuthAdapter();
 
     await expect(
@@ -234,11 +232,11 @@ describe("Supabase auth adapter", () => {
 
     await expect(adapter.currentProfile("user-1")).resolves.toEqual({
       id: "user-1",
-      phone: "13800138000",
+      email: "user@example.com",
       displayName: "Attention_001",
       avatarKey: 2,
     });
-    expect(mocks.select).toHaveBeenCalledWith("id, phone, display_name, avatar_key");
+    expect(mocks.select).toHaveBeenCalledWith("id, email, display_name, avatar_key");
     expect(mocks.eq).toHaveBeenCalledWith("id", "user-1");
   });
 
@@ -246,7 +244,7 @@ describe("Supabase auth adapter", () => {
     mocks.maybeSingle.mockResolvedValue({
       data: {
         id: "user-1",
-        auth_email: "internal@internal.invalid",
+        phone: "13800138000",
         display_name: "Attention_001",
         avatar_key: 2,
       },
@@ -264,7 +262,7 @@ describe("Supabase auth adapter", () => {
     });
     const { ports } = await createSupabaseAuthAdapter();
 
-    await expect(ports.signIn("+8613800138000", "wrong-password")).rejects.toThrow("INVALID_CREDENTIALS");
+    await expect(ports.signIn("user@example.com", "wrong-password")).rejects.toThrow("INVALID_CREDENTIALS");
   });
 
   it("keeps Supabase availability failures opaque to the response mapper", async () => {
@@ -275,14 +273,14 @@ describe("Supabase auth adapter", () => {
     });
     const { ports } = await createSupabaseAuthAdapter();
 
-    await expect(ports.signIn("+8613800138000", "password123")).rejects.toBe(outage);
+    await expect(ports.signIn("user@example.com", "password123")).rejects.toBe(outage);
   });
 
   it("rejects malformed sign-in results instead of treating them as a session", async () => {
     mocks.signInWithPassword.mockResolvedValue({ data: { user: null, session: null }, error: null });
     const { ports } = await createSupabaseAuthAdapter();
 
-    await expect(ports.signIn("+8613800138000", "password123")).rejects.toThrow(
+    await expect(ports.signIn("user@example.com", "password123")).rejects.toThrow(
       "Malformed sign-in response",
     );
   });

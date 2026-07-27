@@ -1,7 +1,7 @@
 import { loginInputSchema } from "@/lib/domain/user";
 import { loginAccount } from "@/server/auth/service";
 import { createSupabaseAuthAdapter } from "@/server/auth/supabase-adapter";
-import { parseRequest, phoneRateBucket } from "@/server/auth/request";
+import { emailRateBucket, parseRequest } from "@/server/auth/request";
 import { authFailure, authSuccess } from "@/server/auth/response";
 
 export const dynamic = "force-dynamic";
@@ -14,9 +14,9 @@ export async function POST(request: Request) {
     const adapter = await createSupabaseAuthAdapter();
     await loginAccount(
       {
-        phone: parsed.data.phone,
+        email: parsed.data.email,
         password: parsed.data.password,
-        bucket: phoneRateBucket(request, parsed.data.phone),
+        bucket: emailRateBucket(request, parsed.data.email),
       },
       adapter.ports,
     );

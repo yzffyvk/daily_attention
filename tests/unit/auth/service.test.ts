@@ -5,7 +5,7 @@ import type { AuthPorts } from "@/server/auth/ports";
 function ports(): AuthPorts {
   const profile = {
     id: "user-1",
-    phone: "13800138000",
+    email: "user@example.com",
     displayName: "Attention_001",
     avatarKey: 2,
   };
@@ -15,7 +15,7 @@ function ports(): AuthPorts {
     createAuthUser: vi.fn().mockResolvedValue({ id: "user-1" }),
     deleteAuthUser: vi.fn().mockResolvedValue(undefined),
     completeRegistration: vi.fn().mockResolvedValue(profile),
-    resolvePhone: vi.fn().mockResolvedValue({ userId: "user-1" }),
+    resolveEmail: vi.fn().mockResolvedValue({ userId: "user-1" }),
     readProfile: vi.fn().mockResolvedValue(profile),
     readRecoveryDigest: vi.fn(),
     replaceRecoveryDigest: vi.fn().mockResolvedValue(true),
@@ -33,7 +33,7 @@ async function recoveryDigest() {
 
 function recoveryInput() {
   return {
-    phone: "13800138000",
+    email: "user@example.com",
     recoveryCode: "01234-56789-ABCDE-FGHJK-MNPQRS",
     newPassword: "newpassword123",
     bucket: "recover-key",
@@ -46,7 +46,7 @@ describe("auth service", () => {
     vi.mocked(adapter.completeRegistration).mockRejectedValue(new Error("duplicate"));
     await expect(
       registerAccount(
-        { phone: "13800138000", password: "password123", avatarKey: 2, bucket: "register-key" },
+        { email: "user@example.com", password: "password123", avatarKey: 2, bucket: "register-key" },
         adapter,
       ),
     ).rejects.toThrow("duplicate");
@@ -60,7 +60,7 @@ describe("auth service", () => {
 
     await expect(
       registerAccount(
-        { phone: "13800138000", password: "password123", avatarKey: 2, bucket: "register-key" },
+        { email: "user@example.com", password: "password123", avatarKey: 2, bucket: "register-key" },
         adapter,
       ),
     ).rejects.toThrow(signInFailure);
@@ -68,12 +68,12 @@ describe("auth service", () => {
     expect(adapter.deleteAuthUser).toHaveBeenCalledWith("user-1");
   });
 
-  it("registers with an E.164 phone and signs in", async () => {
+  it("registers with email and signs in", async () => {
     const adapter = ports();
 
     await registerAccount(
       {
-        phone: "13800138000",
+        email: "user@example.com",
         password: "password123",
         avatarKey: 2,
         bucket: "register-key",
@@ -82,22 +82,22 @@ describe("auth service", () => {
     );
 
     expect(adapter.createAuthUser).toHaveBeenCalledWith({
-      phone: "+8613800138000",
+      email: "user@example.com",
       password: "password123",
     });
     expect(adapter.completeRegistration).toHaveBeenCalledWith(
-      expect.objectContaining({ phone: "13800138000" }),
+      expect.objectContaining({ email: "user@example.com" }),
     );
-    expect(adapter.signIn).toHaveBeenCalledWith("+8613800138000", "password123");
+    expect(adapter.signIn).toHaveBeenCalledWith("user@example.com", "password123");
   });
 
-  it("signs in directly with an E.164 phone", async () => {
+  it("signs in directly with email", async () => {
     const adapter = ports();
 
-    await loginAccount({ phone: "13800138000", password: "password123", bucket: "login-key" }, adapter);
+    await loginAccount({ email: "user@example.com", password: "password123", bucket: "login-key" }, adapter);
 
-    expect(adapter.signIn).toHaveBeenCalledWith("+8613800138000", "password123");
-    expect(adapter.resolvePhone).not.toHaveBeenCalled();
+    expect(adapter.signIn).toHaveBeenCalledWith("user@example.com", "password123");
+    expect(adapter.resolveEmail).not.toHaveBeenCalled();
   });
 
   it("claims the recovery digest before changing the password", async () => {
@@ -111,9 +111,9 @@ describe("auth service", () => {
       updatePassword.mock.invocationCallOrder[0],
     );
     expect(adapter.updatePassword).toHaveBeenCalledWith("user-1", "newpassword123");
-    expect(adapter.resolvePhone).toHaveBeenCalledWith("13800138000");
+    expect(adapter.resolveEmail).toHaveBeenCalledWith("user@example.com");
     expect(adapter.replaceRecoveryDigest).toHaveBeenCalledOnce();
-    expect(result.profile).toMatchObject({ id: "user-1", phone: "13800138000" });
+    expect(result.profile).toMatchObject({ id: "user-1", email: "user@example.com" });
     expect(result.recoveryCode.replace(/-/g, "")).toHaveLength(26);
   });
 

@@ -21,12 +21,12 @@ afterEach(() => {
 });
 
 describe("POST /api/auth/recover", () => {
-  it("returns the recovered profile after using the phone rate bucket", async () => {
+  it("returns the recovered profile after using the email rate bucket", async () => {
     mocks.recoverAccount.mockResolvedValue({
       recoveryCode: "01234-56789-ABCDE-FGHJK-MNPQRS",
       profile: {
         id: "user-1",
-        phone: "13800138000",
+        email: "user@example.com",
         displayName: "Attention_001",
         avatarKey: 1,
       },
@@ -36,7 +36,7 @@ describe("POST /api/auth/recover", () => {
       method: "POST",
       headers: { "cf-connecting-ip": "203.0.113.7" },
       body: JSON.stringify({
-        phone: "138 0013 8000",
+        email: " User@Example.com ",
         recoveryCode: "01234-56789-ABCDE-FGHJK-MNPQRS",
         newPassword: "new-password123",
       }),
@@ -44,8 +44,8 @@ describe("POST /api/auth/recover", () => {
 
     expect(mocks.recoverAccount).toHaveBeenCalledWith(
       expect.objectContaining({
-        phone: "13800138000",
-        bucket: "203.0.113.7:13800138000",
+        email: "user@example.com",
+        bucket: "203.0.113.7:user@example.com",
       }),
       expect.anything(),
     );
@@ -64,7 +64,7 @@ describe("POST /api/auth/recover", () => {
     const response = await POST(new Request("http://example.test/api/auth/recover", {
       method: "POST",
       body: JSON.stringify({
-        phone: "13800138000",
+        email: "user@example.com",
         recoveryCode: "01234-56789-ABCDE-FGHJK-MNPQRS",
         newPassword: "new-password123",
       }),

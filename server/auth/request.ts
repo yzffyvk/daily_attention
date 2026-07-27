@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { normalizePhone } from "@/lib/domain/user";
+import { normalizeEmail } from "@/lib/domain/user";
 import { validationFailure } from "./response";
 
 export const emptyInputSchema = z.object({}).strict();
@@ -28,6 +28,6 @@ export function requestIp(request: Request) {
   return cloudflareIp || "local";
 }
 
-export function phoneRateBucket(request: Request, phone: string) {
-  return `${requestIp(request)}:${normalizePhone(phone)}`;
+export function emailRateBucket(request: Request, email: string) {
+  return `${requestIp(request)}:${normalizeEmail(email)}`;
 }
