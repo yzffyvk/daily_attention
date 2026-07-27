@@ -297,14 +297,43 @@ async function listOwnedStoragePaths(userId) {
     throw new Error("Invalid E2E Storage ownership.");
   }
   const query = `
-    select bucket_id, name, owner_id
-    from storage.objects
-    where bucket_id = '${checkInImageBucket}'
+    select
+      objects.bucket_id,
+      objects.name,
+      objects.owner_id,
+      exists (
+        select 1
+        from public.check_ins check_ins
+        where check_ins.user_id = '${userId}'
+          and check_ins.image_path = objects.name
+      ) as has_check_in_reference,
+      exists (
+        select 1
+        from private.storage_upload_reservations reservations
+        where reservations.user_id = '${userId}'
+          and reservations.path = objects.name
+      ) as has_reservation_reference,
+      (
+        exists (
+          select 1
+          from public.check_ins check_ins
+          where check_ins.user_id <> '${userId}'
+            and check_ins.image_path = objects.name
+        )
+        or exists (
+          select 1
+          from private.storage_upload_reservations reservations
+          where reservations.user_id <> '${userId}'
+            and reservations.path = objects.name
+        )
+      ) as has_conflicting_reference
+    from storage.objects objects
+    where objects.bucket_id = '${checkInImageBucket}'
       and (
-        owner_id = '${userId}'
-        or name like '${userId}/%'
+        objects.owner_id = '${userId}'
+        or objects.name like '${userId}/%'
       )
-    order by name;
+    order by objects.name;
   `;
   let stdout;
   try {
@@ -340,12 +369,24 @@ async function listOwnedStoragePaths(userId) {
       !row
       || typeof row !== "object"
       || Array.isArray(row)
-      || Object.keys(row).sort().join(",") !== "bucket_id,name,owner_id"
+      || Object.keys(row).sort().join(",")
+        !== "bucket_id,has_check_in_reference,has_conflicting_reference,has_reservation_reference,name,owner_id"
       || row.bucket_id !== checkInImageBucket
-      || row.owner_id !== userId
+      || (typeof row.owner_id !== "string" && row.owner_id !== null)
+      || typeof row.has_check_in_reference !== "boolean"
+      || typeof row.has_reservation_reference !== "boolean"
+      || typeof row.has_conflicting_reference !== "boolean"
       || typeof row.name !== "string"
       || !row.name.startsWith(expectedPrefix)
       || !ownedPathPattern.test(row.name)
+      || row.has_conflicting_reference
+      || (
+        row.owner_id !== userId
+        && (
+          row.owner_id !== null
+          || (!row.has_check_in_reference && !row.has_reservation_reference)
+        )
+      )
       || seenPaths.has(row.name)
     ) {
       throw new Error("Local E2E Storage ownership is ambiguous.");

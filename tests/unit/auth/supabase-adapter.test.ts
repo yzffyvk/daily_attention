@@ -123,6 +123,7 @@ describe("Supabase auth adapter", () => {
   it.each([
     { description: "a missing error property", deleted: {} },
     { description: "an inherited null error", deleted: Object.create({ error: null }) },
+    { description: "an array-shaped envelope", deleted: Object.assign([], { error: null }) },
     { description: "a non-null error", deleted: { error: { code: "delete_failed" } } },
   ])("rejects a delete response with $description", async ({ deleted }) => {
     mocks.deleteUser.mockResolvedValue(deleted);
@@ -141,6 +142,7 @@ describe("Supabase auth adapter", () => {
     },
     { description: "a missing data envelope", absent: { error: { status: 404, code: "user_not_found" } } },
     { description: "an inherited null user", absent: { data: Object.create({ user: null }), error: { status: 404, code: "user_not_found" } } },
+    { description: "an array-shaped data envelope", absent: { data: Object.assign([], { user: null }), error: { status: 404, code: "user_not_found" } } },
     { description: "a missing error envelope", absent: { data: { user: null } } },
     { description: "an inherited error status", absent: { data: { user: null }, error: Object.create({ status: 404, code: "user_not_found" }) } },
     { description: "an inherited error code", absent: { data: { user: null }, error: Object.assign(Object.create({ code: "user_not_found" }), { status: 404 }) } },

@@ -139,7 +139,13 @@ export function createClient() {
 
 type RunnerResult = { code: number | null; signal: NodeJS.Signals | null; stderr: string; stdout: string };
 type FakeUser = { id: string; email: string };
-type FakeStorageObject = { bucketId: string; ownerId: string | null; path: string };
+type FakeStorageObject = {
+  bucketId: string;
+  checkInReferenceUserIds?: string[];
+  ownerId: string | null;
+  path: string;
+  reservationReferenceUserIds?: string[];
+};
 
 const staleUser: FakeUser = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -275,6 +281,13 @@ async function fixture(
           ))
           .map((object) => ({
             bucket_id: object.bucketId,
+            has_check_in_reference: object.checkInReferenceUserIds?.includes(userId) ?? false,
+            has_conflicting_reference: (
+              object.checkInReferenceUserIds?.some((referenceUserId) => referenceUserId !== userId)
+              || object.reservationReferenceUserIds?.some((referenceUserId) => referenceUserId !== userId)
+              || false
+            ),
+            has_reservation_reference: object.reservationReferenceUserIds?.includes(userId) ?? false,
             name: object.path,
             owner_id: object.ownerId,
           }));
@@ -518,6 +531,79 @@ describe("E2E runner isolation", () => {
     expect(setup.storageObjects.size).toBe(0);
     expect(setup.users.has(staleUser.id)).toBe(false);
     expect(existsSync(setup.registryFile)).toBe(false);
+  });
+
+  it("removes a null-owner signed-upload image with an exact check-in reference", async () => {
+    const image = {
+      bucketId: "checkin-images",
+      checkInReferenceUserIds: [staleUser.id],
+      ownerId: null,
+      path: `${staleUser.id}/2026-07-27/00000000-0000-4000-8000-000000000020.png`,
+    };
+    const setup = await fixture([staleUser], [image]);
+    await writeRegistry(setup, ownershipLine(staleUser));
+
+    expect((await runRunner(setup.env)).code).toBe(0);
+    expect(setup.storageObjects.size).toBe(0);
+    expect(existsSync(setup.registryFile)).toBe(false);
+  });
+
+  it("removes a null-owner signed-upload image with an exact reservation reference", async () => {
+    const image = {
+      bucketId: "checkin-images",
+      ownerId: null,
+      path: `${staleUser.id}/2026-07-27/00000000-0000-4000-8000-000000000020.png`,
+      reservationReferenceUserIds: [staleUser.id],
+    };
+    const setup = await fixture([staleUser], [image]);
+    await writeRegistry(setup, ownershipLine(staleUser));
+
+    expect((await runRunner(setup.env)).code).toBe(0);
+    expect(setup.storageObjects.size).toBe(0);
+    expect(existsSync(setup.registryFile)).toBe(false);
+  });
+
+  it.each([
+    {
+      description: "a null owner without an exact reference",
+      image: {
+        bucketId: "checkin-images",
+        ownerId: null,
+        path: `${staleUser.id}/2026-07-27/00000000-0000-4000-8000-000000000020.png`,
+      },
+    },
+    {
+      description: "a wrong non-null owner despite an exact check-in reference",
+      image: {
+        bucketId: "checkin-images",
+        checkInReferenceUserIds: [staleUser.id],
+        ownerId: localDeveloper.id,
+        path: `${staleUser.id}/2026-07-27/00000000-0000-4000-8000-000000000020.png`,
+      },
+    },
+    {
+      description: "a conflicting other-user reservation reference",
+      image: {
+        bucketId: "checkin-images",
+        checkInReferenceUserIds: [staleUser.id],
+        ownerId: null,
+        path: `${staleUser.id}/2026-07-27/00000000-0000-4000-8000-000000000020.png`,
+        reservationReferenceUserIds: [localDeveloper.id],
+      },
+    },
+  ])("refuses stale cleanup with $description", async ({ image }) => {
+    const setup = await fixture([staleUser, localDeveloper], [image]);
+    await writeRegistry(setup, ownershipLine(staleUser));
+
+    const result = await runRunner(setup.env);
+
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("Storage ownership is ambiguous");
+    expect(result.stderr).not.toContain(staleUser.id);
+    expect(result.stderr).not.toContain(staleUser.email);
+    expect(setup.storageObjects.size).toBe(1);
+    expect(setup.users.has(staleUser.id)).toBe(true);
+    expect(existsSync(setup.registryFile)).toBe(true);
   });
 
   it("refuses stale cleanup when a path-prefix object has a different owner", async () => {
