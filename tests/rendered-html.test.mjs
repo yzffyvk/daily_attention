@@ -176,6 +176,18 @@ test("defines compact responsive calendar, sticky controls, and reduced-motion f
     styles,
     /\.entry-mode-switch,\s*\.manual-entry,\s*\.ai-workflow,\s*\.form-actions\s*\{[^}]*width:\s*min\(100%,\s*var\(--editor-content-width\)\);[^}]*margin-inline:\s*auto;/s,
   );
+  assert.match(
+    styles,
+    /@media \(min-width: 1001px\)[\s\S]*?\.manual-core-fields\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*minmax\(0,\s*2fr\);/s,
+  );
+  assert.match(
+    styles,
+    /@media \(min-width: 1001px\)[\s\S]*?\.manual-reference-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/s,
+  );
+  assert.match(
+    styles,
+    /@media \(min-width: 1001px\)[\s\S]*?\.form-actions\s*\{[^}]*position:\s*static;[^}]*margin-top:\s*1\.5rem;/s,
+  );
   assert.doesNotMatch(styles, /border-radius:\s*(1[0-9]|[2-9][0-9])px/);
 });
 

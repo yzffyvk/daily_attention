@@ -3611,3 +3611,18 @@ button.calendar-cell:hover {
   width: min(100%, var(--editor-content-width));
   margin-inline: auto;
 }
+
+@media (min-width: 1001px) {
+  .manual-core-fields {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  }
+
+  .manual-reference-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .form-actions {
+    position: static;
+    margin-top: 1.5rem;
+  }
+}
