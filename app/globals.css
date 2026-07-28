@@ -3483,3 +3483,118 @@ button.calendar-cell:hover {
     align-items: start;
   }
 }
+
+.summary-editor {
+  display: grid;
+}
+
+.checkin-form .summary-field {
+  display: grid;
+  min-width: 0;
+  gap: 0.35rem;
+  color: #343b37;
+  font-size: 0.78rem;
+}
+
+.summary-toolbar {
+  display: flex;
+  min-height: 2.6rem;
+  gap: 0.35rem;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  padding: 0.3rem 0.4rem;
+  background: #f3f6f5;
+}
+
+.checkin-form .summary-toolbar-select {
+  display: flex;
+  min-width: 0;
+  grid-template-columns: none;
+  gap: 0.35rem;
+  align-items: center;
+  color: var(--ink-soft);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.56rem;
+  font-weight: 750;
+}
+
+.summary-toolbar-select select {
+  height: 1.9rem;
+  border: 0;
+  border-radius: 4px;
+  padding: 0 1.7rem 0 0.5rem;
+  background-color: #fff;
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), sans-serif;
+  font-size: 0.65rem;
+  font-weight: 650;
+  outline: 1px solid var(--line);
+}
+
+.summary-toolbar-select select:focus {
+  outline: 2px solid rgba(8, 121, 108, 0.32);
+}
+
+.summary-toolbar-divider {
+  width: 1px;
+  height: 1.5rem;
+  margin: 0 0.15rem;
+  background: var(--line);
+}
+
+.summary-toolbar button {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--green-dark);
+}
+
+.summary-toolbar button:hover:not(:disabled) {
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.summary-toolbar button:focus-visible {
+  outline: 2px solid rgba(8, 121, 108, 0.32);
+  outline-offset: 1px;
+}
+
+.summary-toolbar button:disabled,
+.summary-toolbar-select select:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.checkin-form .summary-editor .summary-textarea {
+  border-radius: 0 0 6px 6px;
+}
+
+.checkin-form .summary-editor .summary-font-sans {
+  font-family: var(--font-geist-sans), sans-serif;
+}
+
+.checkin-form .summary-editor .summary-font-serif {
+  font-family: "Songti SC", STSong, Georgia, serif;
+}
+
+.checkin-form .summary-editor .summary-font-mono {
+  font-family: var(--font-geist-mono), "SFMono-Regular", monospace;
+}
+
+.checkin-form .summary-editor .summary-size-small {
+  font-size: 0.72rem;
+}
+
+.checkin-form .summary-editor .summary-size-medium {
+  font-size: 0.82rem;
+}
+
+.checkin-form .summary-editor .summary-size-large {
+  font-size: 0.98rem;
+}

@@ -12,6 +12,7 @@ import { useState, type FormEvent } from "react";
 import type { DraftStorageState } from "@/features/drafts/use-checkin-draft";
 import { formatDate } from "./dates";
 import { ImageNoteUploader, type ImageSelection } from "./image-note-uploader";
+import { SummaryEditor } from "./summary-editor";
 import type { CheckInRecord } from "./types";
 
 export type CheckInDraft = {
@@ -197,19 +198,21 @@ export function CheckInEditor({
                 <span className="character-count">{draft.attention.length}/120</span>
               </label>
 
-              <label className="summary-field" htmlFor="summary">
-                <span className="label-row"><b>学习知识点小结</b></span>
-                <span className="field-hint">写下关键概念、你的理解，以及还没想明白的问题</span>
-                <textarea
+              <div className="summary-field">
+                <label htmlFor="summary">
+                  <span className="label-row"><b>学习知识点小结</b></span>
+                  <span className="field-hint">写下关键概念、你的理解，以及还没想明白的问题</span>
+                </label>
+                <SummaryEditor
+                  disabled={isDisabled}
                   id="summary"
                   maxLength={5000}
-                  disabled={isDisabled}
-                  onChange={(event) => onDraftChange({ summary: event.target.value })}
+                  onChange={(summary) => onDraftChange({ summary })}
                   placeholder="今天真正理解了什么？试着用自己的话讲一遍。"
                   value={draft.summary}
                 />
                 <span className="character-count">{draft.summary.length}/5000</span>
-              </label>
+              </div>
             </div>
 
             <section
@@ -346,18 +349,20 @@ export function CheckInEditor({
                   />
                   <span className="character-count">{draft.attention.length}/120</span>
                 </label>
-                <label className="summary-field" htmlFor="summary">
-                  <span className="label-row"><b>学习知识点小结</b></span>
-                  <textarea
+                <div className="summary-field">
+                  <label htmlFor="summary">
+                    <span className="label-row"><b>学习知识点小结</b></span>
+                  </label>
+                  <SummaryEditor
+                    disabled={isDisabled}
                     id="summary"
                     maxLength={5000}
-                    disabled={isDisabled}
-                    onChange={(event) => onDraftChange({ summary: event.target.value })}
+                    onChange={(summary) => onDraftChange({ summary })}
                     placeholder="AI 生成的核心知识点、概念解释和复习线索会显示在这里"
                     value={draft.summary}
                   />
                   <span className="character-count">{draft.summary.length}/5000</span>
-                </label>
+                </div>
               </div>
             </section>
 
