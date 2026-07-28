@@ -177,8 +177,8 @@ export function CheckInEditor({
 
       <form aria-busy={isDisabled} className="checkin-form" onSubmit={submit}>
         {entryMode === "manual" ? (
-          <>
-            <div className="form-grid">
+          <div className="manual-entry">
+            <div className="manual-core-fields">
               <label htmlFor="attention">
                 <span className="label-row">
                   <b>今日 attention</b>
@@ -197,23 +197,6 @@ export function CheckInEditor({
                 <span className="character-count">{draft.attention.length}/120</span>
               </label>
 
-              <label htmlFor="source-url">
-                <span className="label-row"><b>学习资料来源</b></span>
-                <span className="field-hint">文章、视频、课程或工具链接</span>
-                <input
-                  id="source-url"
-                  inputMode="url"
-                  maxLength={2048}
-                  disabled={isDisabled}
-                  onChange={(event) => onDraftChange({ sourceUrl: event.target.value })}
-                  placeholder="https://"
-                  type="url"
-                  value={draft.sourceUrl}
-                />
-              </label>
-            </div>
-
-            <div className="reflection-layout">
               <label className="summary-field" htmlFor="summary">
                 <span className="label-row"><b>学习知识点小结</b></span>
                 <span className="field-hint">写下关键概念、你的理解，以及还没想明白的问题</span>
@@ -227,8 +210,36 @@ export function CheckInEditor({
                 />
                 <span className="character-count">{draft.summary.length}/5000</span>
               </label>
+            </div>
 
-              <div className="secondary-fields">
+            <section
+              aria-labelledby="manual-reference-title"
+              className="manual-reference-section"
+            >
+              <div className="manual-reference-heading">
+                <div>
+                  <p>REFERENCE</p>
+                  <h3 id="manual-reference-title">参考资料</h3>
+                </div>
+                <span>可选 · 为这次 attention 留下出处、图像与延伸想法</span>
+              </div>
+
+              <div className="manual-reference-grid">
+                <label htmlFor="source-url">
+                  <span className="label-row"><b>学习资料来源</b></span>
+                  <span className="field-hint">文章、视频、课程或工具链接</span>
+                  <input
+                    id="source-url"
+                    inputMode="url"
+                    maxLength={2048}
+                    disabled={isDisabled}
+                    onChange={(event) => onDraftChange({ sourceUrl: event.target.value })}
+                    placeholder="https://"
+                    type="url"
+                    value={draft.sourceUrl}
+                  />
+                </label>
+
                 <ImageNoteUploader
                   disabled={isUploaderDisabled}
                   existingImage={record ? { imageName: record.imageName, imageUrl: record.imageUrl } : null}
@@ -255,8 +266,8 @@ export function CheckInEditor({
                   <span className="character-count">{draft.inspiration.length}/2000</span>
                 </label>
               </div>
-            </div>
-          </>
+            </section>
+          </div>
         ) : (
           <div className="ai-workflow">
             <section aria-labelledby="ai-source-title" className="ai-source-step">

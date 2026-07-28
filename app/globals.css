@@ -3375,3 +3375,111 @@ button.calendar-cell:hover {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Manual entry: keep the reflection compact and move optional context below a rule. */
+.manual-entry {
+  display: grid;
+  width: min(100%, 62rem);
+  gap: 1.5rem;
+  margin-inline: auto;
+}
+
+.manual-core-fields {
+  display: grid;
+  grid-template-columns: minmax(17rem, 0.72fr) minmax(0, 1.28fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.manual-core-fields .summary-field textarea {
+  min-height: 9.5rem;
+}
+
+.manual-reference-section {
+  display: grid;
+  gap: 1rem;
+  border-top: 1px solid var(--line-strong);
+  padding-top: 1.1rem;
+}
+
+.manual-reference-heading {
+  display: flex;
+  gap: 1rem;
+  align-items: end;
+  justify-content: space-between;
+}
+
+.manual-reference-heading p {
+  margin: 0 0 0.18rem;
+  color: var(--green);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.56rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.manual-reference-heading h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 720;
+}
+
+.manual-reference-heading > span {
+  color: var(--ink-soft);
+  font-size: 0.63rem;
+}
+
+.manual-reference-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.manual-reference-grid .upload-field,
+.manual-reference-grid .upload-dropzone,
+.manual-reference-grid .image-preview {
+  min-height: 8.75rem;
+}
+
+.manual-reference-grid .upload-dropzone {
+  padding: 0.8rem;
+}
+
+.manual-reference-grid .upload-dropzone small {
+  line-height: 1.45;
+}
+
+.manual-reference-grid .inspiration-field textarea {
+  min-height: 8.75rem;
+}
+
+@media (max-width: 1000px) {
+  .manual-core-fields {
+    grid-template-columns: minmax(15rem, 0.8fr) minmax(0, 1.2fr);
+  }
+
+  .manual-reference-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .manual-reference-grid > label:first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 720px) {
+  .manual-core-fields,
+  .manual-reference-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .manual-reference-grid > label:first-child {
+    grid-column: auto;
+  }
+
+  .manual-reference-heading {
+    display: grid;
+    align-items: start;
+  }
+}

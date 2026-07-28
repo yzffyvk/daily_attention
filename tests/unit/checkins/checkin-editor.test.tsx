@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -62,8 +62,12 @@ describe("CheckInEditor modes", () => {
       "true",
     );
     expect(screen.getByLabelText("attention")).toBeVisible();
-    expect(screen.getByLabelText(/学习资料来源/)).toBeVisible();
     expect(screen.getByLabelText(/学习知识点小结/)).toBeVisible();
+
+    const referenceSection = screen.getByRole("region", { name: "参考资料" });
+    expect(within(referenceSection).getByLabelText(/学习资料来源/)).toBeVisible();
+    expect(within(referenceSection).getByTestId("image-note-uploader")).toBeVisible();
+    expect(within(referenceSection).getByLabelText(/灵感记录/)).toBeVisible();
   });
 
   it("stages an AI summary flow without sending a backend request", async () => {
