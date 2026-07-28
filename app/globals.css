@@ -3598,3 +3598,16 @@ button.calendar-cell:hover {
 .checkin-form .summary-editor .summary-size-large {
   font-size: 0.98rem;
 }
+
+/* One centered content rail keeps editor modules aligned on wide screens. */
+.editor-section {
+  --editor-content-width: 62rem;
+}
+
+.entry-mode-switch,
+.manual-entry,
+.ai-workflow,
+.form-actions {
+  width: min(100%, var(--editor-content-width));
+  margin-inline: auto;
+}

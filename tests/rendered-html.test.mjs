@@ -168,6 +168,14 @@ test("defines compact responsive calendar, sticky controls, and reduced-motion f
     /\.profile-email-value\s*\{[^}]*min-width:\s*0;[^}]*overflow-wrap:\s*anywhere;/s,
   );
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(
+    styles,
+    /\.editor-section\s*\{[^}]*--editor-content-width:\s*62rem;/s,
+  );
+  assert.match(
+    styles,
+    /\.entry-mode-switch,\s*\.manual-entry,\s*\.ai-workflow,\s*\.form-actions\s*\{[^}]*width:\s*min\(100%,\s*var\(--editor-content-width\)\);[^}]*margin-inline:\s*auto;/s,
+  );
   assert.doesNotMatch(styles, /border-radius:\s*(1[0-9]|[2-9][0-9])px/);
 });
 
