@@ -692,64 +692,66 @@ export function CheckInWorkspace({
           }}
           today={today}
         />
-        <MonthCalendar
-          errorMessage={monthQuery.isError ? messageForError(monthQuery.error) : ""}
-          isLoading={monthQuery.isPending}
-          isRetrying={monthQuery.isFetching}
-          month={month}
-          disabled={isEditorLocked}
-          onMonthChange={(nextMonth) => {
-            if (!editorLockedRef.current && !imageCleanupInFlightRef.current) setMonth(nextMonth);
-          }}
-          onRetry={() => void monthQuery.refetch()}
-          onSelectDate={requestDateChange}
-          selectedDate={selectedDate}
-          summaries={monthQuery.data}
-          today={today}
-        />
-        <CheckInEditor
-          date={selectedDate}
-          draft={draft}
-          isDirty={isDirty}
-          isLoading={isAwaitingSelectedRecord || isCloudReadFailure}
-          isSaving={isSaving || saveMutation.isPending}
-          isCleaningUpImage={isCleaningUpImage}
-          isPreparingImage={isPreparingImage}
-          isRetryingRecord={checkInQuery.isFetching}
-          isOffline={isOffline}
-          draftStorageState={draftStorageState}
-          loadError={isCloudReadFailure ? messageForError(checkInQuery.error) : ""}
-          message={message}
-          messageTone={messageTone}
-          onDraftChange={(change) => {
-            if (!editorLockedRef.current) {
-              setDraft((current) => ({ ...current, ...change }));
-            }
-          }}
-          onImageChange={handleImageChange}
-          onImageError={(nextMessage) => setStatus(nextMessage, "error")}
-          onImagePreparationChange={(isPreparing, identity) => {
-            if (identity !== selectedDateRef.current) return;
-            imagePreparationInFlightRef.current = isPreparing;
-            if (isPreparing) editorLockedRef.current = true;
-            setIsPreparingImage(isPreparing);
-          }}
-          onReset={async () => {
-            if (editorLockedRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current) return;
-            const operation = imageOperationRef.current + 1;
-            imageOperationRef.current = operation;
-            if (await abandonLocalDraft(selectedRecord, operation)) {
-              setStatus("已还原未保存的修改");
-            }
-          }}
-          onRetryRecord={() => {
-            if (!imageCleanupInFlightRef.current && !imagePreparationInFlightRef.current) {
-              void checkInQuery.refetch();
-            }
-          }}
-          onSubmit={saveCurrentRecord}
-          record={draftBaseRecord}
-        />
+        <div className="workspace-grid">
+          <MonthCalendar
+            errorMessage={monthQuery.isError ? messageForError(monthQuery.error) : ""}
+            isLoading={monthQuery.isPending}
+            isRetrying={monthQuery.isFetching}
+            month={month}
+            disabled={isEditorLocked}
+            onMonthChange={(nextMonth) => {
+              if (!editorLockedRef.current && !imageCleanupInFlightRef.current) setMonth(nextMonth);
+            }}
+            onRetry={() => void monthQuery.refetch()}
+            onSelectDate={requestDateChange}
+            selectedDate={selectedDate}
+            summaries={monthQuery.data}
+            today={today}
+          />
+          <CheckInEditor
+            date={selectedDate}
+            draft={draft}
+            isDirty={isDirty}
+            isLoading={isAwaitingSelectedRecord || isCloudReadFailure}
+            isSaving={isSaving || saveMutation.isPending}
+            isCleaningUpImage={isCleaningUpImage}
+            isPreparingImage={isPreparingImage}
+            isRetryingRecord={checkInQuery.isFetching}
+            isOffline={isOffline}
+            draftStorageState={draftStorageState}
+            loadError={isCloudReadFailure ? messageForError(checkInQuery.error) : ""}
+            message={message}
+            messageTone={messageTone}
+            onDraftChange={(change) => {
+              if (!editorLockedRef.current) {
+                setDraft((current) => ({ ...current, ...change }));
+              }
+            }}
+            onImageChange={handleImageChange}
+            onImageError={(nextMessage) => setStatus(nextMessage, "error")}
+            onImagePreparationChange={(isPreparing, identity) => {
+              if (identity !== selectedDateRef.current) return;
+              imagePreparationInFlightRef.current = isPreparing;
+              if (isPreparing) editorLockedRef.current = true;
+              setIsPreparingImage(isPreparing);
+            }}
+            onReset={async () => {
+              if (editorLockedRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current) return;
+              const operation = imageOperationRef.current + 1;
+              imageOperationRef.current = operation;
+              if (await abandonLocalDraft(selectedRecord, operation)) {
+                setStatus("已还原未保存的修改");
+              }
+            }}
+            onRetryRecord={() => {
+              if (!imageCleanupInFlightRef.current && !imagePreparationInFlightRef.current) {
+                void checkInQuery.refetch();
+              }
+            }}
+            onSubmit={saveCurrentRecord}
+            record={draftBaseRecord}
+          />
+        </div>
       </section>
 
       {toast ? <div aria-live="polite" className="light-toast" role="status">{toast}</div> : null}

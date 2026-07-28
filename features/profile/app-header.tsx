@@ -434,9 +434,18 @@ export function AppHeader({
               </button>
             )}
           </div>
-          <h1>
-            今天你<span>attention</span>了吗？
-          </h1>
+          <div className="brand-title-row">
+            <span aria-hidden="true" className="brand-monogram">A</span>
+            <h1>
+              今天你<span>attention</span>了吗？
+            </h1>
+          </div>
+          <div aria-hidden="true" className="attention-trace">
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
           <p className="hero-copy">每天留下一点新知，慢慢长成自己的知识地图。</p>
         </div>
 

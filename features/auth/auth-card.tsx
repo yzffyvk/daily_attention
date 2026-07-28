@@ -15,11 +15,21 @@ export function AuthCard({
     <main className="login-page">
       <section className="login-shell">
         <div className="login-brand">
-          <p className="eyebrow">AI LEARNING JOURNAL</p>
-          <h1>
-            今天你<span>attention</span>了吗？
-          </h1>
-          <p>给每天的学习留一个名字，也给自己留一个位置。</p>
+          <div className="auth-brand-mark" aria-hidden="true">A</div>
+          <div>
+            <p className="eyebrow">AI LEARNING JOURNAL</p>
+            <h1>
+              今天你<span>attention</span>了吗？
+            </h1>
+            <p>给每天的学习留一个名字，也给自己留一个位置。</p>
+          </div>
+          <div aria-hidden="true" className="auth-signal">
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
         </div>
         <section className="login-panel" aria-labelledby="auth-card-title">
           <div className="login-panel-heading">
