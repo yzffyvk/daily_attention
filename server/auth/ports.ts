@@ -3,6 +3,7 @@ export type AccountProfile = {
   email: string;
   displayName: string;
   avatarKey: number;
+  onboardingCompleted: boolean;
 };
 
 export type AuthPorts = {
@@ -14,6 +15,11 @@ export type AuthPorts = {
     email: string;
     avatarKey: number;
     recoveryDigest: Uint8Array;
+  }): Promise<AccountProfile>;
+  completeOnboarding(input: {
+    userId: string;
+    displayName: string;
+    avatarKey: number;
   }): Promise<AccountProfile>;
   resolveEmail(email: string): Promise<{ userId: string } | null>;
   resolveRecoveryChallenge(email: string): Promise<{ userId: string | null; recoveryDigest: Uint8Array }>;

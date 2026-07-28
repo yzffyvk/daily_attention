@@ -41,29 +41,6 @@ describe("auth response mapping", () => {
     expect(JSON.stringify(body)).not.toContain("recovery data");
   });
 
-  it("logs a sanitized operational alert for post-completion registration sign-in failure", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-
-    const response = authFailure(new Error("REGISTRATION_SIGNIN_FAILED"), "request-id");
-    const body = await response.json();
-
-    expect(response.status).toBe(500);
-    expect(body).toEqual({
-      ok: false,
-      error: {
-        code: "INTERNAL_ERROR",
-        message: "服务暂时不可用，请稍后再试",
-        details: {},
-      },
-      requestId: "request-id",
-    });
-    expect(errorSpy).toHaveBeenCalledWith("auth request failed", {
-      requestId: "request-id",
-      errorType: "Error",
-      errorCode: "REGISTRATION_SIGNIN_FAILED",
-    });
-  });
-
   it("does not alert for a mapped client error", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
 

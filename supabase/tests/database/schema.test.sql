@@ -1,5 +1,5 @@
 begin;
-select plan(46);
+select plan(50);
 
 select has_schema('private', 'private schema exists');
 select has_table('public', 'profiles', 'profiles exists');
@@ -15,6 +15,25 @@ select col_is_pk(
   'account_recovery_credentials.user_id is the primary key'
 );
 select has_column('public', 'profiles', 'email', 'profiles have an email');
+select has_column(
+  'public',
+  'profiles',
+  'onboarding_completed',
+  'profiles track whether first-login onboarding is complete'
+);
+select col_not_null(
+  'public',
+  'profiles',
+  'onboarding_completed',
+  'onboarding state is required'
+);
+select col_default_is(
+  'public',
+  'profiles',
+  'onboarding_completed',
+  'false',
+  'new profiles default to incomplete onboarding'
+);
 select col_not_null('public', 'profiles', 'email', 'email is required');
 select col_is_unique('public', 'profiles', 'email', 'email is unique');
 select col_type_is('public', 'profiles', 'email', 'character varying(254)', 'email has a 254-character maximum');
@@ -50,6 +69,12 @@ select function_returns(
   'public',
   'read_profile',
   array['uuid'],
+  'public.profiles'
+);
+select function_returns(
+  'public',
+  'complete_profile_onboarding',
+  array['uuid', 'text', 'smallint'],
   'public.profiles'
 );
 select has_column('public', 'check_ins', 'version', 'check-ins have a version');

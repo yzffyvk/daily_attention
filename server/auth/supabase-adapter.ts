@@ -13,6 +13,7 @@ const databaseProfileSchema = z.object({
   email: z.string().email(),
   display_name: z.string().min(1),
   avatar_key: z.number().int().min(1).max(5),
+  onboarding_completed: z.boolean(),
 });
 const emailResolutionSchema = z.array(z.object({ user_id: z.string().min(1) })).max(1);
 const recoveryChallengeSchema = z
@@ -70,6 +71,7 @@ function profile(value: unknown): AccountProfile {
     email: parsed.data.email,
     displayName: parsed.data.display_name,
     avatarKey: parsed.data.avatar_key,
+    onboardingCompleted: parsed.data.onboarding_completed,
   };
 }
 
@@ -124,6 +126,16 @@ export async function createSupabaseAuthAdapter() {
       });
       throwIfError(error);
       if (!data) throw new Error("Profile was not created");
+      return profile(data);
+    },
+    async completeOnboarding(input) {
+      const { data, error } = await admin.rpc("complete_profile_onboarding", {
+        target_user_id: input.userId,
+        target_display_name: input.displayName,
+        target_avatar_key: input.avatarKey,
+      });
+      throwIfError(error);
+      if (!data) throw new Error("Profile onboarding was not completed");
       return profile(data);
     },
     async resolveEmail(email) {
@@ -213,7 +225,7 @@ export async function createSupabaseAuthAdapter() {
     async currentProfile(userId: string) {
       const { data, error } = await server
         .from("profiles")
-        .select("id, email, display_name, avatar_key")
+        .select("id, email, display_name, avatar_key, onboarding_completed")
         .eq("id", userId)
         .maybeSingle();
       throwIfError(error);

@@ -1,5 +1,5 @@
 begin;
-select plan(61);
+select plan(65);
 
 select results_eq(
   $$ select last_value, is_called
@@ -15,6 +15,14 @@ select function_privs_are(
   'anon',
   array[]::text[],
   'anon cannot complete registration'
+);
+select function_privs_are(
+  'public',
+  'complete_profile_onboarding',
+  array['uuid', 'text', 'smallint'],
+  'anon',
+  array[]::text[],
+  'anon cannot complete profile onboarding'
 );
 select function_privs_are(
   'public',
@@ -82,6 +90,14 @@ select function_privs_are(
 );
 select function_privs_are(
   'public',
+  'complete_profile_onboarding',
+  array['uuid', 'text', 'smallint'],
+  'authenticated',
+  array[]::text[],
+  'authenticated cannot complete profile onboarding'
+);
+select function_privs_are(
+  'public',
   'resolve_email',
   array['text'],
   'authenticated',
@@ -103,6 +119,14 @@ select function_privs_are(
   'service_role',
   array['EXECUTE'],
   'only service role can resolve recovery challenges'
+);
+select function_privs_are(
+  'public',
+  'complete_profile_onboarding',
+  array['uuid', 'text', 'smallint'],
+  'service_role',
+  array['EXECUTE'],
+  'only service role can complete profile onboarding'
 );
 select function_privs_are(
   'public',
@@ -382,14 +406,14 @@ select results_eq(
 );
 
 select results_eq(
-  $$select email, display_name, avatar_key
+  $$select email, display_name, avatar_key, onboarding_completed
     from public.complete_registration(
       '00000000-0000-4000-8000-000000000003',
       'first@example.com',
       3::smallint,
       decode('01020304', 'hex')
     )$$,
-  $$values ('first@example.com'::varchar, 'Attention_001'::varchar, 3::smallint)$$,
+  $$values ('first@example.com'::varchar, 'Attention_001'::varchar, 3::smallint, false)$$,
   'first registration receives the first global default name'
 );
 select results_eq(
@@ -456,6 +480,16 @@ select results_eq(
     )$$,
   $$values ('first@example.com'::varchar, 'Renamed'::varchar, 4::smallint)$$,
   'service role updates and returns the profile without changing its email'
+);
+select results_eq(
+  $$select display_name, avatar_key, onboarding_completed
+    from public.complete_profile_onboarding(
+      '00000000-0000-4000-8000-000000000003',
+      'First login name',
+      5::smallint
+    )$$,
+  $$values ('First login name'::varchar, 5::smallint, true)$$,
+  'service role completes first-login onboarding'
 );
 select results_eq(
   $$select * from public.resolve_email('first@example.com')$$,

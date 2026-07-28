@@ -148,14 +148,13 @@ export async function register(page: Page, email?: string) {
   await page.goto("/register", { waitUntil: "load" });
   await waitForClient(page);
   await page.getByLabel("邮箱").fill(allocatedEmail);
-  await page.getByLabel("头像 4").check();
   await page.getByLabel("密码", { exact: true }).fill(password);
   await page.getByLabel("确认密码").fill(password);
   const registrationResponse = page.waitForResponse((response) => {
     const url = new URL(response.url());
     return url.pathname === "/api/auth/register" && response.request().method() === "POST";
   });
-  await page.getByRole("button", { name: "注册并进入" }).click();
+  await page.getByRole("button", { name: "创建账号" }).click();
   const response = await registrationResponse;
   if (!response.ok()) {
     throw new Error(`E2E registration failed with status ${response.status()}`);
@@ -179,6 +178,17 @@ export async function register(page: Page, email?: string) {
   const code = (await recoveryCode.textContent())?.trim();
   if (!code) throw new Error("The registration dialog did not show a recovery code");
   await page.getByRole("button", { name: "我已保存" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await waitForClient(page);
+  await page.getByLabel("邮箱").fill(allocatedEmail);
+  await page.getByLabel("密码", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "登录" }).click();
+  await expect(page).toHaveURL(/\/onboarding$/);
+  await page.goto("/", { waitUntil: "load" });
+  await expect(page).toHaveURL(/\/onboarding$/);
+  await page.getByLabel("名称").fill("E2E 学习者");
+  await page.getByLabel("头像 4").check();
+  await page.getByRole("button", { name: "进入学习空间" }).click();
   await expect(page.getByRole("button", { name: "打开账户菜单" })).toBeVisible();
   return { code, email: allocatedEmail };
 }

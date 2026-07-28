@@ -14,15 +14,21 @@ let emailSeed = 30_000;
 async function registeredSession() {
   const ip = `storage-${crypto.randomUUID()}`;
   const session = new ApiSession(undefined, { "CF-Connecting-IP": ip });
+  const email = uniqueEmail(emailSeed++);
   trackIntegrationRateBucket("register", ip);
   const response = await session.post("/api/auth/register", {
-    email: uniqueEmail(emailSeed++),
+    email,
     password: "password123",
-    avatarKey: 1,
   });
   expect(response.status).toBe(201);
   const userId = response.body.data.profile.id as string;
   trackIntegrationUser(userId, response.body.data.profile.email as string);
+  trackIntegrationRateBucket("login", `${ip}:${email}`);
+  expect((await session.post("/api/auth/login", { email, password: "password123" })).status).toBe(200);
+  expect((await session.post("/api/onboarding", {
+    displayName: "存储测试用户",
+    avatarKey: 1,
+  })).status).toBe(200);
   return { session, userId };
 }
 

@@ -25,12 +25,14 @@ beforeEach(() => {
     email: "user@example.com",
     displayName: "Attention_001",
     avatarKey: 2,
+    onboardingCompleted: true,
   });
   mocks.updateProfile.mockResolvedValue({
     id: "user-1",
     email: "user@example.com",
     displayName: "Attention_001",
     avatarKey: 5,
+    onboardingCompleted: true,
   });
 });
 
@@ -79,6 +81,7 @@ describe("PATCH /api/me", () => {
           email: "user@example.com",
           displayName: "Attention_001",
           avatarKey: 5,
+          onboardingCompleted: true,
         },
       },
     });
@@ -95,6 +98,7 @@ describe("PATCH /api/me", () => {
       email: "user@example.com",
       displayName: "新的名称",
       avatarKey: 2,
+      onboardingCompleted: true,
     });
 
     const response = await PATCH(new Request("http://example.test/api/me", {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   loginInputSchema,
   normalizeEmail,
+  onboardingInputSchema,
   profilePatchSchema,
   recoverInputSchema,
   registerInputSchema,
@@ -16,14 +17,16 @@ describe("user contracts", () => {
     expect(registerInputSchema.parse({
       email: " User@Example.COM ",
       password: "password123",
-      avatarKey: 3,
     })).toEqual({
       email: "user@example.com",
       password: "password123",
-      avatarKey: 3,
     });
     expect(registerInputSchema.safeParse({
       email: "not-an-email",
+      password: "password123",
+    }).success).toBe(false);
+    expect(registerInputSchema.safeParse({
+      email: "user@example.com",
       password: "password123",
       avatarKey: 3,
     }).success).toBe(false);
@@ -67,5 +70,26 @@ describe("user contracts", () => {
   it("allows display name patches but rejects email patches", () => {
     expect(profilePatchSchema.safeParse({ displayName: "新的名称" }).success).toBe(true);
     expect(profilePatchSchema.safeParse({ email: "other@example.com" }).success).toBe(false);
+  });
+
+  it("requires a normalized display name and an explicit avatar during onboarding", () => {
+    expect(onboardingInputSchema.parse({
+      displayName: "  新的   名称  ",
+      avatarKey: 3,
+    })).toEqual({
+      displayName: "新的 名称",
+      avatarKey: 3,
+    });
+    expect(onboardingInputSchema.safeParse({ displayName: "新的名称" }).success).toBe(false);
+    expect(onboardingInputSchema.safeParse({ avatarKey: 2 }).success).toBe(false);
+    expect(onboardingInputSchema.safeParse({
+      displayName: "新的名称",
+      avatarKey: 6,
+    }).success).toBe(false);
+    expect(onboardingInputSchema.safeParse({
+      displayName: "新的名称",
+      avatarKey: 2,
+      userId: "forged",
+    }).success).toBe(false);
   });
 });

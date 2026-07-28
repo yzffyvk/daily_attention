@@ -18,7 +18,7 @@ afterEach(() => {
 
 describe("profile header", () => {
   it("loads lifetime totals and a cross-month current streak from the stats query", async () => {
-    const profile = { id: "profile-1", email: "learner@example.com", avatarKey: 1, displayName: "学习者" };
+    const profile = { id: "profile-1", email: "learner@example.com", avatarKey: 1, displayName: "学习者", onboardingCompleted: true };
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
@@ -64,7 +64,7 @@ describe("profile header", () => {
   });
 
   it("keeps a stats failure visible and independently retryable", async () => {
-    const profile = { id: "profile-1", email: "learner@example.com", avatarKey: 1, displayName: "学习者" };
+    const profile = { id: "profile-1", email: "learner@example.com", avatarKey: 1, displayName: "学习者", onboardingCompleted: true };
     let statsRequests = 0;
     vi.stubGlobal(
       "fetch",
@@ -128,6 +128,7 @@ describe("profile header", () => {
       email: "student@example.com",
       avatarKey: 1,
       displayName: "Attention_001",
+      onboardingCompleted: true,
     };
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
         if (String(input).startsWith("/api/checkins/stats?")) {
@@ -200,6 +201,7 @@ describe("profile header", () => {
       email: `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.invalid`,
       avatarKey: 1,
       displayName: "Attention_001",
+      onboardingCompleted: true,
     };
     vi.stubGlobal(
       "fetch",
@@ -241,7 +243,7 @@ describe("profile header", () => {
   });
 
   it("keeps a duplicate profile name as its meaningful 409 error", async () => {
-    const profile = { id: "profile-1", email: "learner@example.com", avatarKey: 1, displayName: "学习者" };
+    const profile = { id: "profile-1", email: "learner@example.com", avatarKey: 1, displayName: "学习者", onboardingCompleted: true };
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -301,7 +303,7 @@ describe("profile header", () => {
   });
 
   it("restores focus to the account trigger after closing the profile dialog", async () => {
-    const profile = { id: "profile-1", email: "learner@example.com", avatarKey: 1, displayName: "学习者" };
+    const profile = { id: "profile-1", email: "learner@example.com", avatarKey: 1, displayName: "学习者", onboardingCompleted: true };
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
@@ -340,7 +342,7 @@ describe("profile header", () => {
   });
 
   it("rotates and shows a recovery code once after confirming the current password", async () => {
-    const profile = { id: "profile-1", email: "learner@example.com", avatarKey: 1, displayName: "学习者" };
+    const profile = { id: "profile-1", email: "learner@example.com", avatarKey: 1, displayName: "学习者", onboardingCompleted: true };
     const rotatedCode = "ABCDE-FGHJK-MNPQR-STUVW-XYZ234";
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const path = String(input);
@@ -404,7 +406,7 @@ describe("profile header", () => {
   });
 
   it("keeps the recovery-code rotation dialog usable after an API error", async () => {
-    const profile = { id: "profile-1", email: "learner@example.com", avatarKey: 1, displayName: "学习者" };
+    const profile = { id: "profile-1", email: "learner@example.com", avatarKey: 1, displayName: "学习者", onboardingCompleted: true };
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {

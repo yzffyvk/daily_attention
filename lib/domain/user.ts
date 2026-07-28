@@ -37,8 +37,7 @@ const emailSchema = z
 export const registerInputSchema = z.object({
   email: emailSchema,
   password: passwordSchema,
-  avatarKey: z.number().int().min(1).max(5),
-});
+}).strict();
 
 export const loginInputSchema = z.object({
   email: emailSchema,
@@ -62,3 +61,8 @@ export const profilePatchSchema = z.object({
     });
   }
 });
+
+export const onboardingInputSchema = z.object({
+  displayName: normalizedNameSchema,
+  avatarKey: z.number().int().min(1).max(5),
+}).strict();

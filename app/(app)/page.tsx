@@ -13,10 +13,11 @@ export default async function AppPage() {
 
   const { data: profile, error } = await supabase
     .from("profiles")
-    .select("id, email, display_name, avatar_key")
+    .select("id, email, display_name, avatar_key, onboarding_completed")
     .eq("id", data.claims.sub)
     .maybeSingle();
   if (error || !profile) redirect("/login");
+  if (!profile.onboarding_completed) redirect("/onboarding");
 
   return (
     <CheckInWorkspaceClient
@@ -28,6 +29,7 @@ export default async function AppPage() {
         email: profile.email,
         displayName: profile.display_name,
         avatarKey: profile.avatar_key,
+        onboardingCompleted: profile.onboarding_completed,
       }}
     />
   );

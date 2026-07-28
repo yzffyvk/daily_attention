@@ -582,6 +582,34 @@ h2 {
   align-items: center;
 }
 
+.onboarding-form {
+  gap: 1.25rem;
+}
+
+.onboarding-actions {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.15rem;
+}
+
+.onboarding-actions .primary-button {
+  width: 100%;
+}
+
+.onboarding-logout {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.onboarding-logout:disabled {
+  opacity: 0.55;
+}
+
 .profile-list {
   display: grid;
   grid-template-columns: 1fr 1fr;

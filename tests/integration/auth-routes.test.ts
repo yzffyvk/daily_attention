@@ -20,9 +20,9 @@ function fixtureSession() {
   };
 }
 
-async function register(session: ApiSession, ip: string, email: string, avatarKey: number) {
+async function register(session: ApiSession, ip: string, email: string) {
   trackIntegrationRateBucket("register", ip);
-  const response = await session.post("/api/auth/register", { email, password: "password123", avatarKey });
+  const response = await session.post("/api/auth/register", { email, password: "password123" });
   if (response.status === 201) trackIntegrationUser(response.body.data.profile.id as string, email);
   return response;
 }
@@ -67,18 +67,20 @@ describe("authentication routes", () => {
   it("registers, logs out, logs in, updates a profile, and rotates recovery credentials", async () => {
     const { ip, session } = fixtureSession();
     const email = uniqueEmail(emailSeed++);
-    const registered = await register(session, ip, email, 4);
+    const registered = await register(session, ip, email);
     expect(registered.status).toBe(201);
     expect(registered.headers.get("Cache-Control")).toBe("private, no-store");
     expect(registered.body.data.recoveryCode.replace(/-/g, "")).toHaveLength(26);
     expect(registered.body.data.profile).toEqual(expect.objectContaining({
       email,
       displayName: expect.stringMatching(/^Attention_[0-9]{3}$/),
+      avatarKey: 1,
+      onboardingCompleted: false,
     }));
     const originalRecoveryCode = registered.body.data.recoveryCode as string;
 
-    expect((await session.request("/api/me")).status).toBe(200);
-    const duplicateEmail = await register(new ApiSession(undefined, { "CF-Connecting-IP": ip }), ip, email, 1);
+    expect((await session.request("/api/me")).status).toBe(401);
+    const duplicateEmail = await register(new ApiSession(undefined, { "CF-Connecting-IP": ip }), ip, email);
     expect(duplicateEmail.status).toBe(409);
     expect(duplicateEmail.headers.get("Cache-Control")).toBe("private, no-store");
     expect(duplicateEmail.body.error).toMatchObject({
@@ -93,6 +95,17 @@ describe("authentication routes", () => {
     expect((await session.post("/api/auth/login", { email, password: "password123" })).status).toBe(200);
 
     const renamed = "测试用户新名称";
+    const onboarded = await session.post("/api/onboarding", {
+      displayName: renamed,
+      avatarKey: 5,
+    });
+    expect(onboarded.status).toBe(200);
+    expect(onboarded.body.data.profile).toMatchObject({
+      email,
+      displayName: renamed,
+      avatarKey: 5,
+      onboardingCompleted: true,
+    });
     expect(
       (
         await session.request("/api/me", {
@@ -158,7 +171,7 @@ describe("authentication routes", () => {
     const { ip, session } = fixtureSession();
     const email = uniqueEmail(emailSeed++);
     const password = "password123";
-    const registered = await register(session, ip, email, 3);
+    const registered = await register(session, ip, email);
     expect(registered.status).toBe(201);
     const userId = registered.body.data.profile.id as string;
     await session.post("/api/auth/logout", {});
@@ -234,14 +247,17 @@ describe("authentication routes", () => {
     expect(malformed.headers.get("Cache-Control")).toBe("private, no-store");
 
     const email = uniqueEmail(emailSeed++);
-    const registered = await register(session, ip, email, 2);
+    const registered = await register(session, ip, email);
     expect(registered.status).toBe(201);
+    trackEmailBucket("login", ip, email);
+    expect((await session.post("/api/auth/login", { email, password: "password123" })).status).toBe(200);
     const profile = await session.request("/api/me");
     expect(profile.status).toBe(200);
     expect(profile.body.data.profile).toEqual(expect.objectContaining({
       email,
       displayName: expect.stringMatching(/^Attention_[0-9]{3}$/),
-      avatarKey: 2,
+      avatarKey: 1,
+      onboardingCompleted: false,
     }));
     expect(JSON.stringify(profile.body)).not.toMatch(/auth_email|internal\.invalid|recovery_digest/i);
     const displayName = profile.body.data.profile.displayName as string;
@@ -290,7 +306,6 @@ describe("authentication routes", () => {
         body: JSON.stringify({
           email: uniqueEmail(emailSeed++),
           password: "password123",
-          avatarKey: 1,
         }),
       });
       expect(response.status).toBe(201);
@@ -301,7 +316,7 @@ describe("authentication routes", () => {
     const spoofedXff = await session.request("/api/auth/register", {
       method: "POST",
       headers: { ...headers, "X-Forwarded-For": "203.0.113.99" },
-      body: JSON.stringify({ email: uniqueEmail(emailSeed++), password: "password123", avatarKey: 1 }),
+      body: JSON.stringify({ email: uniqueEmail(emailSeed++), password: "password123" }),
     });
     expect(spoofedXff.status).toBe(429);
     expect(spoofedXff.body.error.code).toBe("RATE_LIMITED");
@@ -311,7 +326,7 @@ describe("authentication routes", () => {
     const differentVerifiedIp = await session.request("/api/auth/register", {
       method: "POST",
       headers: { "CF-Connecting-IP": `${cloudflareIp}-different`, "X-Forwarded-For": "203.0.113.99" },
-      body: JSON.stringify({ email: uniqueEmail(emailSeed++), password: "password123", avatarKey: 1 }),
+      body: JSON.stringify({ email: uniqueEmail(emailSeed++), password: "password123" }),
     });
     expect(differentVerifiedIp.status).toBe(201);
     if (differentVerifiedIp.status === 201) trackIntegrationUser(differentVerifiedIp.body.data.profile.id as string, differentVerifiedIp.body.data.profile.email as string);

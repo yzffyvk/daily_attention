@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { loginAccount, recoverAccount, registerAccount, updateProfile } from "@/server/auth/service";
+import {
+  completeOnboarding,
+  loginAccount,
+  recoverAccount,
+  registerAccount,
+  updateProfile,
+} from "@/server/auth/service";
 import type { AuthPorts } from "@/server/auth/ports";
 
 function ports(): AuthPorts {
@@ -8,6 +14,7 @@ function ports(): AuthPorts {
     email: "user@example.com",
     displayName: "Attention_001",
     avatarKey: 2,
+    onboardingCompleted: false,
   };
 
   return {
@@ -15,6 +22,12 @@ function ports(): AuthPorts {
     createAuthUser: vi.fn().mockResolvedValue({ id: "user-1" }),
     deleteAuthUser: vi.fn().mockResolvedValue(undefined),
     completeRegistration: vi.fn().mockResolvedValue(profile),
+    completeOnboarding: vi.fn().mockResolvedValue({
+      ...profile,
+      displayName: "新的名称",
+      avatarKey: 5,
+      onboardingCompleted: true,
+    }),
     resolveEmail: vi.fn().mockResolvedValue({ userId: "user-1" }),
     resolveRecoveryChallenge: vi.fn(),
     readProfile: vi.fn().mockResolvedValue(profile),
@@ -48,7 +61,7 @@ describe("auth service", () => {
     vi.mocked(adapter.completeRegistration).mockRejectedValue(registrationError);
     await expect(
       registerAccount(
-        { email: "user@example.com", password: "password123", avatarKey: 2, bucket: "register-key" },
+        { email: "user@example.com", password: "password123", bucket: "register-key" },
         adapter,
       ),
     ).rejects.toThrow(registrationError);
@@ -64,7 +77,7 @@ describe("auth service", () => {
 
     await expect(
       registerAccount(
-        { email: "user@example.com", password: "password123", avatarKey: 2, bucket: "register-key" },
+        { email: "user@example.com", password: "password123", bucket: "register-key" },
         adapter,
       ),
     ).rejects.toMatchObject({
@@ -74,45 +87,13 @@ describe("auth service", () => {
     });
   });
 
-  it("keeps the completed account when the final sign-in fails", async () => {
-    const adapter = ports();
-    const signInFailure = new Error("sign-in failed");
-    vi.mocked(adapter.signIn).mockRejectedValue(signInFailure);
-
-    await expect(
-      registerAccount(
-        { email: "user@example.com", password: "password123", avatarKey: 2, bucket: "register-key" },
-        adapter,
-      ),
-    ).rejects.toThrow("REGISTRATION_SIGNIN_FAILED");
-
-    expect(adapter.completeRegistration).toHaveBeenCalledOnce();
-    expect(adapter.deleteAuthUser).not.toHaveBeenCalled();
-  });
-
-  it("does not attempt compensation after profile completion even when deletion would fail", async () => {
-    const adapter = ports();
-    vi.mocked(adapter.signIn).mockRejectedValue(new Error("sign-in failed"));
-    vi.mocked(adapter.deleteAuthUser).mockRejectedValue(new Error("Auth cleanup failed"));
-
-    await expect(
-      registerAccount(
-        { email: "user@example.com", password: "password123", avatarKey: 2, bucket: "register-key" },
-        adapter,
-      ),
-    ).rejects.toThrow("REGISTRATION_SIGNIN_FAILED");
-
-    expect(adapter.deleteAuthUser).not.toHaveBeenCalled();
-  });
-
-  it("registers with email and signs in", async () => {
+  it("registers with credentials, assigns the internal avatar, and leaves login explicit", async () => {
     const adapter = ports();
 
     await registerAccount(
       {
         email: "user@example.com",
         password: "password123",
-        avatarKey: 2,
         bucket: "register-key",
       },
       adapter,
@@ -123,9 +104,9 @@ describe("auth service", () => {
       password: "password123",
     });
     expect(adapter.completeRegistration).toHaveBeenCalledWith(
-      expect.objectContaining({ email: "user@example.com" }),
+      expect.objectContaining({ email: "user@example.com", avatarKey: 1 }),
     );
-    expect(adapter.signIn).toHaveBeenCalledWith("user@example.com", "password123");
+    expect(adapter.signIn).not.toHaveBeenCalled();
   });
 
   it("signs in directly with email", async () => {
@@ -299,6 +280,28 @@ describe("auth service", () => {
     expect(adapter.updateProfile).toHaveBeenCalledWith({
       userId: "user-1",
       displayName: "Attention_002",
+      avatarKey: 5,
+    });
+  });
+
+  it("completes onboarding for the authenticated user identity supplied by the route", async () => {
+    const adapter = ports();
+
+    await expect(
+      completeOnboarding({
+        userId: "user-1",
+        displayName: "新的名称",
+        avatarKey: 5,
+      }, adapter),
+    ).resolves.toMatchObject({
+      displayName: "新的名称",
+      avatarKey: 5,
+      onboardingCompleted: true,
+    });
+
+    expect(adapter.completeOnboarding).toHaveBeenCalledWith({
+      userId: "user-1",
+      displayName: "新的名称",
       avatarKey: 5,
     });
   });

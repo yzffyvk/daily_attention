@@ -64,6 +64,7 @@ const databaseProfile = {
   email: "user@example.com",
   display_name: "Attention_001",
   avatar_key: 2,
+  onboarding_completed: false,
 };
 
 beforeEach(() => {
@@ -193,6 +194,7 @@ describe("Supabase auth adapter", () => {
       email: "user@example.com",
       displayName: "Attention_001",
       avatarKey: 2,
+      onboardingCompleted: false,
     });
     expect(mocks.rpc).toHaveBeenCalledWith("complete_registration", {
       target_user_id: "user-1",
@@ -317,6 +319,7 @@ describe("Supabase auth adapter", () => {
       email: "user@example.com",
       displayName: "Attention_001",
       avatarKey: 2,
+      onboardingCompleted: false,
     });
     expect(mocks.rpc).toHaveBeenCalledWith("read_profile", {
       target_user_id: "user-1",
@@ -355,6 +358,36 @@ describe("Supabase auth adapter", () => {
     });
   });
 
+  it("completes first-login onboarding through the privileged RPC", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: {
+        ...databaseProfile,
+        display_name: "新的名称",
+        avatar_key: 5,
+        onboarding_completed: true,
+      },
+      error: null,
+    });
+    const { ports } = await createSupabaseAuthAdapter();
+
+    await expect(
+      ports.completeOnboarding({
+        userId: "user-1",
+        displayName: "新的名称",
+        avatarKey: 5,
+      }),
+    ).resolves.toMatchObject({
+      displayName: "新的名称",
+      avatarKey: 5,
+      onboardingCompleted: true,
+    });
+    expect(mocks.rpc).toHaveBeenCalledWith("complete_profile_onboarding", {
+      target_user_id: "user-1",
+      target_display_name: "新的名称",
+      target_avatar_key: 5,
+    });
+  });
+
   it("rejects an updated profile response with the old phone field shape", async () => {
     mocks.rpc.mockResolvedValue({ data: { ...databaseProfile, phone: "13800138000", email: undefined }, error: null });
     const { ports } = await createSupabaseAuthAdapter();
@@ -372,8 +405,11 @@ describe("Supabase auth adapter", () => {
       email: "user@example.com",
       displayName: "Attention_001",
       avatarKey: 2,
+      onboardingCompleted: false,
     });
-    expect(mocks.select).toHaveBeenCalledWith("id, email, display_name, avatar_key");
+    expect(mocks.select).toHaveBeenCalledWith(
+      "id, email, display_name, avatar_key, onboarding_completed",
+    );
     expect(mocks.eq).toHaveBeenCalledWith("id", "user-1");
   });
 

@@ -46,7 +46,7 @@ async function restoreRecoveryDigest(
 }
 
 export async function registerAccount(
-  input: { email: string; password: string; avatarKey: number; bucket: string },
+  input: { email: string; password: string; bucket: string },
   ports: AuthPorts,
 ) {
   await ports.rateLimit({ action: "register", bucket: input.bucket });
@@ -58,7 +58,7 @@ export async function registerAccount(
     profile = await ports.completeRegistration({
       userId: authUser.id,
       email: input.email,
-      avatarKey: input.avatarKey,
+      avatarKey: 1,
       recoveryDigest: await digest(recoveryCode),
     });
   } catch (registrationError) {
@@ -73,11 +73,6 @@ export async function registerAccount(
     throw registrationError;
   }
 
-  try {
-    await ports.signIn(input.email, input.password);
-  } catch {
-    throw new Error("REGISTRATION_SIGNIN_FAILED");
-  }
   return { profile, recoveryCode };
 }
 
@@ -136,6 +131,17 @@ export async function updateProfile(
     displayName: input.displayName,
     avatarKey: input.avatarKey,
   });
+}
+
+export async function completeOnboarding(
+  input: {
+    userId: string;
+    displayName: string;
+    avatarKey: number;
+  },
+  ports: AuthPorts,
+) {
+  return ports.completeOnboarding(input);
 }
 
 export async function rotateRecoveryCode(

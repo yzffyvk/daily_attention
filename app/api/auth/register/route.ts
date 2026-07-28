@@ -16,7 +16,6 @@ export async function POST(request: Request) {
       {
         email: parsed.data.email,
         password: parsed.data.password,
-        avatarKey: parsed.data.avatarKey,
         bucket: requestIp(request),
       },
       adapter.ports,

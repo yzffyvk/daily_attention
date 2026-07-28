@@ -4,6 +4,7 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { postAuth } from "@/features/auth/auth-card";
 import { LoginForm } from "@/features/auth/login-form";
+import { OnboardingForm } from "@/features/auth/onboarding-form";
 import { RecoverForm } from "@/features/auth/recover-form";
 import { RegisterForm } from "@/features/auth/register-form";
 import { RecoveryCodeDialog } from "@/features/auth/recovery-code-dialog";
@@ -25,14 +26,14 @@ afterEach(() => {
 });
 
 describe("registration UI", () => {
-  it("renders an accessible email field, five avatars, and a return-login link", () => {
+  it("renders credential fields and a return-login link without avatar selection", () => {
     render(<RegisterForm onRegistered={vi.fn()} />);
     const email = screen.getByLabelText("邮箱");
 
     expect(email).toHaveAttribute("type", "email");
     expect(email).toHaveAttribute("autocomplete", "username");
     expect(screen.queryByLabelText("名称")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("radio", { name: /头像/ })).toHaveLength(5);
+    expect(screen.queryByRole("radio", { name: /头像/ })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "返回登录" })).toHaveAttribute("href", "/login");
   });
 
@@ -49,15 +50,14 @@ describe("registration UI", () => {
     render(<RegisterForm onRegistered={vi.fn()} />);
 
     await user.type(screen.getByLabelText("邮箱"), "Student@Example.COM");
-    await user.click(screen.getByRole("radio", { name: "头像 1" }));
     await user.type(screen.getByLabelText("密码"), "password123");
     await user.type(screen.getByLabelText("确认密码"), "password123");
-    await user.click(screen.getByRole("button", { name: "注册并进入" }));
+    await user.click(screen.getByRole("button", { name: "创建账号" }));
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/auth/register",
       expect.objectContaining({
-        body: JSON.stringify({ email: "Student@Example.COM", password: "password123", avatarKey: 1 }),
+        body: JSON.stringify({ email: "Student@Example.COM", password: "password123" }),
       }),
     );
   });
@@ -69,10 +69,9 @@ describe("registration UI", () => {
     render(<RegisterForm onRegistered={vi.fn()} />);
     const email = screen.getByLabelText("邮箱");
     await user.type(email, "student@example.com");
-    await user.click(screen.getByRole("radio", { name: "头像 1" }));
     await user.type(screen.getByLabelText("密码"), "password123");
     await user.type(screen.getByLabelText("确认密码"), "password123");
-    await user.click(screen.getByRole("button", { name: "注册并进入" }));
+    await user.click(screen.getByRole("button", { name: "创建账号" }));
 
     const error = await screen.findByText("该邮箱已注册");
     expect(email).toHaveValue("student@example.com");
@@ -181,13 +180,12 @@ describe("authentication network failures", () => {
     render(<RegisterForm onRegistered={vi.fn()} />);
 
     await user.type(screen.getByLabelText("邮箱"), "student@example.com");
-    await user.click(screen.getByRole("radio", { name: "头像 1" }));
     await user.type(screen.getByLabelText("密码"), "password123");
     await user.type(screen.getByLabelText("确认密码"), "password123");
-    await user.click(screen.getByRole("button", { name: "注册并进入" }));
+    await user.click(screen.getByRole("button", { name: "创建账号" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("网络连接失败，请检查网络后重试");
-    expect(screen.getByRole("button", { name: "注册并进入" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "创建账号" })).toBeEnabled();
   });
 
   it("unlocks the recovery form and shows a friendly error after a network failure", async () => {
@@ -207,6 +205,52 @@ describe("authentication network failures", () => {
     expect(email).toHaveValue("student@example.com");
     expect(await screen.findByRole("alert")).toHaveTextContent("网络连接失败，请检查网络后重试");
     expect(screen.getByRole("button", { name: "重设密码" })).toBeEnabled();
+  });
+});
+
+describe("first-login onboarding UI", () => {
+  it("requires a name and explicit avatar before entering the learning space", async () => {
+    const user = userEvent.setup();
+    render(<OnboardingForm />);
+
+    expect(screen.getByLabelText("名称")).toHaveValue("");
+    expect(screen.getAllByRole("radio", { name: /头像/ })).toHaveLength(5);
+    expect(screen.getAllByRole("radio", { name: /头像/ }).every((radio) => !radio.hasAttribute("checked"))).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "进入学习空间" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("请填写名称");
+  });
+
+  it("submits only the selected name and avatar", async () => {
+    const assign = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({
+      ok: true,
+      requestId: "request-id",
+      data: {
+        profile: {
+          id: "profile-1",
+          email: "student@example.com",
+          displayName: "学习者",
+          avatarKey: 4,
+          onboardingCompleted: true,
+        },
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<OnboardingForm onCompleted={assign} />);
+
+    await user.type(screen.getByLabelText("名称"), "  学习者  ");
+    await user.click(screen.getByRole("radio", { name: "头像 4" }));
+    await user.click(screen.getByRole("button", { name: "进入学习空间" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/onboarding",
+      expect.objectContaining({
+        body: JSON.stringify({ displayName: "学习者", avatarKey: 4 }),
+      }),
+    );
+    await waitFor(() => expect(assign).toHaveBeenCalledOnce());
   });
 });
 

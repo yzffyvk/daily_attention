@@ -12,6 +12,8 @@ test("guards the cloud journal page and installs one query provider", async () =
 
   assert.match(page, /supabase\.auth\.getClaims\(\)/);
   assert.match(page, /redirect\("\/login"\)/);
+  assert.match(page, /onboarding_completed/);
+  assert.match(page, /redirect\("\/onboarding"\)/);
   assert.match(page, /<CheckInWorkspaceClient/);
   assert.match(page, /initialProfile/);
   assert.match(layout, /<Providers>\{children\}<\/Providers>/);
@@ -189,14 +191,32 @@ test("renders email-oriented authentication forms", async () => {
     assert.doesNotMatch(form, /replace\(\/\\D\/gu, ""\)/);
   }
   assert.match(loginForm, /\{ email, password \}/);
-  assert.match(registerForm, /\{ email, password, avatarKey \}/);
+  assert.match(registerForm, /\{ email, password \}/);
   assert.match(recoverForm, /\{ email, recoveryCode, newPassword \}/);
   assert.match(recoverForm, /result\.data\.profile\.displayName/);
   assert.match(registerForm, /<Link className="secondary-button" href="\/login">返回登录<\/Link>/);
   assert.doesNotMatch(registerForm, /name-field|setName|名称/);
+  assert.doesNotMatch(registerForm, /avatar-fieldset|avatar-options|选择头像/);
   assert.match(registerPage, /result\.profile\.displayName/);
   assert.match(recoverPage, /name=\{recovered\?\.displayName\}/);
   for (const page of [loginPage, registerPage, recoverPage]) {
     assert.match(page, /邮箱/);
   }
+});
+
+test("guards first-login onboarding in both directions", async () => {
+  const [page, form] = await Promise.all([
+    readFile(new URL("../app/(auth)/onboarding/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../features/auth/onboarding-form.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /supabase\.auth\.getClaims\(\)/);
+  assert.match(page, /redirect\("\/login"\)/);
+  assert.match(page, /onboarding_completed/);
+  assert.match(page, /redirect\("\/"\)/);
+  assert.match(page, /<OnboardingForm \/>/);
+  assert.match(form, /\/api\/onboarding/);
+  assert.match(form, /进入学习空间/);
+  assert.match(form, /切换账号/);
+  assert.doesNotMatch(form, /跳过/);
 });

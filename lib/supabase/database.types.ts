@@ -86,6 +86,7 @@ export type Database = {
           display_name: string
           email: string
           id: string
+          onboarding_completed: boolean
           updated_at: string
         }
         Insert: {
@@ -94,6 +95,7 @@ export type Database = {
           display_name: string
           email: string
           id: string
+          onboarding_completed?: boolean
           updated_at?: string
         }
         Update: {
@@ -102,6 +104,7 @@ export type Database = {
           display_name?: string
           email?: string
           id?: string
+          onboarding_completed?: boolean
           updated_at?: string
         }
         Relationships: []
@@ -111,6 +114,28 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      complete_profile_onboarding: {
+        Args: {
+          target_avatar_key: number
+          target_display_name: string
+          target_user_id: string
+        }
+        Returns: {
+          avatar_key: number
+          created_at: string
+          display_name: string
+          email: string
+          id: string
+          onboarding_completed: boolean
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       complete_registration: {
         Args: {
           target_avatar_key: number
@@ -124,6 +149,7 @@ export type Database = {
           display_name: string
           email: string
           id: string
+          onboarding_completed: boolean
           updated_at: string
         }
         SetofOptions: {
@@ -153,6 +179,7 @@ export type Database = {
           display_name: string
           email: string
           id: string
+          onboarding_completed: boolean
           updated_at: string
         }
         SetofOptions: {
@@ -215,6 +242,7 @@ export type Database = {
           display_name: string
           email: string
           id: string
+          onboarding_completed: boolean
           updated_at: string
         }
         SetofOptions: {
