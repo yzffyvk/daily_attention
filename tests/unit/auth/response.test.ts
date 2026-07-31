@@ -29,12 +29,16 @@ describe("auth response mapping", () => {
       },
       requestId: "request-id",
     });
-    expect(errorSpy).toHaveBeenCalledWith("auth request failed", {
+    expect(errorSpy).toHaveBeenCalledWith("server_error", {
+      event: "auth request failed",
       requestId: "request-id",
       errorType: "AggregateError",
       errorCode: "REGISTRATION_COMPENSATION_FAILED",
     });
     expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("user@example.com");
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("password");
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("recovery data");
     expect(JSON.stringify(body)).not.toContain("user@example.com");
     expect(JSON.stringify(body)).not.toContain("user-1");
     expect(JSON.stringify(body)).not.toContain("password");

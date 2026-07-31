@@ -1,6 +1,10 @@
 import "server-only";
 
 import { apiFailure, apiSuccess } from "@/lib/api/result";
+import {
+  logServerError,
+  operationalErrorFields,
+} from "@/lib/server/logging";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { createCheckInRepository } from "./repository";
 
@@ -48,14 +52,10 @@ export async function createCheckInRequestContext() {
 }
 
 export function checkInServiceFailure(error: unknown, requestId: string) {
-  const errorType = error instanceof Error ? error.name : typeof error;
-  const errorCode = (
-    typeof error === "object"
-    && error !== null
-    && "code" in error
-    && typeof error.code === "string"
-  ) ? error.code : undefined;
-  console.error("check-in request failed", { requestId, errorType, errorCode });
+  logServerError("check-in request failed", {
+    requestId,
+    ...operationalErrorFields(error),
+  });
   return checkInFailure(
     "SERVICE_UNAVAILABLE",
     "服务暂时不可用，请稍后再试",

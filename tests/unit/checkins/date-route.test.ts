@@ -155,8 +155,13 @@ describe("check-in image replacement cleanup", () => {
     await expect(response?.json()).resolves.toMatchObject({ ok: true, data: record });
     expect(mocks.remove).toHaveBeenCalledWith("user-1", previousImagePath, supabase);
     expect(consoleError).toHaveBeenCalledWith(
-      "check-in image cleanup failed",
-      expect.objectContaining({ errorType: "Error", requestId: expect.any(String) }),
+      "server_error",
+      expect.objectContaining({
+        event: "check-in image cleanup failed",
+        errorType: "Error",
+        errorCode: "INTERNAL_ERROR",
+        requestId: expect.any(String),
+      }),
     );
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain(previousImagePath);
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain(nextImagePath);
