@@ -171,12 +171,22 @@ export type Database = {
           retry_after_seconds: number
         }[]
       }
+      delete_expired_storage_upload_reservations: {
+        Args: { target_limit: number }
+        Returns: number
+      }
       get_check_in_stats: {
         Args: { target_today: string }
         Returns: {
           current_streak: number
           has_today_record: boolean
           total_count: number
+        }[]
+      }
+      list_orphan_checkin_image_paths: {
+        Args: { target_limit: number }
+        Returns: {
+          path: string
         }[]
       }
       read_profile: {
