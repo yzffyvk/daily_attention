@@ -190,6 +190,114 @@ If migration, deployment, schema verification, or smoke testing fails after a su
 
 Never record command output together with environment files or secret values.
 
+## Hourly Storage Maintenance
+
+The `storage-maintenance` Edge Function deletes expired upload reservations and
+old, unreferenced objects from the private `checkin-images` bucket. Each run is
+bounded to 100 reservations and 100 object paths. Objects younger than 24 hours
+and objects referenced by `check_ins.image_path` are not candidates.
+
+This service-to-service function intentionally has `verify_jwt = false` in
+`supabase/config.toml`. The platform's legacy JWT check is not the authentication
+mechanism for a custom service Bearer and can reject projects using new
+asymmetric keys before the handler runs. The function is not public: it requires
+a separate, random `STORAGE_MAINTENANCE_TOKEN`, compares it inside the handler
+in constant time, and returns `401` before any database or Storage call when it
+does not match.
+
+Prepare and deploy it as follows:
+
+1. Generate a dedicated random value of at least 32 bytes in an approved secret
+   manager. Do not reuse a Supabase publishable key, secret key, legacy
+   `service_role` key, user JWT, or any application credential.
+2. Store that value as the Edge Function secret named
+   `STORAGE_MAINTENANCE_TOKEN`. When using the CLI, load the value from a local
+   secret environment and never place it directly in shell history:
+
+   ```sh
+   npx supabase secrets set \
+     STORAGE_MAINTENANCE_TOKEN="$STORAGE_MAINTENANCE_TOKEN" \
+     --project-ref "$SUPABASE_PROJECT_REF"
+   ```
+
+3. Deploy the reviewed function with the handler-owned authorization mode:
+
+   ```sh
+   npx supabase functions deploy storage-maintenance \
+     --no-verify-jwt \
+     --project-ref "$SUPABASE_PROJECT_REF"
+   ```
+
+4. In Supabase Vault, store the exact project origin and the same dedicated
+   token. Substitute reviewed values in a secure SQL session; do not save the
+   resulting SQL or its output in source control:
+
+   ```sql
+   select vault.create_secret(
+     'https://<project-ref>.supabase.co',
+     'storage_maintenance_project_url'
+   );
+   select vault.create_secret(
+     '<dedicated-storage-maintenance-token>',
+     'storage_maintenance_token'
+   );
+   ```
+
+5. Create the hourly Cron invocation. The schedule runs at minute 17 to avoid a
+   top-of-hour spike:
+
+   ```sql
+   select cron.schedule(
+     'storage-maintenance-hourly',
+     '17 * * * *',
+     $schedule$
+       select net.http_post(
+         url := (
+           select decrypted_secret
+           from vault.decrypted_secrets
+           where name = 'storage_maintenance_project_url'
+         ) || '/functions/v1/storage-maintenance',
+         headers := jsonb_build_object(
+           'Content-Type', 'application/json',
+           'Authorization', 'Bearer ' || (
+             select decrypted_secret
+             from vault.decrypted_secrets
+             where name = 'storage_maintenance_token'
+           )
+         ),
+         body := '{}'::jsonb
+       ) as request_id;
+     $schedule$
+   );
+   ```
+
+Manually invoke the deployed function once before relying on Cron:
+
+```sh
+curl --fail-with-body --request POST \
+  "https://$SUPABASE_PROJECT_REF.supabase.co/functions/v1/storage-maintenance" \
+  --header "Authorization: Bearer $STORAGE_MAINTENANCE_TOKEN"
+```
+
+Require HTTP `200`, `ok: true`, integer `deletedReservations` and
+`deletedOrphans` counts, and a UUID `requestId`. A request with no Bearer must
+return `401`. In Function logs, retain only the fixed event name, request ID,
+counts, error type, and safe error code. Never record the token, object paths,
+user IDs, signed URLs, request headers, or raw error objects. Alert on non-2xx
+Cron responses and on the absence of a successful hourly event.
+
+Before rollback or token rotation, deactivate or remove the Cron job first:
+
+```sql
+select cron.unschedule('storage-maintenance-hourly');
+```
+
+Wait for any in-flight invocation to finish, then rotate the Edge Function
+secret and Vault secret together or deploy the previously reviewed function
+version. The two service-role-only database functions may remain during a
+function rollback. Database rollback remains forward-only; do not edit an
+applied migration. Recreate the Cron job only after a manual invocation passes.
+
 ## Sites Runtime Variables
 
 Set these runtime variables in the managed Sites project for the exact release environment:

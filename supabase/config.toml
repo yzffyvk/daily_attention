@@ -388,3 +388,9 @@ enabled = true
 # declarative_schema_path = "./database"
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
+
+[functions.storage-maintenance]
+enabled = true
+verify_jwt = false
+import_map = "./functions/storage-maintenance/deno.json"
+entrypoint = "./functions/storage-maintenance/index.ts"
