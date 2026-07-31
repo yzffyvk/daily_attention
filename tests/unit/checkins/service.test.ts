@@ -18,7 +18,11 @@ function repository(
   return {
     findByDate: vi.fn().mockResolvedValue(null),
     findByMonth: vi.fn().mockResolvedValue([]),
-    findAllDates: vi.fn().mockResolvedValue([]),
+    getStats: vi.fn().mockResolvedValue({
+      totalCount: 0,
+      currentStreak: 0,
+      hasTodayRecord: false,
+    }),
     insert: vi.fn().mockResolvedValue({
       id: "1",
       date: "2026-07-23",

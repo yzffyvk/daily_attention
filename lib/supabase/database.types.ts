@@ -171,6 +171,14 @@ export type Database = {
           retry_after_seconds: number
         }[]
       }
+      get_check_in_stats: {
+        Args: { target_today: string }
+        Returns: {
+          current_streak: number
+          has_today_record: boolean
+          total_count: number
+        }[]
+      }
       read_profile: {
         Args: { target_user_id: string }
         Returns: {

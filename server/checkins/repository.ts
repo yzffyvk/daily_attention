@@ -5,6 +5,7 @@ import type { CheckInInput } from "@/lib/domain/checkin";
 import type { Database, Tables } from "@/lib/supabase/database.types";
 import type {
   CheckInRecord,
+  CheckInStats,
   CheckInSummary,
 } from "@/features/checkins/types";
 
@@ -36,7 +37,7 @@ function nextMonth(month: string) {
 export interface CheckInRepository {
   findByDate(userId: string, date: string): Promise<CheckInRecord | null>;
   findByMonth(userId: string, month: string): Promise<CheckInSummary[]>;
-  findAllDates(userId: string): Promise<string[]>;
+  getStats(today: string): Promise<CheckInStats>;
   insert(
     userId: string,
     date: string,
@@ -83,14 +84,16 @@ export function createCheckInRepository(
       }));
     },
 
-    async findAllDates(userId) {
+    async getStats(today) {
       const { data, error } = await supabase
-        .from("check_ins")
-        .select("checkin_date")
-        .eq("user_id", userId)
-        .order("checkin_date", { ascending: true });
+        .rpc("get_check_in_stats", { target_today: today })
+        .single();
       if (error) throw error;
-      return (data ?? []).map((row) => row.checkin_date);
+      return {
+        totalCount: Number(data.total_count),
+        currentStreak: data.current_streak,
+        hasTodayRecord: data.has_today_record,
+      };
     },
 
     async insert(userId, date, input) {
