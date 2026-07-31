@@ -11,6 +11,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     exclude: [...configDefaults.exclude, "**/.worktrees/**"],
+    maxWorkers: 1,
     setupFiles: ["./tests/setup.ts"],
     restoreMocks: true,
   },
