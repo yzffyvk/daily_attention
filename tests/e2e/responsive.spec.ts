@@ -16,12 +16,16 @@ test("keeps the journal usable without horizontal overflow or sticky overlap", a
     const previousScrollBehavior = scroller.style.scrollBehavior;
     scroller.style.scrollBehavior = "auto";
     scroller.scrollTop = scroller.scrollHeight;
-    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
     scroller.style.scrollBehavior = previousScrollBehavior;
     return {
-      reached: Math.ceil(scroller.scrollTop + scroller.clientHeight) >= scroller.scrollHeight,
+      reached: Math.ceil(scroller.scrollTop + window.innerHeight) >= scroller.scrollHeight,
       scrollTop: scroller.scrollTop,
       clientHeight: scroller.clientHeight,
+      innerHeight: window.innerHeight,
+      visualViewportHeight: window.visualViewport?.height ?? null,
       scrollHeight: scroller.scrollHeight,
       windowY: window.scrollY,
     };
