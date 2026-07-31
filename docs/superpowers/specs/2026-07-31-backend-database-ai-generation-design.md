@@ -2,7 +2,7 @@
 
 日期：2026-07-31
 
-状态：已确认，待实施计划
+状态：已确认，安全抓取网关方案与实施计划已完成
 
 适用项目：今天你 Ai 了吗？
 
@@ -21,6 +21,7 @@
 
 - Next.js/vinext 路由与 OpenAI Sites/Cloudflare 运行入口。
 - Supabase Auth、Postgres、Storage 和现有 SSR 客户端。
+- 独立部署的 Node.js 22 安全抓取网关，只负责受控获取公开网页，不解析用户身份或调用模型。
 - `public.profiles` 保存用户资料。
 - `public.check_ins` 保存每日打卡，并使用 `version` 做乐观并发控制。
 - 私有图片 bucket、上传预约、容量和频率限制。
@@ -40,6 +41,7 @@
 - 始终开启思考模式，首版 `reasoning_effort` 使用 `high`。
 - AI 输出只回填当前草稿，不自动创建或覆盖正式打卡。
 - 网页正文仅在 worker 内存中处理，不长期保存。
+- Supabase Edge Function 不直接访问用户提交的网址；所有网页请求必须经过独立安全抓取网关。
 - `reasoning_content` 不保存、不记录日志、不返回前端。
 - 每位用户每天最多 5 个进入模型调用阶段的生成任务。
 
@@ -74,7 +76,11 @@ Supabase Cron 或创建任务后的 best-effort 触发
   └─ Supabase Edge Function worker
        ├─ 从 Supabase Queue 领取消息
        ├─ 原子认领任务
-       ├─ 安全抓取和提取正文
+       ├─ 调用安全抓取网关
+       │    ├─ URL、DNS、IP 与重定向检查
+       │    ├─ 把连接固定到已验证的公网 IP
+       │    └─ 返回有大小上限的 HTML
+       ├─ 在 Edge Function 内提取正文
        ├─ 开始模型调用并消耗额度
        ├─ DeepSeek V4 Pro Chat Completions
        ├─ JSON + Zod 校验
@@ -84,6 +90,8 @@ Supabase Cron 或创建任务后的 best-effort 触发
 Supabase Queue 使用 Postgres `pgmq` 的持久消息、可见性超时和重试语义。队列只保存 `job_id`，不保存网页正文或完整 URL。
 
 创建任务后，Next API 可以 best-effort 调用 worker 以减少首轮等待；Supabase Cron 是可靠兜底，定期触发 worker 消费批次。即时触发失败不影响已经入队的任务。
+
+安全抓取网关作为单独的 OCI 容器部署，使用 Node.js 22 的 DNS 与 HTTP/HTTPS 原语实现 DNS 固定。网关只提供 `POST /v1/fetch` 和无敏感信息的健康检查；业务入口必须通过独立 bearer token 鉴权。网关不连接 Supabase、不持有 DeepSeek 密钥，也不保存网页正文。若网关不可用，worker 必须安全失败或重试，禁止退回为 Edge Function 直接抓取。
 
 ## 5. 阶段一：现有后端加固
 
@@ -234,19 +242,21 @@ queued ──领取──> fetching ──开始模型调用──> generating �
 
 ### 8.1 URL 安全
 
-创建任务时做语法校验，worker 抓取前做最终网络校验：
+创建任务时由 Next API 做语法校验；真正的网络边界检查和连接由安全抓取网关完成：
 
 - 只允许 `https:` 和 `http:`。
 - 禁止 URL 中的用户名、密码和片段。
 - 首版只允许 80、443 或未显式指定端口。
 - 拒绝 `localhost`、环回、私网、链路本地、组播、保留地址和云元数据地址。
-- DNS 解析后的每个 A/AAAA 地址都必须通过检查。
+- 网关使用系统 DNS 同时获取全部 A/AAAA 地址；任何一个地址不安全时整次请求失败。
 - 每次重定向重新规范化、解析 DNS 并检查目标，最多 5 次。
-- DNS 校验后发起请求时必须防止 DNS rebinding；连接目标不得偏离已验证地址。
+- DNS 校验后通过自定义 `lookup` 把本次 HTTP/TLS 连接固定到一个已验证地址，同时保留原始 hostname 做 `Host` 与 TLS SNI/证书校验，防止 DNS rebinding。
 - 设置连接和总读取超时，首版总抓取上限 15 秒。
 - 响应正文上限 2 MiB，超出即停止。
 - 只处理允许的文本/HTML 内容类型。
 - 遵守站点 robots、访问策略和适用条款，不绕过验证码、登录或付费墙。
+
+网关接口只接受带 `Authorization: Bearer <SAFE_FETCH_GATEWAY_TOKEN>` 的 JSON 请求，URL 长度上限为 2048。返回值只包含 `finalUrl`、`contentType` 和不超过 2 MiB 的 `body`。网关、反向代理和容器平台都不得记录请求体、完整 URL 或响应正文；基础设施层额外禁止到私网、链路本地和云元数据网段的出口，作为应用层校验之外的第二道防线。
 
 ### 8.2 正文处理
 
@@ -427,7 +437,7 @@ max_tokens: 8192
 
 ## 13. 数据生命周期
 
-- 网页正文：worker 内存中存在，处理完成后立即释放。
+- 网页正文：仅在安全抓取网关和 worker 内存中短暂存在，响应完成或处理结束后立即释放。
 - `reasoning_content`：不保存。
 - 成功结果字段：终态后保留 24 小时，之后置空。
 - 失败用户消息：随结果保留 24 小时。
@@ -447,6 +457,8 @@ max_tokens: 8192
 - 私有表不直接暴露给 `anon` 或 `authenticated`。
 - service-role RPC 显式检查任务所有权和状态。
 - DeepSeek 密钥永远不进入浏览器 bundle、公开环境变量、数据库或日志。
+- `SAFE_FETCH_GATEWAY_TOKEN` 只存在于网关和 Edge Function Secret 中，与 worker/Cron token 分离并可独立轮换。
+- 网关只接受 worker 的 HTTPS 请求；worker 不得包含绕过网关直接抓取源 URL 的生产代码路径。
 
 ### 14.2 Prompt Injection
 
@@ -474,6 +486,7 @@ max_tokens: 8192
 - 输入 token、缓存命中/未命中 token、推理 token、输出 token。
 - 每日用户额度使用量、全站调用量和异常突增。
 - 清理任务、额度 RPC、入队和消息删除失败数。
+- 安全抓取网关的请求量、拒绝原因、DNS/连接/读取延迟、超时率、响应大小和 5xx；日志只记录 URL 摘要与主机名摘要。
 
 首版告警基线：
 
@@ -489,7 +502,7 @@ max_tokens: 8192
 
 ### 16.1 单元测试
 
-- URL 规范化、协议/端口/IP 检查、DNS 与重定向验证。
+- 网关 URL 规范化、协议/端口/IP 检查、DNS 固定、TLS hostname 校验与重定向验证。
 - 正文提取、字符预算和摘要指纹。
 - 状态机允许与禁止的迁移。
 - DeepSeek 请求参数、思考模式、匿名 `user_id`。
@@ -509,7 +522,7 @@ max_tokens: 8192
 
 ### 16.3 集成测试
 
-- 使用本地 Supabase 和 Queue，网页服务器与 DeepSeek API使用可控 mock。
+- 使用本地 Supabase 和 Queue，安全抓取网关、网页服务器与 DeepSeek API 使用可控 mock。
 - 覆盖成功、超时、429、5xx、无效 JSON、内容过短、重定向和重试耗尽。
 - 验证 Queue visibility timeout、重复投递和 worker 幂等。
 - 验证结果 24 小时清理与元数据 90 天清理。
@@ -526,7 +539,8 @@ max_tokens: 8192
 
 ### 16.5 安全测试
 
-- IPv4/IPv6 私网、十进制/十六进制 IP、DNS rebinding、重定向到内网、云元数据地址。
+- IPv4/IPv6 私网、十进制/十六进制 IP、混合安全/不安全 DNS 结果、DNS rebinding、重定向到内网、云元数据地址。
+- 证明网关连接使用测试解析阶段选定的 IP，且 Edge Worker 没有直接访问源 URL 的回退路径。
 - 页面正文中的 Prompt Injection 和输出格式覆盖指令。
 - 越权任务读取和取消。
 - 日志中不出现密钥、网页正文、邮箱、完整 URL 或 `reasoning_content`。
@@ -537,11 +551,12 @@ max_tokens: 8192
 
 1. 完成阶段一加固并验证现有测试全部通过。
 2. 部署新增 schema、函数和 Queue，但保持 `AI_GENERATION_ENABLED=false`。
-3. 部署 worker、Cron、DeepSeek Secret 和监控。
-4. 部署后端 API 和前端轮询逻辑。
-5. 用内部测试账号开启功能，完成真实网页和真实 DeepSeek 小流量验证。
-6. 按配置逐步扩大灰度范围。
-7. 观察成功率、延迟、token 和失败分布后再全量开放。
+3. 部署安全抓取网关，配置出口防火墙、HTTPS、独立 token、健康检查和监控；完成 DNS 固定与内网阻断验收。
+4. 部署 worker、Cron、DeepSeek Secret、网关 Secret 和监控。
+5. 部署后端 API 和前端轮询逻辑。
+6. 用内部测试账号开启功能，完成真实网页和真实 DeepSeek 小流量验证。
+7. 按配置逐步扩大灰度范围。
+8. 观察成功率、延迟、token 和失败分布后再全量开放。
 
 回滚时先关闭 `AI_GENERATION_ENABLED`，停止新任务；允许已进入 `generating` 的任务完成或安全失败。现有手动打卡、认证和图片功能不依赖 AI 表、Queue 或 DeepSeek，因此保持可用。
 
@@ -555,6 +570,7 @@ max_tokens: 8192
 - 用户只能读取和取消自己的任务。
 - 普通公开文章可以生成结构合法的草稿并由用户手动保存。
 - 内网地址、重定向绕过和 Prompt Injection 测试被阻止。
+- 所有生产网页抓取都经由 DNS 固定的独立网关；网关故障时系统关闭抓取而不是绕过安全边界。
 - 网页正文和 `reasoning_content` 不进入数据库或日志。
 - DeepSeek token 用量、阶段延迟、成功率和失败码可观测。
 - 功能可以通过配置立即停止新任务，而不影响手动打卡。
@@ -563,6 +579,8 @@ max_tokens: 8192
 
 - [Supabase Queues](https://supabase.com/docs/guides/queues)
 - [使用 Edge Functions 消费 Supabase Queue](https://supabase.com/docs/guides/queues/consuming-messages-with-edge-functions)
+- [Node.js DNS API](https://nodejs.org/api/dns.html)
+- [Node.js HTTP API](https://nodejs.org/api/http.html)
 - [DeepSeek V4 更新说明](https://api-docs.deepseek.com/updates)
 - [DeepSeek V4 Pro Chat Completion API](https://api-docs.deepseek.com/api/create-chat-completion)
 - [DeepSeek 思考模式](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode)
