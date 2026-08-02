@@ -1,0 +1,243 @@
+import "server-only";
+
+import { z } from "zod";
+import type { AiGenerationStatus } from "@/features/ai-generation/types";
+import { dateKeySchema } from "@/lib/domain/checkin";
+import { createAdminSupabase } from "@/lib/supabase/admin";
+
+const statusSchema = z.enum([
+  "queued",
+  "fetching",
+  "generating",
+  "retryable",
+  "succeeded",
+  "failed",
+  "cancelled",
+]);
+
+const timestampSchema = z.iso.datetime({ offset: true });
+const jobSchema = z.object({
+  id: z.uuid(),
+  user_id: z.uuid(),
+  target_date: dateKeySchema,
+  idempotency_key: z.uuid(),
+  source_url: z.string().min(1).max(2048),
+  source_host: z.string().min(1).max(253),
+  source_title: z.string().max(300).nullable(),
+  status: statusSchema,
+  attempt_count: z.number().int().min(0).max(3),
+  provider_call_count: z.number().int().nonnegative(),
+  attention: z.string().max(120).nullable(),
+  summary: z.string().max(5000).nullable(),
+  inspiration: z.string().max(2000).nullable(),
+  warnings: z.array(z.string()).max(10),
+  error_code: z.string().max(80).nullable(),
+  error_message: z.string().nullable(),
+  provider: z.string().min(1),
+  model: z.string().min(1).max(160),
+  thinking_enabled: z.boolean(),
+  reasoning_effort: z.enum(["high", "max"]),
+  prompt_version: z.string().min(1).max(40),
+  prompt_tokens: z.number().int().nonnegative().nullable(),
+  prompt_cache_hit_tokens: z.number().int().nonnegative().nullable(),
+  prompt_cache_miss_tokens: z.number().int().nonnegative().nullable(),
+  completion_tokens: z.number().int().nonnegative().nullable(),
+  reasoning_tokens: z.number().int().nonnegative().nullable(),
+  system_fingerprint: z.string().max(255).nullable(),
+  created_at: timestampSchema,
+  started_at: timestampSchema.nullable(),
+  finished_at: timestampSchema.nullable(),
+  result_expires_at: timestampSchema.nullable(),
+  metadata_expires_at: timestampSchema,
+  updated_at: timestampSchema,
+});
+
+const jobWithQuotaSchema = z.object({
+  job: jobSchema,
+  quota_used: z.number().int().min(0).max(5),
+  quota_reserved: z.number().int().min(0).max(5),
+  quota_consumed: z.number().int().min(0).max(5),
+  quota_remaining: z.number().int().min(0).max(5),
+}).superRefine((value, context) => {
+  if (
+    value.quota_used !== value.quota_reserved + value.quota_consumed
+    || value.quota_remaining !== 5 - value.quota_used
+  ) {
+    context.addIssue({ code: "custom", message: "inconsistent AI quota" });
+  }
+});
+
+type RpcClient = {
+  rpc: unknown;
+};
+
+function rpc(
+  client: RpcClient,
+  name: string,
+  params: Record<string, unknown>,
+): PromiseLike<{ data: unknown; error: unknown }> {
+  if (typeof client.rpc !== "function") {
+    throw new Error("AI generation RPC client is unavailable");
+  }
+  const invoke = client.rpc as (
+    targetName: string,
+    targetParams: Record<string, unknown>,
+  ) => PromiseLike<{ data: unknown; error: unknown }>;
+  return invoke.call(client, name, params);
+}
+
+export type AiJob = {
+  id: string;
+  userId: string;
+  targetDate: string;
+  idempotencyKey: string;
+  sourceUrl: string;
+  sourceHost: string;
+  sourceTitle: string | null;
+  status: AiGenerationStatus;
+  attemptCount: number;
+  providerCallCount: number;
+  attention: string | null;
+  summary: string | null;
+  inspiration: string | null;
+  warnings: string[];
+  errorCode: string | null;
+  errorMessage: string | null;
+  provider: string;
+  model: string;
+  thinkingEnabled: boolean;
+  reasoningEffort: "high" | "max";
+  promptVersion: string;
+  promptTokens: number | null;
+  promptCacheHitTokens: number | null;
+  promptCacheMissTokens: number | null;
+  completionTokens: number | null;
+  reasoningTokens: number | null;
+  systemFingerprint: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  resultExpiresAt: string | null;
+  metadataExpiresAt: string;
+  updatedAt: string;
+};
+
+export type AiJobWithQuota = {
+  job: AiJob;
+  quota: {
+    used: number;
+    reserved: number;
+    consumed: number;
+    limit: 5;
+    remaining: number;
+  };
+};
+
+export type CreateAiJob = {
+  userId: string;
+  targetDate: string;
+  idempotencyKey: string;
+  sourceUrl: string;
+  sourceHost: string;
+};
+
+export interface AiGenerationRepository {
+  create(input: CreateAiJob): Promise<AiJobWithQuota>;
+  findOwned(userId: string, jobId: string): Promise<AiJob | null>;
+  cancelOwned(userId: string, jobId: string): Promise<AiJob>;
+}
+
+function mapJob(row: z.infer<typeof jobSchema>): AiJob {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    targetDate: row.target_date,
+    idempotencyKey: row.idempotency_key,
+    sourceUrl: row.source_url,
+    sourceHost: row.source_host,
+    sourceTitle: row.source_title,
+    status: row.status,
+    attemptCount: row.attempt_count,
+    providerCallCount: row.provider_call_count,
+    attention: row.attention,
+    summary: row.summary,
+    inspiration: row.inspiration,
+    warnings: row.warnings,
+    errorCode: row.error_code,
+    errorMessage: row.error_message,
+    provider: row.provider,
+    model: row.model,
+    thinkingEnabled: row.thinking_enabled,
+    reasoningEffort: row.reasoning_effort,
+    promptVersion: row.prompt_version,
+    promptTokens: row.prompt_tokens,
+    promptCacheHitTokens: row.prompt_cache_hit_tokens,
+    promptCacheMissTokens: row.prompt_cache_miss_tokens,
+    completionTokens: row.completion_tokens,
+    reasoningTokens: row.reasoning_tokens,
+    systemFingerprint: row.system_fingerprint,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    resultExpiresAt: row.result_expires_at,
+    metadataExpiresAt: row.metadata_expires_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapWithQuota(row: z.infer<typeof jobWithQuotaSchema>): AiJobWithQuota {
+  return {
+    job: mapJob(row.job),
+    quota: {
+      used: row.quota_used,
+      reserved: row.quota_reserved,
+      consumed: row.quota_consumed,
+      limit: 5,
+      remaining: row.quota_remaining,
+    },
+  };
+}
+
+function oneWithQuota(data: unknown) {
+  const parsed = z.array(jobWithQuotaSchema).length(1).safeParse(data);
+  if (!parsed.success) throw new Error("Malformed AI generation RPC response");
+  return parsed.data[0];
+}
+
+export function createAiGenerationRepository(
+  client: RpcClient = createAdminSupabase(),
+): AiGenerationRepository {
+  return {
+    async create(input) {
+      const { data, error } = await rpc(client, "create_ai_generation_job", {
+        target_user_id: input.userId,
+        target_date: input.targetDate,
+        target_idempotency_key: input.idempotencyKey,
+        target_source_url: input.sourceUrl,
+        target_source_host: input.sourceHost,
+      });
+      if (error) throw error;
+      return mapWithQuota(oneWithQuota(data));
+    },
+
+    async findOwned(userId, jobId) {
+      const { data, error } = await rpc(client, "read_ai_generation_job", {
+        target_user_id: userId,
+        target_job_id: jobId,
+      });
+      if (error) throw error;
+      const parsed = z.array(jobSchema).max(1).safeParse(data);
+      if (!parsed.success) throw new Error("Malformed AI generation RPC response");
+      return parsed.data[0] ? mapJob(parsed.data[0]) : null;
+    },
+
+    async cancelOwned(userId, jobId) {
+      const { data, error } = await rpc(client, "cancel_ai_generation_job", {
+        target_user_id: userId,
+        target_job_id: jobId,
+      });
+      if (error) throw error;
+      return mapJob(oneWithQuota(data).job);
+    },
+  };
+}

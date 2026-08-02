@@ -51,6 +51,25 @@ describe("consumeRateLimit", () => {
       consumeRateLimit("login", "203.0.113.1", { rpc: vi.fn() }),
     ).rejects.toThrow("Missing AUTH_RATE_LIMIT_PEPPER");
   });
+
+  it("uses the dedicated AI generation database action", async () => {
+    vi.stubEnv("AUTH_RATE_LIMIT_PEPPER", "test-rate-limit-pepper");
+    const rpc = vi.fn().mockResolvedValue({
+      data: [{ allowed: true, retry_after_seconds: 0 }],
+      error: null,
+    });
+
+    await consumeRateLimit("aiGenerate", "user-1:203.0.113.1", { rpc });
+
+    expect(rpc).toHaveBeenCalledWith(
+      "consume_auth_rate_limit",
+      expect.objectContaining({
+        target_action: "ai_generate",
+        target_max_attempts: 10,
+        target_window_seconds: 600,
+      }),
+    );
+  });
 });
 
 describe("reserveStorageUpload", () => {

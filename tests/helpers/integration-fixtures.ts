@@ -73,7 +73,10 @@ export async function deleteOwnedIntegrationUsers(
 
 export { readIntegrationUserRegistry };
 
-export function trackIntegrationRateBucket(action: "register" | "login" | "recover" | "rotate", bucket: string) {
+export function trackIntegrationRateBucket(
+  action: "register" | "login" | "recover" | "rotate" | "ai_generate",
+  bucket: string,
+) {
   rateBuckets.add(`${action}:${bucket}`);
 }
 

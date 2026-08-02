@@ -3,11 +3,22 @@ import {
   aiFailure,
   aiSuccess,
   aiValidationFailure,
+  isAiGenerationEnabled,
 } from "@/server/ai/http";
 
 describe("AI generation HTTP responses", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("keeps the AI feature disabled unless explicitly enabled", () => {
+    vi.stubEnv("AI_GENERATION_ENABLED", "");
+    expect(isAiGenerationEnabled()).toBe(false);
+    vi.stubEnv("AI_GENERATION_ENABLED", "true");
+    expect(isAiGenerationEnabled()).toBe(true);
+    vi.stubEnv("AI_GENERATION_ENABLED", "TRUE");
+    expect(isAiGenerationEnabled()).toBe(false);
   });
 
   it.each([

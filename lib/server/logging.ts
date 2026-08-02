@@ -65,3 +65,11 @@ export function logServerError(
   assertSafeLogFields(fields);
   console.error("server_error", { event, ...fields });
 }
+
+export function logServerWarning(
+  event: string,
+  fields: Record<string, SafeLogValue>,
+) {
+  assertSafeLogFields(fields);
+  console.warn("server_warning", { event, ...fields });
+}

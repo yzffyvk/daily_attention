@@ -5,6 +5,9 @@ import {
   logServerError,
   operationalErrorFields,
 } from "@/lib/server/logging";
+import { createAdminSupabase } from "@/lib/supabase/admin";
+import { createServerSupabase } from "@/lib/supabase/server";
+import { createAiGenerationRepository } from "./repository";
 
 const noStoreHeaders = { "Cache-Control": "private, no-store" };
 
@@ -106,4 +109,33 @@ export function aiFailure(error: unknown, requestId: string) {
     }),
     { status: mapped.status, headers: noStoreHeaders },
   );
+}
+
+export function isAiGenerationEnabled() {
+  return process.env.AI_GENERATION_ENABLED === "true";
+}
+
+export async function createAiRequestContext() {
+  const sessionClient = await createServerSupabase();
+  const { data, error } = await sessionClient.auth.getUser();
+  if (error || !data.user) return null;
+
+  const admin = createAdminSupabase();
+  return {
+    userId: data.user.id,
+    admin,
+    repository: createAiGenerationRepository(admin),
+  };
+}
+
+export async function triggerAiWorker(
+  admin: ReturnType<typeof createAdminSupabase>,
+) {
+  const token = process.env.AI_WORKER_TRIGGER_TOKEN;
+  if (!token) throw new Error("Missing AI_WORKER_TRIGGER_TOKEN");
+  const { error } = await admin.functions.invoke("ai-generation-worker", {
+    body: { source: "enqueue" },
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (error) throw error;
 }

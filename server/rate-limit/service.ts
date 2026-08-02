@@ -1,10 +1,11 @@
 import "server-only";
 
 export const RATE_LIMITS = {
-  register: { attempts: 5, windowSeconds: 3600 },
-  login: { attempts: 10, windowSeconds: 900 },
-  recover: { attempts: 5, windowSeconds: 1800 },
-  rotate: { attempts: 5, windowSeconds: 3600 },
+  register: { action: "register", attempts: 5, windowSeconds: 3600 },
+  login: { action: "login", attempts: 10, windowSeconds: 900 },
+  recover: { action: "recover", attempts: 5, windowSeconds: 1800 },
+  rotate: { action: "rotate", attempts: 5, windowSeconds: 3600 },
+  aiGenerate: { action: "ai_generate", attempts: 10, windowSeconds: 600 },
 } as const;
 
 type RateLimitRpcResult = { allowed: boolean; retry_after_seconds: number };
@@ -17,11 +18,23 @@ type StorageUploadLimitRpcResult = {
   retry_after_seconds: number;
 };
 type RpcClient = {
-  rpc: (
-    name: string,
-    params: Record<string, unknown>,
-  ) => PromiseLike<{ data: unknown; error: unknown }>;
+  rpc: unknown;
 };
+
+function rpc(
+  client: RpcClient,
+  name: string,
+  params: Record<string, unknown>,
+): PromiseLike<{ data: unknown; error: unknown }> {
+  if (typeof client.rpc !== "function") {
+    throw new Error("RPC client is unavailable");
+  }
+  const invoke = client.rpc as (
+    targetName: string,
+    targetParams: Record<string, unknown>,
+  ) => PromiseLike<{ data: unknown; error: unknown }>;
+  return invoke.call(client, name, params);
+}
 
 function isRateLimitRpcResult(value: unknown): value is RateLimitRpcResult {
   if (!value || typeof value !== "object") return false;
@@ -85,10 +98,10 @@ export async function consumeRateLimit(
   admin: RpcClient,
 ) {
   const limit = RATE_LIMITS[action];
-  const digest = await bucketDigest(action, rawBucket);
-  const { data, error } = await admin.rpc("consume_auth_rate_limit", {
+  const digest = await bucketDigest(limit.action, rawBucket);
+  const { data, error } = await rpc(admin, "consume_auth_rate_limit", {
     target_bucket: `\\x${Buffer.from(digest).toString("hex")}`,
-    target_action: action,
+    target_action: limit.action,
     target_max_attempts: limit.attempts,
     target_window_seconds: limit.windowSeconds,
   });
@@ -111,7 +124,7 @@ export async function reserveStorageUpload(
   input: { userId: string; path: string; size: number },
   admin: RpcClient,
 ) {
-  const { data, error } = await admin.rpc("reserve_checkin_image_upload", {
+  const { data, error } = await rpc(admin, "reserve_checkin_image_upload", {
     target_user_id: input.userId,
     target_path: input.path,
     target_size: input.size,
@@ -140,7 +153,8 @@ export async function releaseStorageUploadReservation(
   input: { userId: string; path: string },
   admin: RpcClient,
 ) {
-  const { data, error } = await admin.rpc(
+  const { data, error } = await rpc(
+    admin,
     "release_checkin_image_upload_reservation",
     {
       target_user_id: input.userId,

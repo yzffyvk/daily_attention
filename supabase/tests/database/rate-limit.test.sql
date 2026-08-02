@@ -1,5 +1,5 @@
 begin;
-select plan(24);
+select plan(28);
 
 select results_eq(
   $$select * from public.consume_auth_rate_limit(decode(repeat('01', 32), 'hex'), 'login', 10, 900)$$,
@@ -55,6 +55,25 @@ select is(
   (select blocked_until from private.auth_rate_limits where bucket_digest = decode(repeat('02', 32), 'hex') and action = 'recover'),
   null,
   'a window reset clears the previous block'
+);
+
+select results_eq(
+  $$select * from public.consume_auth_rate_limit(decode(repeat('09', 32), 'hex'), 'ai_generate', 10, 600)$$,
+  $$values (true, 0)$$,
+  'the documented AI generation burst policy is allowed'
+);
+select is(
+  (select attempt_count from private.auth_rate_limits where bucket_digest = decode(repeat('09', 32), 'hex') and action = 'ai_generate'),
+  1,
+  'an accepted AI generation attempt is recorded'
+);
+select throws_ok(
+  $$select * from public.consume_auth_rate_limit(decode(repeat('0a', 32), 'hex'), 'ai_generate', 9, 600)$$,
+  '22023', 'invalid auth rate limit parameters', 'an AI attempt mismatch is rejected'
+);
+select throws_ok(
+  $$select * from public.consume_auth_rate_limit(decode(repeat('0b', 32), 'hex'), 'ai_generate', 10, 601)$$,
+  '22023', 'invalid auth rate limit parameters', 'an AI window mismatch is rejected'
 );
 
 create temporary table rate_limit_test_state on commit drop as
