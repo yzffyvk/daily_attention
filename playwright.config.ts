@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const flowTests = ["**/auth.spec.ts", "**/checkins.spec.ts"];
+const flowTests = ["**/auth.spec.ts", "**/checkins.spec.ts", "**/ai-generation.spec.ts"];
 
 export default defineConfig({
   testDir: "./tests/e2e",

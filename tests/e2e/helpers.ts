@@ -186,10 +186,22 @@ export async function register(page: Page, email?: string) {
   await expect(page).toHaveURL(/\/onboarding$/);
   await page.goto("/", { waitUntil: "load" });
   await expect(page).toHaveURL(/\/onboarding$/);
+  await waitForClient(page);
   await page.getByLabel("名称").fill("E2E 学习者");
+  await expect(page.getByLabel("名称")).toHaveValue("E2E 学习者");
   await page.getByLabel("头像 4").check();
+  const onboardingResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === "/api/onboarding" && response.request().method() === "POST";
+  });
   await page.getByRole("button", { name: "进入学习空间" }).click();
-  await expect(page.getByRole("button", { name: "打开账户菜单" })).toBeVisible();
+  const completedOnboarding = await onboardingResponse;
+  if (!completedOnboarding.ok()) {
+    throw new Error(`E2E onboarding failed with status ${completedOnboarding.status()}`);
+  }
+  await expect(page.getByRole("button", { name: "打开账户菜单" })).toBeVisible({
+    timeout: 15_000,
+  });
   return { code, email: allocatedEmail };
 }
 
