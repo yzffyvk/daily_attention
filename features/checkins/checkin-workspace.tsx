@@ -5,6 +5,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MonthCalendar } from "@/features/calendar/month-calendar";
+import { useAiGeneration } from "@/features/ai-generation/use-ai-generation";
+import type { ActiveAiJob } from "@/features/ai-generation/types";
 import { useCheckInDraft } from "@/features/drafts/use-checkin-draft";
 import { AppHeader } from "@/features/profile/app-header";
 import type { AccountProfile } from "@/server/auth/ports";
@@ -32,6 +34,10 @@ import { DirtySwitchDialog, useDialogFocus } from "./dirty-switch-dialog";
 import type { ImageSelection } from "./image-note-uploader";
 import { checkInKeys, setMonthRecord, useCheckIn, useMonthCheckIns, useSaveCheckIn } from "./queries";
 import type { CheckInRecord } from "./types";
+import {
+  applyAiResultToDraft,
+  clearDraftActiveAiJob,
+} from "@/lib/indexed-db/drafts";
 
 const muteStorageKey = "attention-journal-muted";
 
@@ -180,6 +186,7 @@ export function CheckInWorkspace({
   const [isSaving, setIsSaving] = useState(false);
   const [isCleaningUpImage, setIsCleaningUpImage] = useState(false);
   const [isPreparingImage, setIsPreparingImage] = useState(false);
+  const [activeAiJob, setActiveAiJob] = useState<ActiveAiJob | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const todayRef = useRef(initialToday);
   const selectedDateRef = useRef(initialDate);
@@ -192,6 +199,8 @@ export function CheckInWorkspace({
   const imageCleanupInFlightRef = useRef(false);
   const imagePreparationInFlightRef = useRef(false);
   const ambiguousCandidatePathsRef = useRef(new Set<string>());
+  const activeAiJobRef = useRef<ActiveAiJob | null>(null);
+  const aiPersistenceRef = useRef<Promise<unknown>>(Promise.resolve());
 
   const monthQuery = useMonthCheckIns(month);
   const checkInQuery = useCheckIn(selectedDate);
@@ -201,6 +210,41 @@ export function CheckInWorkspace({
   const selectedRecord = checkInQuery.data ?? null;
   const isDirty = isDraftDirty(draft, draftBaseRecord);
   const canSave = Boolean(draft.attention.trim());
+  const aiGeneration = useAiGeneration({
+    activeJob: activeAiJob,
+    onActiveJobChange: (nextJob) => {
+      const previousJob = activeAiJobRef.current;
+      activeAiJobRef.current = nextJob;
+      setActiveAiJob(nextJob);
+      if (!nextJob && previousJob && userId) {
+        aiPersistenceRef.current = aiPersistenceRef.current.then(
+          () => clearDraftActiveAiJob(userId, previousJob),
+          () => clearDraftActiveAiJob(userId, previousJob),
+        );
+      }
+    },
+    onSucceeded: (result, targetDate) => {
+      const job = activeAiJobRef.current;
+      if (!job || job.targetDate !== targetDate) return;
+      if (selectedDateRef.current === targetDate) {
+        setDraft((current) => ({
+          ...current,
+          attention: result.attention,
+          summary: result.summary,
+          inspiration: result.inspiration,
+          sourceUrl: job.sourceUrl,
+        }));
+        setStatus("AI 小结已生成，请审阅后手动保存", "success");
+      } else if (userId) {
+        aiPersistenceRef.current = aiPersistenceRef.current.then(
+          () => applyAiResultToDraft(userId, job, result),
+          () => applyAiResultToDraft(userId, job, result),
+        );
+        showToast(`${formatDate(targetDate)}的 AI 小结已生成`);
+      }
+    },
+    onTerminal: () => undefined,
+  });
   const {
     deleteAfterCloudSave,
     isOffline,
@@ -212,7 +256,8 @@ export function CheckInWorkspace({
     draft,
     isDirty,
     baseVersion,
-    onRestore: (restoredDraft, restoredBaseVersion) => {
+    activeAiJob: activeAiJob?.targetDate === selectedDate ? activeAiJob : null,
+    onRestore: (restoredDraft, restoredBaseVersion, restoredAiJob) => {
       if (selectedDateRef.current !== selectedDate) return;
       const cloudSnapshot = recordSnapshot(checkInQuery.data ?? null);
       draftRef.current = restoredDraft;
@@ -222,6 +267,10 @@ export function CheckInWorkspace({
       setBaseVersion(restoredBaseVersion);
       setBaseRecordExists(cloudSnapshot !== null);
       setHydratedDate(selectedDate);
+      if (restoredAiJob) {
+        activeAiJobRef.current = restoredAiJob;
+        setActiveAiJob(restoredAiJob);
+      }
       setStatus("已恢复本地草稿", "success");
     },
   });
@@ -709,6 +758,11 @@ export function CheckInWorkspace({
             today={today}
           />
           <CheckInEditor
+            aiActiveJob={aiGeneration.activeJob}
+            aiError={aiGeneration.error}
+            aiIsLongRunning={aiGeneration.isLongRunning}
+            aiQuotaRemaining={aiGeneration.quotaRemaining}
+            aiStage={aiGeneration.stage}
             date={selectedDate}
             draft={draft}
             isDirty={isDirty}
@@ -725,6 +779,17 @@ export function CheckInWorkspace({
             onDraftChange={(change) => {
               if (!editorLockedRef.current) {
                 setDraft((current) => ({ ...current, ...change }));
+              }
+            }}
+            onAiCancel={() => void aiGeneration.cancel()}
+            onAiGenerate={() => {
+              if (aiGeneration.canRetryCreate) {
+                void aiGeneration.retryCreate();
+              } else {
+                void aiGeneration.generate({
+                  sourceUrl: draft.sourceUrl.trim(),
+                  targetDate: selectedDate,
+                });
               }
             }}
             onImageChange={handleImageChange}

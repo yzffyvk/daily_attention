@@ -1,4 +1,6 @@
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase } from "idb";
+import type { ActiveAiJob } from "@/features/ai-generation/types";
+import type { AiGenerationResult } from "@/lib/domain/ai-generation";
 
 export type StoredDraft = {
   userId: string;
@@ -12,6 +14,7 @@ export type StoredDraft = {
   removeImage: boolean;
   baseVersion: number | null;
   updatedAt: string;
+  activeAiJob?: ActiveAiJob;
 };
 
 interface AttentionDraftDatabase extends DBSchema {
@@ -88,6 +91,40 @@ export async function saveDraft(
 
 export async function deleteDraft(userId: string, date: string) {
   await (await getDatabase()).delete("drafts", [userId, date]);
+}
+
+export async function applyAiResultToDraft(
+  userId: string,
+  job: ActiveAiJob,
+  result: AiGenerationResult,
+) {
+  const existing = await loadDraft(userId, job.targetDate);
+  const next: StoredDraft = {
+    userId,
+    date: job.targetDate,
+    attention: result.attention,
+    sourceUrl: job.sourceUrl,
+    summary: result.summary,
+    inspiration: result.inspiration,
+    imageBlob: existing?.imageBlob ?? null,
+    imageName: existing?.imageName ?? "",
+    removeImage: existing?.removeImage ?? false,
+    baseVersion: existing?.baseVersion ?? null,
+    updatedAt: new Date().toISOString(),
+  };
+  await saveDraft(next);
+  return next;
+}
+
+export async function clearDraftActiveAiJob(
+  userId: string,
+  job: ActiveAiJob,
+) {
+  const existing = await loadDraft(userId, job.targetDate);
+  if (!existing || existing.activeAiJob?.jobId !== job.jobId) return;
+  const cleared = { ...existing };
+  delete cleared.activeAiJob;
+  await saveDraft({ ...cleared, updatedAt: new Date().toISOString() });
 }
 
 export async function deleteAttentionDraftDatabase() {

@@ -232,6 +232,75 @@ afterEach(async () => {
 });
 
 describe("CheckInWorkspace", () => {
+  it("places completed AI output into an editable local draft without saving it", async () => {
+    const date = getTodayKey();
+    const jobId = "10000000-0000-4000-8000-000000000001";
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/ai/generations" && init?.method === "POST") {
+        return Promise.resolve(response({
+          ok: true,
+          data: {
+            jobId,
+            status: "queued",
+            pollAfterMs: 1,
+            quota: { used: 1, reserved: 1, consumed: 0, limit: 5, remaining: 4 },
+          },
+          requestId: "ai-create",
+        }, 202));
+      }
+      if (path === `/api/ai/generations/${jobId}`) {
+        return Promise.resolve(response({
+          ok: true,
+          data: {
+            jobId,
+            status: "succeeded",
+            stage: "complete",
+            result: {
+              attention: "AI 标题",
+              summary: "AI 结构化小结",
+              inspiration: "AI 延伸灵感",
+              sourceTitle: "示例资料",
+              warnings: [],
+            },
+          },
+          requestId: "ai-read",
+        }));
+      }
+      if (path.includes("/api/checkins?month=")) {
+        return Promise.resolve(response({ ok: true, data: [], requestId: "month" }));
+      }
+      if (path.includes("/api/checkins/stats?")) {
+        return Promise.resolve(response({
+          ok: true,
+          data: { totalCount: 0, currentStreak: 0, hasTodayRecord: false },
+          requestId: "stats",
+        }));
+      }
+      if (path.includes(`/api/checkins/${date}`)) return Promise.resolve(missingCheckIn());
+      return Promise.resolve(response({ ok: true, data: {}, requestId: "other" }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <TestQueryProvider>
+        <CheckInWorkspace initialDate={date} initialToday={date} userId="ai-user" />
+      </TestQueryProvider>,
+    );
+    await waitForEditorReady();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /AI 提炼/ }));
+    await user.type(
+      screen.getByLabelText(/学习资料来源/),
+      "https://example.com/article",
+    );
+    await user.click(screen.getByRole("button", { name: "生成知识小结" }));
+
+    await waitFor(() => expect(screen.getByLabelText("attention")).toHaveValue("AI 标题"));
+    expect(screen.getByLabelText(/学习知识点小结/)).toHaveValue("AI 结构化小结");
+    expect(screen.getByText("AI 小结已生成，请审阅后手动保存")).toBeVisible();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0);
+  });
+
   it("restores a newer local draft using the authenticated id even when the profile is unavailable", async () => {
     const date = getTodayKey();
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });

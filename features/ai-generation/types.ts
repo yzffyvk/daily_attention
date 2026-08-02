@@ -31,6 +31,13 @@ export type CreateAiGenerationData = {
   quota: AiGenerationQuota;
 };
 
+export type ActiveAiJob = {
+  jobId: string;
+  targetDate: string;
+  sourceUrl: string;
+  createdAt: string;
+};
+
 export type AiGenerationTaskErrorCode =
   | "FETCH_TIMEOUT"
   | "TOO_MANY_REDIRECTS"

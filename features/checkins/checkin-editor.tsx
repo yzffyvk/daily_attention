@@ -9,6 +9,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import type { ActiveAiJob } from "@/features/ai-generation/types";
+import type { AiGenerationController } from "@/features/ai-generation/use-ai-generation";
 import type { DraftStorageState } from "@/features/drafts/use-checkin-draft";
 import { formatDate } from "./dates";
 import { ImageNoteUploader, type ImageSelection } from "./image-note-uploader";
@@ -51,6 +53,11 @@ export function isDraftDirty(draft: CheckInDraft, record: CheckInRecord | null |
 }
 
 type CheckInEditorProps = {
+  aiActiveJob: ActiveAiJob | null;
+  aiError: string;
+  aiIsLongRunning: boolean;
+  aiQuotaRemaining: number | null;
+  aiStage: AiGenerationController["stage"];
   date: string;
   record: CheckInRecord | null | undefined;
   draft: CheckInDraft;
@@ -66,6 +73,8 @@ type CheckInEditorProps = {
   message: string;
   messageTone: MessageTone;
   onDraftChange: (change: Partial<CheckInDraft>) => void;
+  onAiCancel: () => void;
+  onAiGenerate: () => void;
   onImageChange: (selection: ImageSelection, date: string) => void | Promise<void>;
   onImageError: (message: string) => void;
   onImagePreparationChange: (isPreparing: boolean, date: string) => void;
@@ -75,6 +84,11 @@ type CheckInEditorProps = {
 };
 
 export function CheckInEditor({
+  aiActiveJob,
+  aiError,
+  aiIsLongRunning,
+  aiQuotaRemaining,
+  aiStage,
   date,
   record,
   draft,
@@ -90,6 +104,8 @@ export function CheckInEditor({
   message,
   messageTone,
   onDraftChange,
+  onAiCancel,
+  onAiGenerate,
   onImageChange,
   onImageError,
   onImagePreparationChange,
@@ -98,7 +114,6 @@ export function CheckInEditor({
   onSubmit,
 }: CheckInEditorProps) {
   const [entryMode, setEntryMode] = useState<"manual" | "ai">("manual");
-  const [aiNotice, setAiNotice] = useState<{ date: string; message: string } | null>(null);
 
   const canSave = Boolean(draft.attention.trim());
   const state = isPreparingImage ? "正在整理图片" : isDirty ? "未保存" : record ? "已保存" : isLoading ? "正在读取" : "待填写";
@@ -108,6 +123,20 @@ export function CheckInEditor({
     isCleaningUpImage ||
     (isLoading && !isPreparingImage);
   const localDraftUnavailable = isDirty && draftStorageState === "unavailable";
+  const isAiActive = aiActiveJob !== null;
+  const aiProgressMessage = aiIsLongRunning
+    ? "处理时间比预期更长，任务仍在继续"
+    : aiStage === "creating"
+      ? "正在创建生成任务…"
+      : aiStage === "queued"
+        ? "任务已排队，马上开始读取资料"
+        : aiStage === "fetching"
+          ? "正在安全读取并整理资料…"
+          : aiStage === "generating"
+            ? "DeepSeek 正在思考并生成小结…"
+            : aiStage === "retrying"
+              ? "服务暂时繁忙，正在自动重试…"
+              : aiError;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -172,7 +201,6 @@ export function CheckInEditor({
             <strong>AI 提炼</strong>
             <small>从学习资料生成小结</small>
           </span>
-          <em>即将接入</em>
         </button>
       </div>
 
@@ -291,9 +319,8 @@ export function CheckInEditor({
                   id="source-url"
                   inputMode="url"
                   maxLength={2048}
-                  disabled={isDisabled}
+                  disabled={isDisabled || isAiActive}
                   onChange={(event) => {
-                    setAiNotice(null);
                     onDraftChange({ sourceUrl: event.target.value });
                   }}
                   placeholder="粘贴希望 AI 阅读的资料链接"
@@ -304,22 +331,26 @@ export function CheckInEditor({
               <div className="ai-generate-row">
                 <button
                   className="ai-generate-button"
-                  disabled={isDisabled || !draft.sourceUrl.trim()}
-                  onClick={() => {
-                    setAiNotice({
-                      date,
-                      message: "AI 总结服务尚未接入，资料链接已保存在当前草稿中。",
-                    });
-                  }}
+                  disabled={isDisabled || isOffline || isAiActive || !draft.sourceUrl.trim()}
+                  onClick={onAiGenerate}
                   type="button"
                 >
                   <Sparkles aria-hidden="true" size={17} />
-                  生成知识小结
+                  {aiStage === "creating" ? "正在创建…" : isAiActive ? "生成中…" : "生成知识小结"}
                 </button>
-                <span>本阶段仅完成前端流程</span>
+                <span>
+                  {aiQuotaRemaining === null
+                    ? "每天最多生成 5 次"
+                    : `今天还可生成 ${aiQuotaRemaining} 次`}
+                </span>
               </div>
-              {aiNotice?.date === date ? (
-                <p className="ai-notice" role="status">{aiNotice.message}</p>
+              {aiProgressMessage ? (
+                <p className="ai-notice" role={aiError ? "alert" : "status"}>
+                  {aiProgressMessage}
+                  {isAiActive && aiStage === "queued" ? (
+                    <button onClick={onAiCancel} type="button">取消任务</button>
+                  ) : null}
+                </p>
               ) : null}
             </section>
 
@@ -329,7 +360,7 @@ export function CheckInEditor({
                 <div>
                   <p>STEP 02</p>
                   <h3 id="ai-result-title">审阅生成结果</h3>
-                  <small>AI 接入后，标题与知识点会出现在这里，并支持继续修改</small>
+                  <small>生成完成后会填入下方草稿，你仍可继续修改</small>
                 </div>
               </div>
               <div className="ai-result-fields">

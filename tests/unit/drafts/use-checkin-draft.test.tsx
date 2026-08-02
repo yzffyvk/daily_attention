@@ -128,6 +128,26 @@ describe("useCheckInDraft", () => {
     expect(baseVersion).toBe(3);
   });
 
+  it("restores optional active AI metadata from IndexedDB", async () => {
+    const activeAiJob = {
+      jobId: "10000000-0000-4000-8000-000000000001",
+      targetDate: date,
+      sourceUrl: "https://example.com/article",
+      createdAt: "2026-07-23T11:00:00.000Z",
+    };
+    const onRestore = vi.fn();
+    draftStore.loadDraft.mockResolvedValue({ ...storedDraft(), activeAiJob });
+
+    renderHook(() => useDraft({ onRestore }));
+    await flushDraftEffects();
+
+    expect(onRestore).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceUrl: "https://example.com" }),
+      3,
+      activeAiJob,
+    );
+  });
+
   it("keeps the cloud record when the local draft is not newer", async () => {
     const onRestore = vi.fn();
     draftStore.loadDraft.mockResolvedValue(storedDraft("2026-07-23T09:00:00.000Z"));

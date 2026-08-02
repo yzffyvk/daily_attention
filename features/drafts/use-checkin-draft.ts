@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CheckInDraft } from "@/features/checkins/checkin-editor";
 import type { CheckInRecord } from "@/features/checkins/types";
+import type { ActiveAiJob } from "@/features/ai-generation/types";
 import {
   deleteDraft,
   loadDraft,
@@ -30,7 +31,12 @@ type UseCheckInDraftOptions = {
   draft: CheckInDraft;
   isDirty: boolean;
   baseVersion: number | null;
-  onRestore: (draft: CheckInDraft, baseVersion: number | null) => void;
+  activeAiJob?: ActiveAiJob | null;
+  onRestore: (
+    draft: CheckInDraft,
+    baseVersion: number | null,
+    activeAiJob?: ActiveAiJob | null,
+  ) => void;
 };
 
 function isAbortError(error: unknown) {
@@ -82,6 +88,7 @@ function storedDraftFromEditor(
   date: string,
   draft: CheckInDraft,
   baseVersion: number | null,
+  activeAiJob: ActiveAiJob | null = null,
 ): StoredDraft {
   return {
     userId,
@@ -95,6 +102,7 @@ function storedDraftFromEditor(
     removeImage: draft.removeImage,
     baseVersion,
     updatedAt: new Date().toISOString(),
+    ...(activeAiJob ? { activeAiJob } : {}),
   };
 }
 
@@ -105,6 +113,7 @@ export function useCheckInDraft({
   draft,
   isDirty,
   baseVersion,
+  activeAiJob = null,
   onRestore,
 }: UseCheckInDraftOptions) {
   const [storageState, setStorageState] = useState<DraftStorageState>("loading");
@@ -116,6 +125,7 @@ export function useCheckInDraft({
   const writeTimerRef = useRef<number | null>(null);
   const activeWritesRef = useRef(new Set<ActiveWrite>());
   const onRestoreRef = useRef(onRestore);
+  const persistedActiveJobIdRef = useRef<string | null>(null);
   const isCloudRecordLoading = cloudRecord === undefined;
   const cloudUpdatedAt = cloudRecord
     ? Date.parse(cloudRecord.updatedAt)
@@ -194,8 +204,14 @@ export function useCheckInDraft({
         setStorageState("ready");
         if (editGeneration !== editGenerationRef.current) return;
         const localUpdatedAt = stored ? Date.parse(stored.updatedAt) : Number.NaN;
+        persistedActiveJobIdRef.current = stored?.activeAiJob?.jobId ?? null;
         if (stored && Number.isFinite(localUpdatedAt) && localUpdatedAt > cloudUpdatedAt) {
-          onRestoreRef.current(editorDraftFromStored(stored), stored.baseVersion);
+          const restoredDraft = editorDraftFromStored(stored);
+          if (stored.activeAiJob) {
+            onRestoreRef.current(restoredDraft, stored.baseVersion, stored.activeAiJob);
+          } else {
+            onRestoreRef.current(restoredDraft, stored.baseVersion);
+          }
         }
       })
       .catch(() => {
@@ -209,7 +225,13 @@ export function useCheckInDraft({
   }, [cloudUpdatedAt, date, isCloudRecordLoading, isOffline, userId]);
 
   useEffect(() => {
-    if (!userId || (isCloudRecordLoading && !isOffline) || storageState !== "ready" || !isDirty) return;
+    const activeMetadataChanged = persistedActiveJobIdRef.current !== activeAiJob?.jobId;
+    if (
+      !userId
+      || (isCloudRecordLoading && !isOffline)
+      || storageState !== "ready"
+      || (!isDirty && !activeAiJob && !activeMetadataChanged)
+    ) return;
 
     const generation = writeGenerationRef.current + 1;
     writeGenerationRef.current = generation;
@@ -218,9 +240,13 @@ export function useCheckInDraft({
       if (writeTimerRef.current === timer) writeTimerRef.current = null;
       const controller = new AbortController();
       const write = saveDraft(
-        storedDraftFromEditor(userId, date, draft, baseVersion),
+        storedDraftFromEditor(userId, date, draft, baseVersion, activeAiJob),
         { signal: controller.signal },
-      ).catch((error: unknown) => {
+      ).then(() => {
+        if (generation === writeGenerationRef.current) {
+          persistedActiveJobIdRef.current = activeAiJob?.jobId ?? null;
+        }
+      }).catch((error: unknown) => {
         if (isAbortError(error)) return;
         if (generation === writeGenerationRef.current) setStorageState("unavailable");
       });
@@ -240,7 +266,7 @@ export function useCheckInDraft({
       if (generation === writeGenerationRef.current) writeGenerationRef.current += 1;
       abortActiveWrites(effectWrites);
     };
-  }, [baseVersion, date, draft, isCloudRecordLoading, isDirty, isOffline, storageState, userId]);
+  }, [activeAiJob, baseVersion, date, draft, isCloudRecordLoading, isDirty, isOffline, storageState, userId]);
 
   async function deleteAfterCloudSave() {
     if (!userId) return;

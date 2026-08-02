@@ -6,6 +6,7 @@ import {
   CheckInEditor,
   type CheckInDraft,
 } from "@/features/checkins/checkin-editor";
+import type { ActiveAiJob } from "@/features/ai-generation/types";
 
 vi.mock("@/features/checkins/image-note-uploader", () => ({
   ImageNoteUploader: () => <div data-testid="image-note-uploader">图片笔记</div>,
@@ -23,11 +24,26 @@ const emptyDraft: CheckInDraft = {
 
 afterEach(cleanup);
 
-function EditorHarness() {
+function EditorHarness({
+  activeAiJob = null,
+  aiStage = "idle",
+  onAiCancel = vi.fn(),
+  onAiGenerate = vi.fn(),
+}: {
+  activeAiJob?: ActiveAiJob | null;
+  aiStage?: "idle" | "creating" | "queued" | "fetching" | "generating" | "retrying" | "complete";
+  onAiCancel?: () => void;
+  onAiGenerate?: () => void;
+} = {}) {
   const [draft, setDraft] = useState(emptyDraft);
 
   return (
     <CheckInEditor
+      aiActiveJob={activeAiJob}
+      aiError=""
+      aiIsLongRunning={false}
+      aiQuotaRemaining={null}
+      aiStage={aiStage}
       date="2026-07-28"
       draft={draft}
       draftStorageState="ready"
@@ -42,6 +58,8 @@ function EditorHarness() {
       message=""
       messageTone="neutral"
       onDraftChange={(change) => setDraft((current) => ({ ...current, ...change }))}
+      onAiCancel={onAiCancel}
+      onAiGenerate={onAiGenerate}
       onImageChange={vi.fn()}
       onImageError={vi.fn()}
       onImagePreparationChange={vi.fn()}
@@ -70,9 +88,10 @@ describe("CheckInEditor modes", () => {
     expect(within(referenceSection).getByLabelText(/灵感记录/)).toBeVisible();
   });
 
-  it("stages an AI summary flow without sending a backend request", async () => {
+  it("starts a real AI summary flow after a source URL is entered", async () => {
     const user = userEvent.setup();
-    render(<EditorHarness />);
+    const onAiGenerate = vi.fn();
+    render(<EditorHarness onAiGenerate={onAiGenerate} />);
 
     await user.click(screen.getByRole("button", { name: /AI 提炼/ }));
 
@@ -90,8 +109,23 @@ describe("CheckInEditor modes", () => {
     expect(generate).toBeEnabled();
 
     await user.click(generate);
-    expect(
-      screen.getByText("AI 总结服务尚未接入，资料链接已保存在当前草稿中。"),
-    ).toBeVisible();
+    expect(onAiGenerate).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/尚未接入/)).not.toBeInTheDocument();
+  });
+
+  it("offers cancellation only while a job is queued", async () => {
+    const user = userEvent.setup();
+    const onAiCancel = vi.fn();
+    const activeAiJob = {
+      jobId: "10000000-0000-4000-8000-000000000001",
+      targetDate: "2026-07-28",
+      sourceUrl: "https://example.com/article",
+      createdAt: "2026-07-28T10:00:00.000Z",
+    };
+    render(<EditorHarness activeAiJob={activeAiJob} aiStage="queued" onAiCancel={onAiCancel} />);
+    await user.click(screen.getByRole("button", { name: /AI 提炼/ }));
+
+    await user.click(screen.getByRole("button", { name: "取消任务" }));
+    expect(onAiCancel).toHaveBeenCalledTimes(1);
   });
 });
