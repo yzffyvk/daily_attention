@@ -394,3 +394,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/storage-maintenance/deno.json"
 entrypoint = "./functions/storage-maintenance/index.ts"
+
+[functions.ai-generation-worker]
+enabled = true
+verify_jwt = false
+import_map = "./functions/ai-generation-worker/deno.json"
+entrypoint = "./functions/ai-generation-worker/index.ts"

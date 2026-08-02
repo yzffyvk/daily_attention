@@ -4,6 +4,7 @@ import {
   aiSuccess,
   aiValidationFailure,
   isAiGenerationEnabled,
+  triggerAiWorker,
 } from "@/server/ai/http";
 
 describe("AI generation HTTP responses", () => {
@@ -96,5 +97,19 @@ describe("AI generation HTTP responses", () => {
     });
     expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("secret.invalid");
     expect(JSON.stringify(body)).not.toContain("token-123");
+  });
+
+  it("bounds a stalled worker wake-up without losing the durable queue job", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("AI_WORKER_TRIGGER_TOKEN", "worker-trigger-token-with-at-least-32-characters");
+    const invoke = vi.fn(() => new Promise(() => undefined));
+    const pending = triggerAiWorker({ functions: { invoke } } as never);
+    const rejection = expect(pending).rejects.toThrow("AI_WORKER_TRIGGER_TIMEOUT");
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await rejection;
+    expect(invoke).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
   });
 });

@@ -10,6 +10,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { createAiGenerationRepository } from "./repository";
 
 const noStoreHeaders = { "Cache-Control": "private, no-store" };
+const workerTriggerTimeoutMs = 1_000;
 
 const mappedErrors = {
   SESSION_EXPIRED: {
@@ -133,9 +134,22 @@ export async function triggerAiWorker(
 ) {
   const token = process.env.AI_WORKER_TRIGGER_TOKEN;
   if (!token) throw new Error("Missing AI_WORKER_TRIGGER_TOKEN");
-  const { error } = await admin.functions.invoke("ai-generation-worker", {
-    body: { source: "enqueue" },
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (error) throw error;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const { error } = await Promise.race([
+      admin.functions.invoke("ai-generation-worker", {
+        body: { source: "enqueue" },
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("AI_WORKER_TRIGGER_TIMEOUT")),
+          workerTriggerTimeoutMs,
+        );
+      }),
+    ]);
+    if (error) throw error;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }

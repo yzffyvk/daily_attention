@@ -246,6 +246,14 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      delay_ai_generation_queue_message: {
+        Args: { target_delay_seconds: number; target_msg_id: number }
+        Returns: boolean
+      }
+      delete_ai_generation_queue_message: {
+        Args: { target_msg_id: number }
+        Returns: boolean
+      }
       delete_expired_storage_upload_reservations: {
         Args: { target_limit: number }
         Returns: number
@@ -286,6 +294,27 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      mark_ai_generation_provider_failure: {
+        Args: {
+          target_completion_tokens: number
+          target_error_code: string
+          target_error_message: string
+          target_job_id: string
+          target_prompt_cache_hit_tokens: number
+          target_prompt_cache_miss_tokens: number
+          target_prompt_tokens: number
+          target_provider_call_count: number
+          target_reasoning_tokens: number
+          target_retryable: boolean
+        }
+        Returns: Database["public"]["CompositeTypes"]["ai_generation_job_record"][]
+        SetofOptions: {
+          from: "*"
+          to: "ai_generation_job_record"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       read_ai_generation_job: {
         Args: { target_job_id: string; target_user_id: string }
         Returns: Database["public"]["CompositeTypes"]["ai_generation_job_record"][]
@@ -295,6 +324,16 @@ export type Database = {
           isOneToOne: false
           isSetofReturn: true
         }
+      }
+      read_ai_generation_queue: {
+        Args: { target_batch_limit: number; target_visibility_timeout: number }
+        Returns: {
+          enqueued_at: string
+          message: Json
+          msg_id: number
+          read_count: number
+          visible_at: string
+        }[]
       }
       read_profile: {
         Args: { target_user_id: string }
