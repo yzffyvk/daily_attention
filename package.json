@@ -52,6 +52,7 @@
     "eslint-config-next": "16.2.11",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^29.1.1",
+    "linkedom": "^0.18.13",
     "react-server-dom-webpack": "19.2.6",
     "start-server-and-test": "^3.0.11",
     "supabase": "^2.109.1",
