@@ -1,0 +1,36 @@
+import { z } from "zod";
+
+export const aiGenerationResultSchema = z.object({
+  attention: z.string().trim().min(1).max(120),
+  summary: z.string().trim().min(1).max(5000),
+  inspiration: z.string().trim().min(1).max(2000),
+  sourceTitle: z.string().trim().min(1).max(300),
+  warnings: z.array(z.string().trim().min(1).max(500)).max(10),
+}).strict();
+
+export type AiGenerationResult = z.infer<typeof aiGenerationResultSchema>;
+
+export type AiUsage = {
+  promptTokens: number;
+  promptCacheHitTokens: number;
+  promptCacheMissTokens: number;
+  completionTokens: number;
+  reasoningTokens: number;
+};
+
+export type AiSummaryProviderResult = {
+  result: AiGenerationResult;
+  usage: AiUsage;
+  providerCallCount: number;
+  model: string;
+  systemFingerprint: string | null;
+};
+
+export interface AiSummaryProvider {
+  generate(input: {
+    sourceTitle: string;
+    sourceText: string;
+    anonymousUserId: string;
+    signal?: AbortSignal;
+  }): Promise<AiSummaryProviderResult>;
+}
