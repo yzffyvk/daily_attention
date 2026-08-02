@@ -621,7 +621,12 @@ async function run() {
     releaseLock = acquireRunLock();
     if (receivedSignal) return signalExitCode(receivedSignal);
 
-    const bindings = localSupabaseBindings();
+    const bindings = {
+      ...localSupabaseBindings(),
+      AI_GENERATION_ENABLED: "true",
+      AI_WORKER_TRIGGER_TOKEN: "e2e-worker-trigger-token-with-32-characters",
+      AI_PROVIDER_MODE: "fake",
+    };
     const apiUrl = localApiUrl(bindings.NEXT_PUBLIC_SUPABASE_URL);
     await verifyLocalAuthSettings(bindings, apiUrl);
     if (receivedSignal) return signalExitCode(receivedSignal);

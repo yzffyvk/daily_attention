@@ -400,3 +400,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/ai-generation-worker/deno.json"
 entrypoint = "./functions/ai-generation-worker/index.ts"
+
+[functions.ai-generation-maintenance]
+enabled = true
+verify_jwt = false
+import_map = "./functions/ai-generation-maintenance/deno.json"
+entrypoint = "./functions/ai-generation-maintenance/index.ts"

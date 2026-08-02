@@ -298,6 +298,98 @@ version. The two service-role-only database functions may remain during a
 function rollback. Database rollback remains forward-only; do not edit an
 applied migration. Recreate the Cron job only after a manual invocation passes.
 
+## AI Generation Queue, Gateway, and Cleanup
+
+Keep `AI_GENERATION_ENABLED=false` until the database migrations, Supabase Queue,
+both Edge Functions, the safe-fetch gateway, secrets, schedules, and alerts have
+all passed the checks below. The queue is `ai_generation_jobs`; its payload must
+contain only `job_id`.
+
+Deploy the reviewed functions with handler-owned service authentication. They
+use separate random Bearer tokens and therefore intentionally disable the
+platform JWT pre-check; neither endpoint accepts a user token, publishable key,
+Supabase secret/service-role key, or the other function's token as its Cron
+Bearer.
+
+```sh
+npx supabase functions deploy ai-generation-worker --no-verify-jwt --project-ref "$SUPABASE_PROJECT_REF"
+npx supabase functions deploy ai-generation-maintenance --no-verify-jwt --project-ref "$SUPABASE_PROJECT_REF"
+```
+
+Generate and store `AI_WORKER_TRIGGER_TOKEN`, `AI_MAINTENANCE_TOKEN`,
+`AI_USER_ID_PEPPER`, and `SAFE_FETCH_GATEWAY_TOKEN` independently. Load all
+values from an approved secret environment so no value appears in source,
+command output, tickets, or screenshots:
+
+```sh
+npx supabase secrets set \
+  AI_WORKER_TRIGGER_TOKEN="$AI_WORKER_TRIGGER_TOKEN" \
+  AI_MAINTENANCE_TOKEN="$AI_MAINTENANCE_TOKEN" \
+  AI_USER_ID_PEPPER="$AI_USER_ID_PEPPER" \
+  DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
+  SAFE_FETCH_GATEWAY_URL="$SAFE_FETCH_GATEWAY_URL" \
+  SAFE_FETCH_GATEWAY_TOKEN="$SAFE_FETCH_GATEWAY_TOKEN" \
+  --project-ref "$SUPABASE_PROJECT_REF"
+```
+
+Build `services/safe-fetch-gateway` as an OCI image and deploy it behind an
+internal HTTPS origin. The container must run as its declared non-root `node`
+user. At the workload and network layers, deny private, loopback, link-local,
+carrier-grade NAT, documentation, multicast, and cloud-metadata destinations;
+the application checks are not a substitute for egress policy. Set the same
+dedicated `SAFE_FETCH_GATEWAY_TOKEN` on the gateway and Edge Function, rotate
+both sides together, and never reuse either Cron token.
+
+Before enabling traffic, verify all of these with synthetic public fixtures:
+
+1. `/healthz` succeeds without returning configuration.
+2. One allowed public HTML fixture is fetched and bounded.
+3. Literal private addresses and DNS names resolving to private addresses fail.
+4. A public redirect to a private target fails.
+5. Gateway unavailability fails closed; the Worker never falls back to direct
+   source-URL fetch.
+
+Use Supabase Vault plus `pg_cron`/`pg_net` to invoke the Worker every minute as
+a safety net and maintenance hourly. Store only project origin and dedicated
+tokens in Vault. The Worker schedule posts to
+`/functions/v1/ai-generation-worker`; maintenance posts to
+`/functions/v1/ai-generation-maintenance`. Unschedule both jobs before rotating
+tokens, then manually invoke each endpoint and restore schedules only after a
+`200` response with count-only JSON.
+
+Inspect queue health in a secure SQL session without selecting message bodies:
+
+```sql
+select
+  count(*)::integer as visible_depth,
+  coalesce(
+    extract(epoch from (now() - min(enqueued_at)))::integer,
+    0
+  ) as oldest_visible_seconds
+from pgmq.q_ai_generation_jobs
+where vt <= now();
+
+select status, count(*)::integer
+from private.ai_generation_jobs
+group by status
+order by status;
+```
+
+Alert when the oldest queued task exceeds two minutes; rolling 15-minute
+success is below 90% with a meaningful sample; DeepSeek 429/5xx responses spike;
+a task exceeds configured token limits; or quota, enqueue, message deletion, or
+cleanup operations fail. Also monitor gateway rejection categories and latency,
+stage duration, retries, token/cache counters, and absence of successful hourly
+maintenance. Tune numeric thresholds during the internal rollout without
+weakening the two-minute and 90% initial baselines.
+
+Roll out first to internal accounts, confirm five-per-day quota behavior and
+24-hour result/90-day metadata expiry, then increase exposure gradually. To
+rollback, set `AI_GENERATION_ENABLED=false` first. This blocks new jobs while
+already `generating` jobs finish; keep the Worker running until all nonterminal
+jobs settle. Database rollback is forward-only, and no rollback may expose
+stored source bodies or model reasoning because neither is persisted.
+
 ## Sites Runtime Variables
 
 Set these runtime variables in the managed Sites project for the exact release environment:
@@ -308,11 +400,13 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<Supabase publishable key>
 SUPABASE_SECRET_KEY=<Supabase secret key>
 AUTH_RATE_LIMIT_PEPPER=<at least 32 random bytes>
 APP_ORIGIN=https://<your-public-hostname>
+AI_GENERATION_ENABLED=false
+AI_WORKER_TRIGGER_TOKEN=<dedicated worker trigger token>
 ```
 
-The first two are intentionally public browser configuration. `SUPABASE_SECRET_KEY` and `AUTH_RATE_LIMIT_PEPPER` are server-only secrets: mark them secret, scope them to the target environment, and do not place them in `NEXT_PUBLIC_*` variables, source files, build arguments, browser logs, or screenshots. `APP_ORIGIN` is the exact trusted HTTPS origin used for canonical social-image metadata; it must not contain a path. After setting values, the release owner must build, save, and deploy the exact source commit through the managed Sites workflow.
+The first two are intentionally public browser configuration. `SUPABASE_SECRET_KEY`, `AUTH_RATE_LIMIT_PEPPER`, and `AI_WORKER_TRIGGER_TOKEN` are server-only secrets: mark them secret, scope them to the target environment, and do not place them in `NEXT_PUBLIC_*` variables, source files, build arguments, browser logs, or screenshots. `APP_ORIGIN` is the exact trusted HTTPS origin used for canonical social-image metadata; it must not contain a path. Keep `AI_GENERATION_ENABLED=false` until the staged rollout gate above passes. After setting values, the release owner must build, save, and deploy the exact source commit through the managed Sites workflow.
 
-Treat all five variables as a single release gate. Before any production smoke test or build/save/deploy action, verify in the target Sites environment that every variable is present and non-empty and that the two public values identify the intended Supabase project. Stop the cutover with writers still quiesced if any value is missing, malformed, or scoped to a different environment.
+Treat all seven variables as a single release gate. Before any production smoke test or build/save/deploy action, verify in the target Sites environment that every variable is present and non-empty and that the two public values identify the intended Supabase project. Stop the cutover with writers still quiesced if any value is missing, malformed, or scoped to a different environment.
 
 ## Post-Deploy RLS Verification
 

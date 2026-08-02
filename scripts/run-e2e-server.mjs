@@ -1,5 +1,12 @@
 import { spawn } from "node:child_process";
 
+if (
+  process.env.AI_PROVIDER_MODE === "fake"
+  && process.env.INTEGRATION_TEST_BINDINGS !== "true"
+) {
+  throw new Error("Fake AI provider is restricted to test bindings.");
+}
+
 const command = process.platform === "win32" ? "npm.cmd" : "npm";
 const child = spawn(command, ["run", "dev", "--", "--hostname", "127.0.0.1", "--port", "3200"], {
   env: process.env,

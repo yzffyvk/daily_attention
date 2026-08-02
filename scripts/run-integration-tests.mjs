@@ -42,6 +42,7 @@ function statusEnvironment() {
     AUTH_RATE_LIMIT_PEPPER: "integration-test-rate-limit-pepper",
     AI_GENERATION_ENABLED: "true",
     AI_WORKER_TRIGGER_TOKEN: "integration-test-worker-trigger-token",
+    AI_PROVIDER_MODE: "fake",
     APP_ORIGIN: "http://127.0.0.1:3100",
   };
   if (Object.values(bindings).some((value) => typeof value !== "string" || value.length === 0)) {

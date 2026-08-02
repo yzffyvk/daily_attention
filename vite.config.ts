@@ -20,6 +20,9 @@ function integrationBindings() {
     "SUPABASE_SECRET_KEY",
     "AUTH_RATE_LIMIT_PEPPER",
     "APP_ORIGIN",
+    "AI_GENERATION_ENABLED",
+    "AI_WORKER_TRIGGER_TOKEN",
+    "AI_PROVIDER_MODE",
   ] as const;
   const missing = names.filter((name) => !process.env[name]);
   if (missing.length > 0) throw new Error(`Missing integration bindings: ${missing.join(", ")}`);
@@ -28,6 +31,13 @@ function integrationBindings() {
 }
 
 export default defineConfig(async () => {
+  if (
+    process.env.AI_PROVIDER_MODE === "fake"
+    && process.env.NODE_ENV !== "test"
+    && process.env.INTEGRATION_TEST_BINDINGS !== "true"
+  ) {
+    throw new Error("Fake AI provider is restricted to test bindings.");
+  }
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= "false";

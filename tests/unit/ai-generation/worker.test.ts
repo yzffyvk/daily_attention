@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { createWorkerHandler } from "@/supabase/functions/ai-generation-worker/index";
+import {
+  assertAiProviderModeAllowed,
+  createWorkerHandler,
+  default as aiGenerationWorkerHandler,
+} from "@/supabase/functions/ai-generation-worker/index";
 
 const token = "worker-trigger-token-with-at-least-32-characters";
 
@@ -11,6 +15,26 @@ function request(authorization?: string) {
 }
 
 describe("AI generation queue worker", () => {
+  it("rejects fake provider mode outside explicit test bindings", () => {
+    expect(() => assertAiProviderModeAllowed({ mode: "fake" }))
+      .toThrow("FUNCTION_CONFIGURATION_ERROR");
+    expect(() => assertAiProviderModeAllowed({
+      mode: "fake",
+      integrationTestBindings: "true",
+    })).not.toThrow();
+  });
+
+  it("fails closed when production worker secrets are missing", async () => {
+    vi.stubGlobal("Deno", { env: { get: vi.fn(() => undefined) } });
+
+    const response = await aiGenerationWorkerHandler.fetch(
+      request(`Bearer ${token}`),
+    );
+
+    expect(response.status).toBe(500);
+    vi.unstubAllGlobals();
+  });
+
   it.each([undefined, "Bearer wrong-token"])(
     "rejects missing or invalid trigger auth before reading the queue",
     async (authorization) => {

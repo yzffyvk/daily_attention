@@ -185,6 +185,23 @@ function namedDefaultSecretKey() {
   }
 }
 
+export function assertAiProviderModeAllowed(input: {
+  mode: string;
+  nodeEnv?: string;
+  integrationTestBindings?: string;
+}) {
+  if (input.mode !== "deepseek" && input.mode !== "fake") {
+    throw new Error("FUNCTION_CONFIGURATION_ERROR");
+  }
+  if (
+    input.mode === "fake"
+    && input.nodeEnv !== "test"
+    && input.integrationTestBindings !== "true"
+  ) {
+    throw new Error("FUNCTION_CONFIGURATION_ERROR");
+  }
+}
+
 function requiredEnvironment() {
   const environment = {
     supabaseUrl: Deno.env.get("SUPABASE_URL"),
@@ -196,11 +213,17 @@ function requiredEnvironment() {
     triggerToken: Deno.env.get("AI_WORKER_TRIGGER_TOKEN"),
     safeFetchUrl: Deno.env.get("SAFE_FETCH_GATEWAY_URL"),
     safeFetchToken: Deno.env.get("SAFE_FETCH_GATEWAY_TOKEN"),
+    providerMode: Deno.env.get("AI_PROVIDER_MODE") ?? "deepseek",
   };
+  assertAiProviderModeAllowed({
+    mode: environment.providerMode,
+    nodeEnv: Deno.env.get("NODE_ENV"),
+    integrationTestBindings: Deno.env.get("INTEGRATION_TEST_BINDINGS"),
+  });
   if (
     !environment.supabaseUrl
     || !environment.secretKey
-    || !environment.deepSeekApiKey
+    || (environment.providerMode === "deepseek" && !environment.deepSeekApiKey)
     || !environment.userIdPepper
     || !environment.triggerToken
     || !environment.safeFetchUrl
@@ -211,7 +234,10 @@ function requiredEnvironment() {
   ) {
     throw new Error("FUNCTION_CONFIGURATION_ERROR");
   }
-  return environment as { [Key in keyof typeof environment]: string };
+  return {
+    ...environment,
+    deepSeekApiKey: environment.deepSeekApiKey ?? "",
+  } as { [Key in keyof typeof environment]: string };
 }
 
 async function hmacSha256Hex(secret: string, value: string) {
@@ -241,7 +267,31 @@ function createProductionDependencies(): AiWorkerDependencies {
     baseUrl: environment.safeFetchUrl,
     token: environment.safeFetchToken,
   });
-  const provider = createDeepSeekProvider({ apiKey: environment.deepSeekApiKey });
+  const provider = environment.providerMode === "fake"
+    ? {
+      async generate(input: { sourceTitle: string }) {
+        return {
+          result: {
+            attention: `已整理：${input.sourceTitle}`.slice(0, 120),
+            summary: "这是测试环境生成的确定性知识小结。",
+            inspiration: "请在保存前继续补充自己的理解。",
+            sourceTitle: input.sourceTitle,
+            warnings: ["测试环境结果"],
+          },
+          usage: {
+            promptTokens: 0,
+            promptCacheHitTokens: 0,
+            promptCacheMissTokens: 0,
+            completionTokens: 0,
+            reasoningTokens: 0,
+          },
+          providerCallCount: 1,
+          model: "fake-ai-provider",
+          systemFingerprint: null,
+        };
+      },
+    }
+    : createDeepSeekProvider({ apiKey: environment.deepSeekApiKey });
 
   const runnerPorts: AiJobRunnerPorts = {
     async claim(jobId) {
