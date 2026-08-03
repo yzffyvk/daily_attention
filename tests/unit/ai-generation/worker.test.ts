@@ -3,6 +3,7 @@ import {
   assertAiProviderModeAllowed,
   createWorkerHandler,
   default as aiGenerationWorkerHandler,
+  type AiWorkerDependencies,
 } from "@/supabase/functions/ai-generation-worker/index";
 
 const token = "worker-trigger-token-with-at-least-32-characters";
@@ -14,7 +15,63 @@ function request(authorization?: string) {
   });
 }
 
+function handlerWithCapturedTask(dependencies: AiWorkerDependencies) {
+  let task: Promise<void> | null = null;
+  const handler = createWorkerHandler(dependencies, (scheduled) => {
+    task = scheduled;
+  });
+  return {
+    handler,
+    scheduledTask() {
+      if (!task) throw new Error("Expected the queue batch to be scheduled");
+      return task;
+    },
+  };
+}
+
 describe("AI generation queue worker", () => {
+  it("acknowledges before the scheduled queue batch completes", async () => {
+    let releaseJob!: () => void;
+    const jobGate = new Promise<void>((resolve) => {
+      releaseJob = resolve;
+    });
+    const runJob = vi.fn(async () => {
+      await jobGate;
+      return "completed" as const;
+    });
+    const captured = handlerWithCapturedTask({
+      triggerToken: token,
+      readMessages: vi.fn().mockResolvedValue([{
+        msgId: 1,
+        readCount: 1,
+        message: { job_id: "10000000-0000-4000-8000-000000000001" },
+      }]),
+      runJob,
+      deleteMessage: vi.fn().mockResolvedValue(undefined),
+      delayMessage: vi.fn(),
+    });
+
+    const responsePromise = captured.handler(request(`Bearer ${token}`));
+    const firstResult = await Promise.race([
+      responsePromise.then((response) => ({ kind: "response" as const, response })),
+      new Promise<{ kind: "pending" }>((resolve) => {
+        setTimeout(() => resolve({ kind: "pending" }), 20);
+      }),
+    ]);
+    releaseJob();
+    const response = await responsePromise;
+
+    expect(firstResult.kind).toBe("response");
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      accepted: true,
+      requestId: expect.any(String),
+    });
+    expect(captured.scheduledTask()).toBeInstanceOf(Promise);
+    await captured.scheduledTask();
+    expect(runJob).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects fake provider mode outside explicit test bindings", () => {
     expect(() => assertAiProviderModeAllowed({ mode: "fake" }))
       .toThrow("FUNCTION_CONFIGURATION_ERROR");
@@ -39,18 +96,20 @@ describe("AI generation queue worker", () => {
     "rejects missing or invalid trigger auth before reading the queue",
     async (authorization) => {
       const readMessages = vi.fn();
+      const scheduleTask = vi.fn();
       const handler = createWorkerHandler({
         triggerToken: token,
         readMessages,
         runJob: vi.fn(),
         deleteMessage: vi.fn(),
         delayMessage: vi.fn(),
-      });
+      }, scheduleTask);
 
       const response = await handler(request(authorization));
 
       expect(response.status).toBe(401);
       expect(readMessages).not.toHaveBeenCalled();
+      expect(scheduleTask).not.toHaveBeenCalled();
     },
   );
 
@@ -73,7 +132,7 @@ describe("AI generation queue worker", () => {
       readCount: index + 1,
       message: { job_id: `10000000-0000-4000-8000-00000000000${index + 1}` },
     }));
-    const handler = createWorkerHandler({
+    const captured = handlerWithCapturedTask({
       triggerToken: token,
       readMessages: vi.fn().mockResolvedValue(messages),
       runJob,
@@ -81,27 +140,20 @@ describe("AI generation queue worker", () => {
       delayMessage,
     });
 
-    const response = await handler(request(`Bearer ${token}`));
-    const body = await response.json();
+    const response = await captured.handler(request(`Bearer ${token}`));
+    await captured.scheduledTask();
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(maximumActive).toBe(2);
     expect(runJob).toHaveBeenCalledTimes(5);
     expect(deleteMessage).toHaveBeenCalledTimes(2);
     expect(delayMessage).toHaveBeenCalledTimes(3);
     expect(delayMessage).toHaveBeenCalledWith(3, 120);
-    expect(body).toMatchObject({
-      requestId: expect.any(String),
-      received: 5,
-      completed: 2,
-      retryable: 3,
-      failed: 0,
-    });
   });
 
-  it("deletes malformed messages and reports isolated processing failures", async () => {
+  it("deletes malformed messages without exposing processing failures", async () => {
     const deleteMessage = vi.fn().mockResolvedValue(undefined);
-    const handler = createWorkerHandler({
+    const captured = handlerWithCapturedTask({
       triggerToken: token,
       readMessages: vi.fn().mockResolvedValue([
         { msgId: 1, readCount: 1, message: { sourceUrl: "private" } },
@@ -112,36 +164,35 @@ describe("AI generation queue worker", () => {
       delayMessage: vi.fn(),
     });
 
-    const response = await handler(request(`Bearer ${token}`));
+    const response = await captured.handler(request(`Bearer ${token}`));
     const body = await response.json();
+    await captured.scheduledTask();
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(deleteMessage).toHaveBeenCalledWith(1);
-    expect(body).toMatchObject({ received: 2, completed: 0, retryable: 0, failed: 2 });
+    expect(body).toMatchObject({ accepted: true, requestId: expect.any(String) });
     expect(JSON.stringify(body)).not.toContain("raw body");
   });
 
   it("isolates a malformed-message deletion failure from the rest of the batch", async () => {
-    const handler = createWorkerHandler({
+    const runJob = vi.fn().mockResolvedValue("completed");
+    const captured = handlerWithCapturedTask({
       triggerToken: token,
       readMessages: vi.fn().mockResolvedValue([
         { msgId: 1, readCount: 1, message: {} },
         { msgId: 2, readCount: 1, message: { job_id: "10000000-0000-4000-8000-000000000002" } },
       ]),
-      runJob: vi.fn().mockResolvedValue("completed"),
+      runJob,
       deleteMessage: vi.fn(async (msgId: number) => {
         if (msgId === 1) throw new Error("queue unavailable");
       }),
       delayMessage: vi.fn(),
     });
 
-    const response = await handler(request(`Bearer ${token}`));
+    const response = await captured.handler(request(`Bearer ${token}`));
+    await expect(captured.scheduledTask()).resolves.toBeUndefined();
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      received: 2,
-      completed: 1,
-      failed: 1,
-    });
+    expect(response.status).toBe(202);
+    expect(runJob).toHaveBeenCalledTimes(1);
   });
 });

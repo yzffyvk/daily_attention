@@ -13,6 +13,10 @@ declare const Deno: {
   env: { get(name: string): string | undefined };
 };
 
+declare const EdgeRuntime: {
+  waitUntil(task: Promise<unknown>): void;
+};
+
 const QUEUE_BATCH_LIMIT = 5;
 const QUEUE_VISIBILITY_TIMEOUT_SECONDS = 180;
 const WORKER_CONCURRENCY = 2;
@@ -34,6 +38,8 @@ export type AiWorkerDependencies = {
   deleteMessage(msgId: number): Promise<void>;
   delayMessage(msgId: number, delaySeconds: number): Promise<void>;
 };
+
+export type BackgroundTaskScheduler = (task: Promise<void>) => void;
 
 const jobPayloadSchema = z.object({ job_id: z.uuid() }).strict();
 const queueRowSchema = z.object({
@@ -96,7 +102,39 @@ async function mapWithConcurrency<T>(
   );
 }
 
-export function createWorkerHandler(dependencies: AiWorkerDependencies) {
+async function processQueueBatch(dependencies: AiWorkerDependencies) {
+  const messages = (await dependencies.readMessages()).slice(0, QUEUE_BATCH_LIMIT);
+  await mapWithConcurrency(messages, WORKER_CONCURRENCY, async (delivery) => {
+    const payload = jobPayloadSchema.safeParse(delivery.message);
+    if (!payload.success) {
+      try {
+        await dependencies.deleteMessage(delivery.msgId);
+      } catch {
+        // The message becomes visible again; keep processing the batch.
+      }
+      return;
+    }
+
+    try {
+      const outcome = await dependencies.runJob(payload.data.job_id);
+      if (outcome === "retryable") {
+        await dependencies.delayMessage(
+          delivery.msgId,
+          retryDelaySeconds(delivery.readCount),
+        );
+      } else {
+        await dependencies.deleteMessage(delivery.msgId);
+      }
+    } catch {
+      // Keep processing the rest of the batch. The message becomes visible again.
+    }
+  });
+}
+
+export function createWorkerHandler(
+  dependencies: AiWorkerDependencies,
+  scheduleTask: BackgroundTaskScheduler,
+) {
   return async function handleRequest(request: Request) {
     const requestId = crypto.randomUUID();
     if (!await constantTimeEqual(
@@ -109,43 +147,8 @@ export function createWorkerHandler(dependencies: AiWorkerDependencies) {
       return jsonResponse({ ok: false, requestId }, 405);
     }
 
-    const counts = { received: 0, completed: 0, retryable: 0, failed: 0 };
-    try {
-      const messages = (await dependencies.readMessages()).slice(0, QUEUE_BATCH_LIMIT);
-      counts.received = messages.length;
-      await mapWithConcurrency(messages, WORKER_CONCURRENCY, async (delivery) => {
-        const payload = jobPayloadSchema.safeParse(delivery.message);
-        if (!payload.success) {
-          try {
-            await dependencies.deleteMessage(delivery.msgId);
-          } catch {
-            // The message becomes visible again; keep processing the batch.
-          }
-          counts.failed += 1;
-          return;
-        }
-
-        try {
-          const outcome = await dependencies.runJob(payload.data.job_id);
-          if (outcome === "retryable") {
-            await dependencies.delayMessage(
-              delivery.msgId,
-              retryDelaySeconds(delivery.readCount),
-            );
-            counts.retryable += 1;
-          } else {
-            await dependencies.deleteMessage(delivery.msgId);
-            counts.completed += 1;
-          }
-        } catch {
-          counts.failed += 1;
-        }
-      });
-
-      return jsonResponse({ requestId, ...counts }, 200);
-    } catch {
-      return jsonResponse({ requestId, ...counts }, 500);
-    }
+    scheduleTask(processQueueBatch(dependencies));
+    return jsonResponse({ accepted: true, requestId }, 202);
   };
 }
 
@@ -407,7 +410,10 @@ function createProductionDependencies(): AiWorkerDependencies {
 const aiGenerationWorkerHandler = {
   fetch(request: Request) {
     try {
-      return createWorkerHandler(createProductionDependencies())(request);
+      return createWorkerHandler(
+        createProductionDependencies(),
+        (task) => EdgeRuntime.waitUntil(task),
+      )(request);
     } catch {
       return Promise.resolve(jsonResponse({ ok: false, requestId: crypto.randomUUID() }, 500));
     }
