@@ -85,6 +85,33 @@ describe("DNS-pinned public fetch", () => {
     expect(resolveAll).toHaveBeenCalledTimes(1);
   });
 
+  it("returns an address array when Node requests all lookup results", async () => {
+    const transport = transportFor([{ status: 200 }], (options) => {
+      const lookup = options.lookup as (
+        hostname: string,
+        settings: { all?: boolean },
+        callback: (
+          error: Error | null,
+          address: string | Array<{ address: string; family: number }>,
+          family?: number,
+        ) => void,
+      ) => void;
+
+      lookup("example.com", { all: true }, (error, addresses, family) => {
+        expect(error).toBeNull();
+        expect(addresses).toEqual([{ address: "93.184.216.34", family: 4 }]);
+        expect(family).toBeUndefined();
+      });
+    });
+
+    await expect(fetchPublicHtml({
+      sourceUrl: "https://example.com/article",
+      resolveAll: publicResolver,
+      signal: new AbortController().signal,
+      requestTransport: transport,
+    })).resolves.toMatchObject({ finalUrl: "https://example.com/article" });
+  });
+
   it("revalidates every redirect and rejects a private target", async () => {
     const resolveAll = vi.fn(async (hostname: string) => hostname === "example.com"
       ? [{ address: "93.184.216.34", family: 4 as const }]

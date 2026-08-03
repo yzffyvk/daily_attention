@@ -115,7 +115,11 @@ function requestOptions(url: URL, selected: ResolvedAddress): PinnedRequestOptio
       "User-Agent": "TodayAI-SafeFetch/1.0",
       Connection: "close",
     },
-    lookup: (_lookupHostname, _options, callback) => {
+    lookup: (_lookupHostname, options, callback) => {
+      if (typeof options === "object" && options !== null && options.all === true) {
+        callback(null, [selected]);
+        return;
+      }
       callback(null, selected.address, selected.family);
     },
   };
