@@ -19,6 +19,7 @@ declare const EdgeRuntime: {
 
 const QUEUE_BATCH_LIMIT = 5;
 const QUEUE_VISIBILITY_TIMEOUT_SECONDS = 180;
+const QUEUE_VISIBILITY_GRACE_MS = 100;
 const WORKER_CONCURRENCY = 2;
 const jsonHeaders = {
   "Cache-Control": "private, no-store",
@@ -103,7 +104,12 @@ async function mapWithConcurrency<T>(
 }
 
 async function processQueueBatch(dependencies: AiWorkerDependencies) {
-  const messages = (await dependencies.readMessages()).slice(0, QUEUE_BATCH_LIMIT);
+  let messages = await dependencies.readMessages();
+  if (messages.length === 0) {
+    await new Promise((resolve) => setTimeout(resolve, QUEUE_VISIBILITY_GRACE_MS));
+    messages = await dependencies.readMessages();
+  }
+  messages = messages.slice(0, QUEUE_BATCH_LIMIT);
   await mapWithConcurrency(messages, WORKER_CONCURRENCY, async (delivery) => {
     const payload = jobPayloadSchema.safeParse(delivery.message);
     if (!payload.success) {

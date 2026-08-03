@@ -72,6 +72,37 @@ describe("AI generation queue worker", () => {
     expect(runJob).toHaveBeenCalledTimes(1);
   });
 
+  it("rechecks the queue when the enqueue transaction is not visible immediately", async () => {
+    vi.useFakeTimers();
+    try {
+      const readMessages = vi.fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{
+          msgId: 1,
+          readCount: 1,
+          message: { job_id: "10000000-0000-4000-8000-000000000001" },
+        }]);
+      const runJob = vi.fn().mockResolvedValue("completed");
+      const captured = handlerWithCapturedTask({
+        triggerToken: token,
+        readMessages,
+        runJob,
+        deleteMessage: vi.fn().mockResolvedValue(undefined),
+        delayMessage: vi.fn(),
+      });
+
+      const response = await captured.handler(request(`Bearer ${token}`));
+      await vi.advanceTimersByTimeAsync(100);
+      await captured.scheduledTask();
+
+      expect(response.status).toBe(202);
+      expect(readMessages).toHaveBeenCalledTimes(2);
+      expect(runJob).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects fake provider mode outside explicit test bindings", () => {
     expect(() => assertAiProviderModeAllowed({ mode: "fake" }))
       .toThrow("FUNCTION_CONFIGURATION_ERROR");
