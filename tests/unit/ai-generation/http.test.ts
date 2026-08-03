@@ -99,17 +99,28 @@ describe("AI generation HTTP responses", () => {
     expect(JSON.stringify(body)).not.toContain("token-123");
   });
 
-  it("bounds a stalled worker wake-up without losing the durable queue job", async () => {
+  it("allows five seconds for a worker acknowledgement", async () => {
     vi.useFakeTimers();
-    vi.stubEnv("AI_WORKER_TRIGGER_TOKEN", "worker-trigger-token-with-at-least-32-characters");
-    const invoke = vi.fn(() => new Promise(() => undefined));
-    const pending = triggerAiWorker({ functions: { invoke } } as never);
-    const rejection = expect(pending).rejects.toThrow("AI_WORKER_TRIGGER_TIMEOUT");
+    try {
+      vi.stubEnv("AI_WORKER_TRIGGER_TOKEN", "worker-trigger-token-with-at-least-32-characters");
+      const invoke = vi.fn(() => new Promise(() => undefined));
+      const pending = triggerAiWorker({ functions: { invoke } } as never);
+      const outcome = pending.then(
+        () => "resolved" as const,
+        () => "rejected" as const,
+      );
 
-    await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(4_999);
+      await expect(Promise.race([
+        outcome,
+        Promise.resolve("pending" as const),
+      ])).resolves.toBe("pending");
+      expect(invoke).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
 
-    await rejection;
-    expect(invoke).toHaveBeenCalledTimes(1);
-    vi.useRealTimers();
+      await expect(pending).rejects.toThrow("AI_WORKER_TRIGGER_TIMEOUT");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

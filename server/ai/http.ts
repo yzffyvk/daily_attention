@@ -10,7 +10,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { createAiGenerationRepository } from "./repository";
 
 const noStoreHeaders = { "Cache-Control": "private, no-store" };
-const workerTriggerTimeoutMs = 1_000;
+const workerTriggerTimeoutMs = 5_000;
 
 const mappedErrors = {
   SESSION_EXPIRED: {
