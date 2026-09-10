@@ -33,7 +33,7 @@ describe("registration UI", () => {
     expect(email).toHaveAttribute("type", "email");
     expect(email).toHaveAttribute("autocomplete", "username");
     expect(screen.queryByLabelText("名称")).not.toBeInTheDocument();
-    expect(screen.queryByRole("radio", { name: /头像/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "返回登录" })).toHaveAttribute("href", "/login");
   });
 
@@ -214,8 +214,8 @@ describe("first-login onboarding UI", () => {
     render(<OnboardingForm />);
 
     expect(screen.getByLabelText("名称")).toHaveValue("");
-    expect(screen.getAllByRole("radio", { name: /头像/ })).toHaveLength(5);
-    expect(screen.getAllByRole("radio", { name: /头像/ }).every((radio) => !radio.hasAttribute("checked"))).toBe(true);
+    expect(screen.getAllByRole("radio")).toHaveLength(5);
+    expect(screen.getAllByRole("radio").every((radio) => !radio.hasAttribute("checked"))).toBe(true);
 
     await user.click(screen.getByRole("button", { name: "进入学习空间" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("请填写名称");
@@ -241,7 +241,7 @@ describe("first-login onboarding UI", () => {
     render(<OnboardingForm onCompleted={assign} />);
 
     await user.type(screen.getByLabelText("名称"), "  学习者  ");
-    await user.click(screen.getByRole("radio", { name: "头像 4" }));
+    await user.click(screen.getByRole("radio", { name: "摸鱼家" }));
     await user.click(screen.getByRole("button", { name: "进入学习空间" }));
 
     expect(fetchMock).toHaveBeenCalledWith(

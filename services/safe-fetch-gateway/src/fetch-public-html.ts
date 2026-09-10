@@ -129,6 +129,8 @@ type HopResult =
   | { type: "redirect"; location: string }
   | { type: "success"; contentType: string; body: string };
 
+class ConnectionFailure extends SafeFetchError {}
+
 function requestHop(input: {
   url: URL;
   selected: ResolvedAddress;
@@ -137,6 +139,7 @@ function requestHop(input: {
 }): Promise<HopResult> {
   return new Promise((resolve, reject) => {
     let settled = false;
+    let receivedResponse = false;
     let request: RequestLike | null = null;
     function finish(callback: () => void) {
       if (settled) return;
@@ -151,6 +154,7 @@ function requestHop(input: {
     request = input.requestTransport(
       requestOptions(input.url, input.selected),
       (response) => {
+        receivedResponse = true;
         const status = response.statusCode ?? 0;
         if ([301, 302, 303, 307, 308].includes(status)) {
           const location = headerValue(response.headers.location);
@@ -206,7 +210,9 @@ function requestHop(input: {
         : input.signal.aborted
           ? new SafeFetchError("FETCH_TIMEOUT")
           : new SafeFetchError("CONTENT_BLOCKED");
-      finish(() => reject(safeError));
+      finish(() => reject(!receivedResponse && !input.signal.aborted
+        ? new ConnectionFailure(safeError.code)
+        : safeError));
     });
     request.end();
   });
@@ -240,13 +246,25 @@ export async function fetchPublicHtml(input: {
       throw new SafeFetchError("CONTENT_BLOCKED");
     }
     assertPublicAddresses(addresses);
-    const selected = addresses[0]!;
-    const result = await requestHop({
-      url: current,
-      selected,
-      signal: totalSignal,
-      requestTransport,
-    });
+    let result: HopResult | undefined;
+    // Every address is validated above before any connection. Keep the hostname,
+    // TLS verification, pinned DNS and one total deadline across all attempts.
+    for (let index = 0; index < addresses.length; index += 1) {
+      try {
+        result = await requestHop({
+          url: current,
+          selected: addresses[index]!,
+          signal: totalSignal,
+          requestTransport,
+        });
+        break;
+      } catch (error) {
+        if (!(error instanceof ConnectionFailure) || totalSignal.aborted || index === addresses.length - 1) {
+          throw error;
+        }
+      }
+    }
+    if (!result) throw new SafeFetchError("CONTENT_BLOCKED");
     if (result.type === "success") {
       return {
         finalUrl: current.toString(),

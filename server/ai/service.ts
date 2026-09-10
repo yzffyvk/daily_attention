@@ -4,10 +4,6 @@ import type {
   AiGenerationTaskErrorCode,
 } from "@/features/ai-generation/types";
 import type { CreateAiGenerationInput } from "@/lib/domain/ai-generation";
-import {
-  logServerWarning,
-  operationalErrorFields,
-} from "@/lib/server/logging";
 import type {
   AiGenerationRepository,
   AiJob,
@@ -46,7 +42,6 @@ export async function createGeneration(
   userId: string,
   input: CreateAiGenerationInput,
   repository: AiGenerationRepository,
-  triggerWorker: () => Promise<void>,
 ): Promise<AiJobWithQuota> {
   const created = await repository.create({
     userId,
@@ -55,15 +50,6 @@ export async function createGeneration(
     sourceUrl: input.sourceUrl,
     sourceHost: new URL(input.sourceUrl).hostname,
   });
-
-  try {
-    await triggerWorker();
-  } catch (error) {
-    logServerWarning("AI worker trigger failed", {
-      jobId: created.job.id,
-      ...operationalErrorFields(error),
-    });
-  }
 
   return created;
 }

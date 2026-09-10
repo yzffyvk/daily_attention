@@ -94,10 +94,12 @@ describe("AI generation routes", () => {
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
-  it("creates a queued job with quota and triggers the worker", async () => {
+  it("creates a queued job with quota without dispatching an Edge Function", async () => {
     const response = await POST(postRequest());
 
     expect(response.status).toBe(202);
+    expect(mocks.create).toHaveBeenCalledWith(userId, requestBody, {});
+    expect(mocks.trigger).not.toHaveBeenCalled();
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
@@ -114,6 +116,12 @@ describe("AI generation routes", () => {
       {},
     );
     expect(mocks.create).toHaveBeenCalled();
+  });
+
+  it("passes the full article URL without its section anchor to job creation", async () => {
+    const response = await POST(postRequest({...requestBody, sourceUrl: requestBody.sourceUrl + "#skills"}));
+    expect(response.status).toBe(202);
+    expect(mocks.create).toHaveBeenCalledWith(userId, requestBody, {});
   });
 
   it("maps the daily quota error without leaking database details", async () => {

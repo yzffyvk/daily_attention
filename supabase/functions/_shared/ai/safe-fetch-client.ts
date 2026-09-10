@@ -86,6 +86,7 @@ export function createSafeFetchClient(config: {
   baseUrl: string;
   token: string;
   fetchImpl?: typeof fetch;
+  allowLoopbackHttp?: boolean;
 }) {
   let baseUrl: URL;
   try {
@@ -94,7 +95,11 @@ export function createSafeFetchClient(config: {
     return fail("SAFE_FETCH_GATEWAY_CONFIG_INVALID");
   }
   if (
-    baseUrl.protocol !== "https:"
+    (baseUrl.protocol !== "https:" && !(
+      config.allowLoopbackHttp === true
+      && baseUrl.protocol === "http:"
+      && ["localhost", "127.0.0.1"].includes(baseUrl.hostname)
+    ))
     || baseUrl.username
     || baseUrl.password
     || baseUrl.search

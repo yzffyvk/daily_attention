@@ -6,6 +6,14 @@ import {
 import { normalizeSourceUrl } from "@/services/safe-fetch-gateway/src/normalize-url";
 
 describe("safe-fetch IP policy", () => {
+  it("strips section anchors while preserving encoded path and query data", () => {
+    expect(normalizeSourceUrl("https://example.com/a%23b?q=x%23y#skills").toString())
+      .toBe("https://example.com/a%23b?q=x%23y");
+  });
+
+  it.each(["#/page", "#!/page", "#%2fpage", "#?page=1"])("rejects hash routing %s", (hash) => {
+    expect(() => normalizeSourceUrl(`https://example.com/${hash}`)).toThrow("URL_NOT_ALLOWED");
+  });
   it.each([
     "0.0.0.0",
     "10.0.0.1",

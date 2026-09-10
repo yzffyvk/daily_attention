@@ -2,6 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 import { createSafeFetchClient } from "@/supabase/functions/_shared/ai/safe-fetch-client";
 
 describe("safe-fetch Edge client", () => {
+  it("allows explicitly enabled loopback HTTP only", () => {
+    const token = "dedicated-gateway-token-with-32-characters";
+    expect(() => createSafeFetchClient({ baseUrl: "http://127.0.0.1:8788", token,
+      allowLoopbackHttp: true })).not.toThrow();
+    for (const baseUrl of ["http://gateway.example.test", "http://127.0.0.1.evil.test", "http://192.168.1.1"]) {
+      expect(() => createSafeFetchClient({baseUrl, token, allowLoopbackHttp: true}))
+        .toThrow("SAFE_FETCH_GATEWAY_CONFIG_INVALID");
+    }
+    expect(() => createSafeFetchClient({baseUrl: "http://127.0.0.1:8788", token}))
+      .toThrow("SAFE_FETCH_GATEWAY_CONFIG_INVALID");
+  });
   it("uses only the authenticated HTTPS gateway", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       finalUrl: "https://example.com/article",

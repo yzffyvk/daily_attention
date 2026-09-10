@@ -31,7 +31,7 @@ function repository(overrides: Partial<AiGenerationRepository> = {}): AiGenerati
 }
 
 describe("AI generation service", () => {
-  it("persists before triggering the worker", async () => {
+  it("returns the durable queued job without an external worker trigger", async () => {
     const order: string[] = [];
     const repo = repository({
       create: vi.fn(async () => {
@@ -39,34 +39,17 @@ describe("AI generation service", () => {
         return created;
       }),
     });
-    const trigger = vi.fn(async () => {
-      order.push("triggered");
-    });
-
-    await expect(createGeneration(created.job.userId, input, repo, trigger))
+    await expect(createGeneration(created.job.userId, input, repo))
       .resolves.toBe(created);
-    expect(order).toEqual(["persisted", "triggered"]);
+    expect(order).toEqual(["persisted"]);
   });
 
-  it("returns the durable job when worker wake-up fails", async () => {
-    const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const trigger = vi.fn().mockRejectedValue(
-      new Error("token and https://internal.invalid must not leak"),
-    );
-
+  it("propagates enqueue failure without reporting a successful job", async () => {
     await expect(createGeneration(
       created.job.userId,
       input,
-      repository(),
-      trigger,
-    )).resolves.toBe(created);
-    expect(warningSpy).toHaveBeenCalledWith("server_warning", {
-      event: "AI worker trigger failed",
-      jobId: created.job.id,
-      errorType: "Error",
-      errorCode: "INTERNAL_ERROR",
-    });
-    expect(JSON.stringify(warningSpy.mock.calls)).not.toContain("internal.invalid");
+      repository({create: vi.fn().mockRejectedValue(new Error("DB_UNAVAILABLE"))}),
+    )).rejects.toThrow("DB_UNAVAILABLE");
   });
 
   it("does not reveal whether a foreign job exists", async () => {

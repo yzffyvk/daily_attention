@@ -46,11 +46,13 @@ export function normalizeSourceUrl(sourceUrl: string) {
     (parsed.protocol !== "http:" && parsed.protocol !== "https:")
     || parsed.username !== ""
     || parsed.password !== ""
-    || parsed.hash !== ""
+    || /^#(?:[!/?]|%(?:2f|21|3f))/iu.test(parsed.hash)
     || (parsed.port !== "" && parsed.port !== "80" && parsed.port !== "443")
   ) {
     throw new SafeFetchError("URL_NOT_ALLOWED");
   }
+  // Section anchors are browser-only; never send them to the source server.
+  parsed.hash = "";
   if (parsed.toString().length > 2048) throw new SafeFetchError("URL_NOT_ALLOWED");
   return parsed;
 }

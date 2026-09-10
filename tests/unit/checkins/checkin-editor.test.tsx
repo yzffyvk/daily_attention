@@ -72,6 +72,14 @@ function EditorHarness({
 }
 
 describe("CheckInEditor modes", () => {
+  it("explains full-article extraction for section anchors", async () => {
+    const user = userEvent.setup();
+    render(<EditorHarness />);
+    await user.click(screen.getByRole("button", {name:/AI 提炼/}));
+    await user.type(screen.getByLabelText(/学习资料来源/), "https://example.com/article#skills");
+    expect(screen.getByText("将忽略链接中的章节定位，提炼整篇文章，而非仅该章节。")).toBeVisible();
+    expect(screen.getByRole("button", {name:"生成知识小结"})).toBeEnabled();
+  });
   it("starts in manual mode with the existing journal fields", () => {
     render(<EditorHarness />);
 
@@ -79,7 +87,7 @@ describe("CheckInEditor modes", () => {
       "aria-pressed",
       "true",
     );
-    expect(screen.getByLabelText("attention")).toBeVisible();
+    expect(screen.getByLabelText("我的注意力")).toBeVisible();
     expect(screen.getByLabelText(/学习知识点小结/)).toBeVisible();
 
     const referenceSection = screen.getByRole("region", { name: "参考资料" });

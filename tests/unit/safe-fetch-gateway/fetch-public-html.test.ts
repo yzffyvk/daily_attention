@@ -51,6 +51,34 @@ function transportFor(
 const publicResolver = vi.fn(async () => [{ address: "93.184.216.34", family: 4 as const }]);
 
 describe("DNS-pinned public fetch", () => {
+  it("tries another validated DNS address after connection failure", async () => {
+    const resolver = vi.fn(async () => [
+      { address: "185.199.111.153", family: 4 as const },
+      { address: "185.199.110.153", family: 4 as const },
+    ]);
+    let calls = 0;
+    const successful = transportFor([{status:200}]);
+    const requestTransport: RequestTransport = (options, onResponse) => {
+      if (calls++ > 0) return successful(options, onResponse);
+      const request = new EventEmitter() as EventEmitter & {end(): void; destroy(): void};
+      request.end = () => queueMicrotask(() => request.emit("error", new Error("ECONNREFUSED")));
+      request.destroy = () => {};
+      return request as unknown as ReturnType<RequestTransport>;
+    };
+    await expect(fetchPublicHtml({sourceUrl:"https://example.com", resolveAll:resolver,
+      requestTransport, signal:new AbortController().signal})).resolves.toMatchObject({contentType:"text/html"});
+    expect(calls).toBe(2);
+    expect(resolver).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry another address after an HTTP rejection", async () => {
+    let calls = 0;
+    await expect(fetchPublicHtml({sourceUrl:"https://example.com", signal:new AbortController().signal,
+      resolveAll:async () => [{address:"185.199.111.153",family:4},{address:"185.199.110.153",family:4}],
+      requestTransport:transportFor([{status:403},{status:200}], () => { calls++; }),
+    })).rejects.toMatchObject({code:"CONTENT_BLOCKED"});
+    expect(calls).toBe(1);
+  });
   it("pins the socket lookup while retaining the original HTTPS hostname", async () => {
     const resolveAll = vi.fn(publicResolver);
     const transport = transportFor([{ status: 200 }], (options) => {

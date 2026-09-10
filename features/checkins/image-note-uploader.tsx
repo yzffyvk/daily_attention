@@ -1,9 +1,9 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element */
 import { ImagePlus, Trash2, Upload } from "lucide-react";
 import type { ChangeEvent, DragEvent } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ImageNoteViewer } from "./image-note-viewer";
 
 export type ImageSelection = {
   file: File | null;
@@ -279,7 +279,6 @@ function ImageNoteUploaderSession({
     <div
       className={`upload-field${isActiveDrag ? " dragging" : ""}${previewUrl ? " has-image" : ""}`}
       aria-busy={isActivePreparation}
-      aria-disabled={disabled}
       onDragEnter={(event) => {
         event.preventDefault();
         if (!disabled) setIsDragging(true);
@@ -294,7 +293,7 @@ function ImageNoteUploaderSession({
     >
       {previewUrl ? (
         <div className="image-preview">
-          <img alt={imageName || "学习图片笔记"} src={previewUrl} />
+          <ImageNoteViewer key={previewUrl} name={imageName} src={previewUrl} />
           <div className="image-actions">
             <span>{imageName || "图片笔记"}</span>
             <div>

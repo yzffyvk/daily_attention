@@ -59,13 +59,13 @@ export function RecoveryCodeDialog({
 
   function downloadCode() {
     const blob = new Blob(
-      [`今天你attention了吗？\n名称：${name}\n恢复码：${recoveryCode}\n`],
+      [`知序 Aura\n名称：${name}\n恢复码：${recoveryCode}\n`],
       { type: "text/plain;charset=utf-8" },
     );
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "attention-recovery-code.txt";
+    link.download = "aura-recovery-code.txt";
     link.click();
     URL.revokeObjectURL(url);
   }

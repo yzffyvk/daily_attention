@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import "./attention-theme.css";
 import { Providers } from "./providers";
 
 const geistSans = Geist({
@@ -30,18 +31,18 @@ function metadataOrigin() {
 export async function generateMetadata(): Promise<Metadata> {
   const metadataBase = metadataOrigin();
   const ogImage = new URL("/og.png", metadataBase).toString();
-  const description = "Attention is all you need~";
+  const description = "知序 Aura · 专注，让知识有序。记录每日学习，积累自己的知识。Attention is all you need.";
 
   return {
     metadataBase,
-    title: "今天你attention了吗？",
+    title: "知序 Aura｜专注，让知识有序",
     description,
     icons: {
-      icon: "/favicon.svg",
-      shortcut: "/favicon.svg",
+      icon: "/aura-icon.svg",
+      shortcut: "/aura-icon.svg",
     },
     openGraph: {
-      title: "今天你attention了吗？",
+      title: "知序 Aura｜专注，让知识有序",
       description,
       images: [{ url: ogImage, width: 1731, height: 909 }],
       type: "website",
@@ -49,7 +50,7 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     twitter: {
       card: "summary_large_image",
-      title: "今天你attention了吗？",
+      title: "知序 Aura｜专注，让知识有序",
       description,
       images: [ogImage],
     },

@@ -1,6 +1,7 @@
 "use client";
 
 import { Check, ChevronLeft, ChevronRight } from "lucide-react";
+import { useId, useState } from "react";
 import { dateKey, formatCalendarDate, formatMonth, monthDate, monthKeyForDate, shiftMonth } from "@/features/checkins/dates";
 import type { CheckInSummary } from "@/features/checkins/types";
 
@@ -16,6 +17,7 @@ type MonthCalendarProps = {
   onMonthChange: (month: string) => void;
   onRetry?: () => void;
   onSelectDate: (date: string) => void;
+  onSelectToday?: () => void;
 };
 
 const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
@@ -45,7 +47,10 @@ export function MonthCalendar({
   onMonthChange,
   onRetry,
   onSelectDate,
+  onSelectToday,
 }: MonthCalendarProps) {
+  const [previewDate, setPreviewDate] = useState<string | null>(null);
+  const previewId = useId();
   const current = monthDate(month);
   const year = current.getFullYear();
   const monthIndex = current.getMonth();
@@ -96,6 +101,11 @@ export function MonthCalendar({
           >
             <ChevronRight aria-hidden="true" size={19} />
           </button>
+          {onSelectToday ? (
+            <button className="month-reset" disabled={disabled} onClick={onSelectToday} type="button">
+              回到今天
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -141,14 +151,21 @@ export function MonthCalendar({
               const summary = summaryByDate.get(date);
               const selected = date === selectedDate;
               const isToday = date === today;
+              const showPreview = !disabled && Boolean(summary) && previewDate === date;
               return (
                 <button
                   aria-label={calendarLabel(date, summary, selected, isToday)}
                   aria-pressed={selected}
+                  aria-describedby={showPreview ? `${previewId}-${date}` : undefined}
                   className={`calendar-cell${summary ? " recorded" : ""}${isToday ? " today" : ""}${selected ? " selected" : ""}`}
                   disabled={disabled}
                   key={date}
                   onClick={() => onSelectDate(date)}
+                  onPointerEnter={() => { if (!disabled && summary) setPreviewDate(date); }}
+                  onPointerLeave={() => setPreviewDate(null)}
+                  onFocus={() => { if (!disabled && summary) setPreviewDate(date); }}
+                  onBlur={() => setPreviewDate(null)}
+                  onKeyDown={(event) => { if (event.key === "Escape") setPreviewDate(null); }}
                   type="button"
                 >
                   <span className="calendar-cell-top">
@@ -159,12 +176,21 @@ export function MonthCalendar({
                   </span>
                   <small>{summary?.attention ?? (isToday ? "记录今天" : "")}</small>
                   {isToday ? <em>今天</em> : null}
+                  {showPreview ? (
+                    <span className="calendar-preview" id={`${previewId}-${date}`} role="tooltip">
+                      <span>{formatCalendarDate(date)} · 学习记录</span>
+                      {summary?.attention}
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
+            {Array.from({ length: (7 - (firstWeekday + daysInMonth) % 7) % 7 }, (_, index) => (
+              <span aria-hidden="true" className="calendar-cell blank" key={`end-blank-${index}`} />
+            ))}
           </div>
           <div className="calendar-legend">
-            <span><i className="legend-dot recorded-dot" />已打卡</span>
+            <span><i className="legend-dot recorded-dot" />已记录</span>
             <span><i className="legend-dot selected-dot" />当前选中</span>
             <span><i className="legend-dot today-dot" />今天</span>
           </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowRight,
   Check,
   FileText,
   Link2,
@@ -12,6 +13,7 @@ import { useState, type FormEvent } from "react";
 import type { ActiveAiJob } from "@/features/ai-generation/types";
 import type { AiGenerationController } from "@/features/ai-generation/use-ai-generation";
 import type { DraftStorageState } from "@/features/drafts/use-checkin-draft";
+import { aiSourceFragmentNotice } from "@/lib/domain/ai-generation";
 import { formatDate } from "./dates";
 import { ImageNoteUploader, type ImageSelection } from "./image-note-uploader";
 import { SummaryEditor } from "./summary-editor";
@@ -124,6 +126,7 @@ export function CheckInEditor({
     (isLoading && !isPreparingImage);
   const localDraftUnavailable = isDirty && draftStorageState === "unavailable";
   const isAiActive = aiActiveJob !== null;
+  const fragmentNotice = aiSourceFragmentNotice(draft.sourceUrl);
   const aiProgressMessage = aiIsLongRunning
     ? "处理时间比预期更长，任务仍在继续"
     : aiStage === "creating"
@@ -147,8 +150,8 @@ export function CheckInEditor({
     <section aria-labelledby="editor-title" className="editor-section" id="entry-editor">
       <div className="editor-heading-bar">
         <div className="editor-heading-copy">
-          <p className="eyebrow">DAILY ATTENTION</p>
-          <h2 id="editor-title">{formatDate(date)}</h2>
+          <p className="eyebrow editor-date">{formatDate(date)}</p>
+          <h2 id="editor-title">{record ? "回看这一天的收获" : "记录这一天的收获"}</h2>
           <p className="section-description">
             {entryMode === "ai"
               ? "提供资料来源，让 AI 帮你提炼可复习的知识点"
@@ -210,12 +213,12 @@ export function CheckInEditor({
             <div className="manual-core-fields">
               <label htmlFor="attention">
                 <span className="label-row">
-                  <b>今日 attention</b>
+                  <b>我的注意力</b>
                   <em>必填</em>
                 </span>
                 <span className="field-hint">用一句话总结当天学习的内容</span>
                 <input
-                  aria-label="attention"
+                  aria-label="我的注意力"
                   disabled={isDisabled}
                   id="attention"
                   maxLength={120}
@@ -324,10 +327,16 @@ export function CheckInEditor({
                     onDraftChange({ sourceUrl: event.target.value });
                   }}
                   placeholder="粘贴希望 AI 阅读的资料链接"
+                  aria-describedby={fragmentNotice ? "ai-source-fragment-notice" : undefined}
                   type="url"
                   value={draft.sourceUrl}
                 />
               </label>
+              {fragmentNotice ? (
+                <p className="ai-notice" id="ai-source-fragment-notice" role="status">
+                  {fragmentNotice}
+                </p>
+              ) : null}
               <div className="ai-generate-row">
                 <button
                   className="ai-generate-button"
@@ -366,11 +375,11 @@ export function CheckInEditor({
               <div className="ai-result-fields">
                 <label htmlFor="attention">
                   <span className="label-row">
-                    <b>今日 attention</b>
+                    <b>我的注意力</b>
                     <em>必填</em>
                   </span>
                   <input
-                    aria-label="attention"
+                    aria-label="我的注意力"
                     disabled={isDisabled}
                     id="attention"
                     maxLength={120}
@@ -428,8 +437,9 @@ export function CheckInEditor({
 
         <div className="form-actions" data-testid="checkin-actions">
           <div className="action-buttons">
-            <button className="primary-button" disabled={isDisabled || isOffline || !canSave} type="submit">
-              {isSaving ? "正在保存…" : record ? "保存修改" : <><span aria-hidden="true">叮</span>一下，完成打卡</>}
+            <button aria-label={isSaving ? "正在保存" : record ? "保存修改" : "保存记录，完成打卡"} className="primary-button" disabled={isDisabled || isOffline || !canSave} type="submit">
+              {isSaving ? "正在保存…" : record ? "保存修改" : "保存记录"}
+              <ArrowRight aria-hidden="true" size={18} />
             </button>
             <button
               aria-label="还原未保存的修改"

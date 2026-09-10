@@ -1,6 +1,21 @@
 import { z } from "zod";
 import { dateKeySchema } from "@/lib/domain/checkin";
 
+const hashRoutePattern = /^#(?:[!/?]|%(?:2f|21|3f))/iu;
+const hashRouteMessage = "该链接通过 # 切换页面，暂不支持，请使用对应内容的直接链接";
+
+export function aiSourceFragmentNotice(value: string): string {
+  try {
+    const url = new URL(value.trim());
+    if (!["http:", "https:"].includes(url.protocol) || !url.hash) return "";
+    return hashRoutePattern.test(url.hash)
+      ? hashRouteMessage
+      : "将忽略链接中的章节定位，提炼整篇文章，而非仅该章节。";
+  } catch {
+    return "";
+  }
+}
+
 const sourceUrlSchema = z
   .string()
   .trim()
@@ -23,8 +38,8 @@ const sourceUrlSchema = z
       context.addIssue({ code: "custom", message: "链接不能包含登录凭据" });
       return z.NEVER;
     }
-    if (parsed.hash) {
-      context.addIssue({ code: "custom", message: "链接不能包含片段" });
+    if (hashRoutePattern.test(parsed.hash)) {
+      context.addIssue({ code: "custom", message: hashRouteMessage });
       return z.NEVER;
     }
     if (parsed.port && parsed.port !== "80" && parsed.port !== "443") {

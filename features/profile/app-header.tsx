@@ -7,11 +7,13 @@ import type { FormEvent, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import { RecoveryCodeDialog } from "@/features/auth/recovery-code-dialog";
 import { ApiError, getCurrentProfile, rotateRecoveryCode, updateCurrentProfile } from "@/features/checkins/api";
-import { formatDate } from "@/features/checkins/dates";
+import { AttentionAtmosphere } from "./attention-atmosphere";
+import { AuraMark } from "@/features/brand/aura-mark";
 import { useCheckInStats } from "@/features/checkins/queries";
 import type { AccountProfile } from "@/server/auth/ports";
+import { avatarPath } from "./avatar-catalog";
+import { AvatarSelector } from "./avatar-selector";
 
-const avatarKeys = [1, 2, 3, 4, 5];
 const profileKey = ["profile"] as const;
 
 type AppHeaderProps = {
@@ -25,10 +27,6 @@ type AppHeaderProps = {
   onToggleMuted: () => void;
   onRequestLogout: () => void;
 };
-
-function avatarPath(avatarKey: number) {
-  return `/avatars/avatar-${avatarKey}.svg`;
-}
 
 function normalizeDisplayName(value: string) {
   return value.normalize("NFKC").trim().replace(/\s+/gu, " ");
@@ -156,22 +154,7 @@ function ProfileDialog({
           </label>
           <fieldset className="avatar-fieldset">
             <legend>选择头像</legend>
-            <div className="avatar-options">
-              {avatarKeys.map((option) => (
-                <label className={`avatar-option${avatarKey === option ? " selected" : ""}`} key={option}>
-                  <input
-                    aria-label={`头像 ${option}`}
-                    checked={avatarKey === option}
-                    name="profile-avatar"
-                    onChange={() => setAvatarKey(option)}
-                    type="radio"
-                    value={option}
-                  />
-                  <img alt="" src={avatarPath(option)} />
-                  {avatarKey === option ? <i aria-hidden="true"><Check size={14} strokeWidth={3} /></i> : null}
-                </label>
-              ))}
-            </div>
+            <AvatarSelector name="profile-avatar" value={avatarKey} onChange={setAvatarKey} disabled={profileMutation.isPending} />
           </fieldset>
           {error ? <p className="login-error" role="alert">{error}</p> : null}
           <div className="dialog-actions">
@@ -379,9 +362,13 @@ export function AppHeader({
   return (
     <>
       <header className={`app-header${isCelebrating ? " celebrating" : ""}`}>
+        <AttentionAtmosphere />
         <div className="header-copy">
           <div className="header-topline">
-            <p className="eyebrow">AI LEARNING JOURNAL · {formatDate(today)}</p>
+            <div className="aura-brand" aria-label="知序 Aura">
+              <AuraMark />
+              <p className="attention-wordmark">Aura<span lang="zh-CN">知序</span></p>
+            </div>
             {profile ? (
               <div className="account-menu-wrap">
                 <button
@@ -435,18 +422,9 @@ export function AppHeader({
             )}
           </div>
           <div className="brand-title-row">
-            <span aria-hidden="true" className="brand-monogram">A</span>
-            <h1>
-              今天你<span>attention</span>了吗？
-            </h1>
+            <h1>今天，你的注意力在哪里？</h1>
           </div>
-          <div aria-hidden="true" className="attention-trace">
-            <span />
-            <span />
-            <span />
-            <span />
-          </div>
-          <p className="hero-copy">每天留下一点新知，慢慢长成自己的知识地图。</p>
+          <p className="hero-copy">让每一次学习，留下自己的回响。</p>
         </div>
 
         <div className="header-dashboard">

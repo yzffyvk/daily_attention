@@ -56,6 +56,31 @@ function options(overrides: Record<string, unknown> = {}) {
 }
 
 describe("useAiGeneration", () => {
+  it("submits the edited URL after a failure instead of retrying the stale payload", async () => {
+    vi.mocked(createAiGeneration).mockRejectedValueOnce(new Error("链接不能包含片段"))
+      .mockResolvedValueOnce(created);
+    const {result: hook} = renderHook(() => useAiGeneration(options()));
+    await act(() => hook.current.generate({sourceUrl:"https://example.com/#old",targetDate:"2026-09-06"}));
+    expect(hook.current.error).toBe("链接不能包含片段");
+    act(() => hook.current.clearError());
+    expect(hook.current.error).toBe("");
+    const sourceUrl = "https://datawhalechina.github.io/deepagents-in-action/chapters/ch08-long-term-memory/";
+    await act(() => hook.current.generate({sourceUrl,targetDate:"2026-09-06"}));
+    const calls = vi.mocked(createAiGeneration).mock.calls;
+    expect(calls[1]![0].sourceUrl).toBe(sourceUrl);
+    expect(calls[1]![0].idempotencyKey).not.toBe(calls[0]![0].idempotencyKey);
+  });
+
+  it("reuses the pending key when generating again with unchanged input", async () => {
+    vi.mocked(createAiGeneration).mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValueOnce(created);
+    const {result: hook} = renderHook(() => useAiGeneration(options()));
+    const request = {sourceUrl:"https://example.com/article",targetDate:"2026-09-06"};
+    await act(() => hook.current.generate(request));
+    await act(() => hook.current.generate(request));
+    const calls = vi.mocked(createAiGeneration).mock.calls;
+    expect(calls[1]![0].idempotencyKey).toBe(calls[0]![0].idempotencyKey);
+  });
   it("reuses one idempotency key when a network create is retried", async () => {
     vi.mocked(createAiGeneration)
       .mockRejectedValueOnce(new Error("network"))

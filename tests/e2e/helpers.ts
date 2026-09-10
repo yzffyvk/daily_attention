@@ -189,7 +189,7 @@ export async function register(page: Page, email?: string) {
   await waitForClient(page);
   await page.getByLabel("名称").fill("E2E 学习者");
   await expect(page.getByLabel("名称")).toHaveValue("E2E 学习者");
-  await page.getByLabel("头像 4").check();
+  await page.getByRole("radio", { name: "摸鱼家", exact: true }).check();
   const onboardingResponse = page.waitForResponse((response) => {
     const url = new URL(response.url());
     return url.pathname === "/api/onboarding" && response.request().method() === "POST";
@@ -213,7 +213,7 @@ export async function logout(page: Page) {
 }
 
 export async function saveCheckIn(page: Page, attention: string) {
-  await page.getByRole("textbox", { name: "attention", exact: true }).fill(attention);
+  await page.getByRole("textbox", { name: "我的注意力", exact: true }).fill(attention);
   await page.getByRole("button", { name: /完成打卡|保存修改/ }).click();
   await expect(page.getByText(`${attention}`, { exact: true }).first()).toBeVisible();
 }

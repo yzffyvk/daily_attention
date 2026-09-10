@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { AuraMark } from "@/features/brand/aura-mark";
 
 export function AuthCard({
   step,
@@ -15,13 +16,13 @@ export function AuthCard({
     <main className="login-page">
       <section className="login-shell">
         <div className="login-brand">
-          <div className="auth-brand-mark" aria-hidden="true">A</div>
+          <AuraMark className="auth-brand-mark" />
           <div>
-            <p className="eyebrow">AI LEARNING JOURNAL</p>
+            <p className="eyebrow">ATTENTION IS ALL YOU NEED.</p>
             <h1>
-              今天你<span>attention</span>了吗？
+              知序<span lang="en">Aura</span>
             </h1>
-            <p>给每天的学习留一个名字，也给自己留一个位置。</p>
+            <p>专注，让知识有序。<br />为每天的学习，留下一次回响。</p>
           </div>
           <div aria-hidden="true" className="auth-signal">
             <span />

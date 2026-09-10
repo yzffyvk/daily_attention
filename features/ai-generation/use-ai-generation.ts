@@ -37,6 +37,7 @@ export type AiGenerationController = {
   isLongRunning: boolean;
   isCreating: boolean;
   canRetryCreate: boolean;
+  clearError(): void;
   generate(input: { sourceUrl: string; targetDate: string }): Promise<void>;
   retryCreate(): Promise<void>;
   cancel(): Promise<void>;
@@ -176,11 +177,10 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     sourceUrl: string;
     targetDate: string;
   }) => {
-    const request = {
-      sourceUrl,
-      targetDate,
-      idempotencyKey: crypto.randomUUID(),
-    };
+    const pending = pendingCreateRef.current;
+    const request = pending?.sourceUrl === sourceUrl && pending.targetDate === targetDate
+      ? pending
+      : { sourceUrl, targetDate, idempotencyKey: crypto.randomUUID() };
     pendingCreateRef.current = request;
     setCanRetryCreate(false);
     await performCreate(request);
@@ -190,6 +190,10 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     const request = pendingCreateRef.current;
     if (request) await performCreate(request);
   }, [performCreate]);
+
+  const clearError = useCallback(() => {
+    setError("");
+  }, []);
 
   const cancel = useCallback(async () => {
     const job = activeJobRef.current;
@@ -233,6 +237,7 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     isLongRunning,
     isCreating: stage === "creating",
     canRetryCreate,
+    clearError,
     generate,
     retryCreate,
     cancel,

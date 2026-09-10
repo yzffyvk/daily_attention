@@ -305,6 +305,14 @@ both Edge Functions, the safe-fetch gateway, secrets, schedules, and alerts have
 all passed the checks below. The queue is `ai_generation_jobs`; its payload must
 contain only `job_id`.
 
+**2026-09-05 local worker update:** The application now only enqueues jobs; run
+the dedicated Node consumer described in [the worker runbook](../../services/ai-worker/README.md).
+Local development uses the loopback gateway and does not require a tunnel or
+the Edge worker. For a production cutover, deploy the dedicated consumer before
+application traffic, retire the legacy worker Cron/consumer, and retain the
+maintenance schedule. The Edge worker deployment instructions below are legacy
+reference, not the current application's dispatch path.
+
 Deploy the reviewed functions with handler-owned service authentication. They
 use separate random Bearer tokens and therefore intentionally disable the
 platform JWT pre-check; neither endpoint accepts a user token, publishable key,

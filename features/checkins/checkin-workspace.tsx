@@ -753,6 +753,7 @@ export function CheckInWorkspace({
             }}
             onRetry={() => void monthQuery.refetch()}
             onSelectDate={requestDateChange}
+            onSelectToday={selectToday}
             selectedDate={selectedDate}
             summaries={monthQuery.data}
             today={today}
@@ -778,19 +779,18 @@ export function CheckInWorkspace({
             messageTone={messageTone}
             onDraftChange={(change) => {
               if (!editorLockedRef.current) {
+                if (change.sourceUrl !== undefined && change.sourceUrl !== draft.sourceUrl) {
+                  aiGeneration.clearError();
+                }
                 setDraft((current) => ({ ...current, ...change }));
               }
             }}
             onAiCancel={() => void aiGeneration.cancel()}
             onAiGenerate={() => {
-              if (aiGeneration.canRetryCreate) {
-                void aiGeneration.retryCreate();
-              } else {
-                void aiGeneration.generate({
-                  sourceUrl: draft.sourceUrl.trim(),
-                  targetDate: selectedDate,
-                });
-              }
+              void aiGeneration.generate({
+                sourceUrl: draft.sourceUrl.trim(),
+                targetDate: selectedDate,
+              });
             }}
             onImageChange={handleImageChange}
             onImageError={(nextMessage) => setStatus(nextMessage, "error")}

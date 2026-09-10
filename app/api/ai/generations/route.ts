@@ -6,7 +6,6 @@ import {
   aiValidationFailure,
   createAiRequestContext,
   isAiGenerationEnabled,
-  triggerAiWorker,
 } from "@/server/ai/http";
 import { createGeneration } from "@/server/ai/service";
 import { consumeRateLimit } from "@/server/rate-limit/service";
@@ -45,7 +44,6 @@ export async function POST(request: Request): Promise<Response> {
       context.userId,
       parsed.data,
       context.repository,
-      () => triggerAiWorker(context.admin),
     );
 
     return aiSuccess({

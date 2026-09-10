@@ -1,13 +1,11 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element */
-import { Check, LogOut } from "lucide-react";
+import { LogOut } from "lucide-react";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { normalizeLoginName } from "@/lib/domain/user";
 import { postAuth } from "./auth-card";
-
-const avatarKeys = [1, 2, 3, 4, 5];
+import { AvatarSelector } from "@/features/profile/avatar-selector";
 
 type FormError = { message: string; field?: string };
 
@@ -88,29 +86,7 @@ export function OnboardingForm({
         className="avatar-fieldset"
       >
         <legend>选择头像</legend>
-        <div className="avatar-options">
-          {avatarKeys.map((option) => (
-            <label
-              className={`avatar-option${avatarKey === option ? " selected" : ""}`}
-              key={option}
-            >
-              <input
-                aria-label={`头像 ${option}`}
-                checked={avatarKey === option}
-                name="onboarding-avatar"
-                onChange={() => setAvatarKey(option)}
-                type="radio"
-                value={option}
-              />
-              <img alt="" src={`/avatars/avatar-${option}.svg`} />
-              {avatarKey === option ? (
-                <i aria-hidden="true">
-                  <Check size={14} strokeWidth={3} />
-                </i>
-              ) : null}
-            </label>
-          ))}
-        </div>
+        <AvatarSelector name="onboarding-avatar" value={avatarKey} onChange={setAvatarKey} disabled={isSubmitting || isLoggingOut} />
       </fieldset>
 
       {error ? (

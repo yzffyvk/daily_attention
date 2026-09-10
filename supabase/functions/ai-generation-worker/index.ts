@@ -103,7 +103,7 @@ async function mapWithConcurrency<T>(
   );
 }
 
-async function processQueueBatch(dependencies: AiWorkerDependencies) {
+export async function processQueueBatch(dependencies: AiWorkerDependencies) {
   let messages = await dependencies.readMessages();
   if (messages.length === 0) {
     await new Promise((resolve) => setTimeout(resolve, QUEUE_VISIBILITY_GRACE_MS));
@@ -183,8 +183,10 @@ function singleRow(schema: z.ZodType, data: unknown) {
   return parsed.data[0]!;
 }
 
-function namedDefaultSecretKey() {
-  const rawKeys = Deno.env.get("SUPABASE_SECRET_KEYS");
+type ReadEnvironment = (name: string) => string | undefined;
+
+function namedDefaultSecretKey(readEnvironment: ReadEnvironment) {
+  const rawKeys = readEnvironment("SUPABASE_SECRET_KEYS");
   if (!rawKeys) return undefined;
   try {
     const keys = JSON.parse(rawKeys) as Record<string, unknown>;
@@ -211,34 +213,33 @@ export function assertAiProviderModeAllowed(input: {
   }
 }
 
-function requiredEnvironment() {
+function requiredEnvironment(readEnvironment: ReadEnvironment, requireTriggerToken: boolean) {
   const environment = {
-    supabaseUrl: Deno.env.get("SUPABASE_URL"),
-    secretKey: namedDefaultSecretKey()
-      ?? Deno.env.get("SUPABASE_SECRET_KEY")
-      ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"),
-    deepSeekApiKey: Deno.env.get("DEEPSEEK_API_KEY"),
-    userIdPepper: Deno.env.get("AI_USER_ID_PEPPER"),
-    triggerToken: Deno.env.get("AI_WORKER_TRIGGER_TOKEN"),
-    safeFetchUrl: Deno.env.get("SAFE_FETCH_GATEWAY_URL"),
-    safeFetchToken: Deno.env.get("SAFE_FETCH_GATEWAY_TOKEN"),
-    providerMode: Deno.env.get("AI_PROVIDER_MODE") ?? "deepseek",
+    supabaseUrl: readEnvironment("SUPABASE_URL") ?? readEnvironment("NEXT_PUBLIC_SUPABASE_URL"),
+    secretKey: namedDefaultSecretKey(readEnvironment)
+      ?? readEnvironment("SUPABASE_SECRET_KEY")
+      ?? readEnvironment("SUPABASE_SERVICE_ROLE_KEY"),
+    deepSeekApiKey: readEnvironment("DEEPSEEK_API_KEY"),
+    userIdPepper: readEnvironment("AI_USER_ID_PEPPER"),
+    triggerToken: readEnvironment("AI_WORKER_TRIGGER_TOKEN") ?? "",
+    safeFetchUrl: readEnvironment("SAFE_FETCH_GATEWAY_URL"),
+    safeFetchToken: readEnvironment("SAFE_FETCH_GATEWAY_TOKEN"),
+    providerMode: readEnvironment("AI_PROVIDER_MODE") ?? "deepseek",
   };
   assertAiProviderModeAllowed({
     mode: environment.providerMode,
-    nodeEnv: Deno.env.get("NODE_ENV"),
-    integrationTestBindings: Deno.env.get("INTEGRATION_TEST_BINDINGS"),
+    nodeEnv: readEnvironment("NODE_ENV"),
+    integrationTestBindings: readEnvironment("INTEGRATION_TEST_BINDINGS"),
   });
   if (
     !environment.supabaseUrl
     || !environment.secretKey
     || (environment.providerMode === "deepseek" && !environment.deepSeekApiKey)
     || !environment.userIdPepper
-    || !environment.triggerToken
     || !environment.safeFetchUrl
     || !environment.safeFetchToken
     || environment.userIdPepper.length < 32
-    || environment.triggerToken.length < 32
+    || (requireTriggerToken && environment.triggerToken.length < 32)
     || environment.safeFetchToken.length < 32
   ) {
     throw new Error("FUNCTION_CONFIGURATION_ERROR");
@@ -267,14 +268,22 @@ async function hmacSha256Hex(secret: string, value: string) {
     .join("");
 }
 
-function createProductionDependencies(): AiWorkerDependencies {
-  const environment = requiredEnvironment();
+export function createProductionDependencies(
+  readEnvironment: ReadEnvironment = (name) => Deno.env.get(name),
+  options: { dedicatedWorker?: boolean } = {},
+): AiWorkerDependencies {
+  const environment = requiredEnvironment(readEnvironment, !options.dedicatedWorker);
   const client = createClient(environment.supabaseUrl, environment.secretKey, {
     auth: { autoRefreshToken: false, detectSessionInUrl: false, persistSession: false },
+    global: { fetch: (input, init) => fetch(input, {
+      ...init, signal: AbortSignal.timeout(10_000),
+    }) },
   });
   const safeFetch = createSafeFetchClient({
     baseUrl: environment.safeFetchUrl,
     token: environment.safeFetchToken,
+    allowLoopbackHttp: options.dedicatedWorker === true
+      && readEnvironment("NODE_ENV") === "development",
   });
   const provider = environment.providerMode === "fake"
     ? {
@@ -384,7 +393,8 @@ function createProductionDependencies(): AiWorkerDependencies {
     async readMessages() {
       const data = await rpc(client, "read_ai_generation_queue", {
         target_visibility_timeout: QUEUE_VISIBILITY_TIMEOUT_SECONDS,
-        target_batch_limit: QUEUE_BATCH_LIMIT,
+        // Do not reserve more deliveries than can start within the 180s lease.
+        target_batch_limit: options.dedicatedWorker ? WORKER_CONCURRENCY : QUEUE_BATCH_LIMIT,
       });
       const parsed = z.array(queueRowSchema).max(QUEUE_BATCH_LIMIT).safeParse(data);
       if (!parsed.success) throw new Error("AI_WORKER_RPC_MALFORMED");
