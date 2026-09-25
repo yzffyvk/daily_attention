@@ -1,0 +1,117 @@
+/* Dark declarations retain their original fallback colors. Only light opts into these tokens. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --background: #fbf8f1;
+  --foreground: #203449;
+  --paper: #fffdf8;
+  --paper-soft: #f0f3f5;
+  --ink-soft: #5c6e7d;
+  --line: #d5dde2;
+  --line-strong: #a8bac8;
+  --green: #16538d;
+  --green-dark: #103f6e;
+  --green-pale: #e8f0f8;
+  --coral: #b63c27;
+  --coral-pale: #fff0e9;
+  --yellow: #f4b72d;
+  --yellow-pale: #fff2cf;
+  --blue: #16538d;
+  --aura-gold: #16538d;
+  --aura-gold-bright: #103f6e;
+  --shadow: 0 16px 48px #20344912;
+  --theme-text: #203449;
+  --theme-text-secondary: #4d6376;
+  --theme-text-muted: #5d6e7d;
+  --theme-accent: #16538d;
+  --theme-accent-border: #91adc7;
+  --theme-accent-wash: #eaf1f8;
+  --theme-surface: #fffdf8;
+  --theme-surface-soft: #f0f3f5;
+  --theme-surface-hover: #e4edf5;
+  --theme-border: #c6d2dc;
+  --theme-danger: #b63c27;
+  --theme-danger-border: #dca08f;
+  --theme-danger-surface: #fff0e9;
+  --theme-backdrop: #1b304466;
+  --theme-shadow: 0 12px 36px #20344914;
+}
+
+.header-tools { display: flex; align-items: center; justify-content: flex-end; gap: .8rem; min-width: 0; }
+.theme-toggle { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; gap: .45rem; min-height: 44px; border: 1px solid var(--line); border-radius: 999px; padding: .5rem .8rem; background: transparent; color: var(--foreground); font-size: .75rem; font-weight: 500; cursor: pointer; }
+.theme-toggle:hover { border-color: var(--line-strong); background: var(--paper-soft); }
+.theme-toggle:focus-visible { outline: 2px solid var(--aura-gold); outline-offset: 4px; }
+.login-page { position: relative; }
+.auth-theme-controls { position: absolute; right: clamp(1rem, 4vw, 3rem); top: 1rem; z-index: 3; }
+
+:root[data-theme="light"] ::selection { color: #103f6e; background: #f8d77d; }
+:root[data-theme="light"] .attention-atmosphere, :root[data-theme="light"] .attention-pointer { display: none; }
+:root[data-theme="light"] .brand-title-row h1 { color: #163f67; }
+:root[data-theme="light"] .attention-wordmark { color: #16538d; }
+:root[data-theme="light"] .aura-brand .attention-wordmark > span { color: #415a71; }
+:root[data-theme="light"] .primary-button, :root[data-theme="light"] .ai-generate-button, :root[data-theme="light"] .reflection-polish-accept { background: #16538d; border-color: #16538d; color: #fff; box-shadow: none; }
+:root[data-theme="light"] .primary-button:hover:not(:disabled), :root[data-theme="light"] .ai-generate-button:hover:not(:disabled), :root[data-theme="light"] .reflection-polish-accept:hover:not(:disabled) { background: #103f6e; border-color: #103f6e; color: #fff; box-shadow: 0 4px 14px #16538d20; }
+:root[data-theme="light"] .primary-button:disabled, :root[data-theme="light"] .ai-generate-button:disabled { background: #e2e8ed; border-color: #c3ced7; color: #576b7c; }
+:root[data-theme="light"] .entry-mode-switch { background: #eef2f4; border-color: #c3d0db; }
+:root[data-theme="light"] .entry-mode-switch button.active, :root[data-theme="light"] .entry-mode-switch button.active:hover:not(:disabled) { color: #fff; background: #16538d; box-shadow: none; }
+:root[data-theme="light"] .checkin-form input:focus, :root[data-theme="light"] .checkin-form textarea:focus, :root[data-theme="light"] .auth-field input:focus { border-color: #16538d; box-shadow: 0 0 0 3px #16538d15; }
+:root[data-theme="light"] input::placeholder, :root[data-theme="light"] textarea::placeholder { color: #687988; }
+:root[data-theme="light"] .today-summary.complete .status-mark { color: #16538d; border-color: #16538d; background: #eaf1f8; }
+:root[data-theme="light"] .metric-row strong { color: #16538d; }
+:root[data-theme="light"] .calendar-cell.selected, :root[data-theme="light"] .calendar-cell.recorded.selected { background: #eaf1f8; box-shadow: inset 0 0 0 2px #16538d; }
+:root[data-theme="light"] .calendar-cell.today em { color: #b63c27; font-weight: 600; }
+:root[data-theme="light"] .recorded-dot { background: #16538d; }
+:root[data-theme="light"] .today-dot { border-color: #c4412b; background: #e7472a; }
+:root[data-theme="light"] .selected-dot { border-color: #16538d; background: #eaf1f8; }
+:root[data-theme="light"] .editor-state.dirty { color: #78510e; border-color: #debc6b; background: #fff2cf; }
+:root[data-theme="light"] .knowledge-entry { background: #fff2cf; border-color: #d8b766; color: #5f481a; }
+:root[data-theme="light"] .knowledge-entry:hover, :root[data-theme="light"] .knowledge-entry[aria-pressed="true"] { background: #f8dfa0; border-color: #ae8431; }
+:root[data-theme="light"] .knowledge-source-warning, :root[data-theme="light"] .source-records-intro { background: #fff2cf; border-color: #dbaa38; color: #72521a; }
+:root[data-theme="light"] .map-origin-ai_supplement { background: #fff2cf; color: #745313; border-color: #d8b766; }
+:root[data-theme="light"] .today-summary .sound-button { color: #4d6376 !important; background: transparent !important; border-color: transparent !important; }
+
+/* All five avatar identities keep their account keys and get distinct daylight artwork. */
+:root[data-theme="light"] .current-account { background: #fffdf8; border-color: #bdcedc; }
+:root[data-theme="light"] .current-account:hover { background: #eaf1f8; }
+:root[data-theme="light"] .current-account .account-portrait { background: #fbf8f1; border-color: #9db7cb; box-shadow: none; }
+:root[data-theme="light"] .current-account .account-portrait img { transform: scale(1.28); }
+:root[data-theme="light"] .aura-avatar-grid .aura-avatar-card { background: #fbf8f1; border-color: #d1dae1; box-shadow: none; }
+:root[data-theme="light"] .aura-avatar-grid .aura-avatar-card:hover { background: #f0f3f5; border-color: #91adc7; }
+:root[data-theme="light"] .aura-avatar-grid .aura-avatar-card.selected { background: #eaf1f8; border-color: #16538d; box-shadow: 0 0 0 1px #16538d; }
+:root[data-theme="light"] .aura-avatar-art { background: #fbf8f1; }
+:root[data-theme="light"] .aura-avatar-art img { mix-blend-mode: multiply; }
+:root[data-theme="light"] .aura-avatar-selected { color: #fff; background: #16538d; }
+:root[data-theme="light"] .learning-persona-art { mix-blend-mode: multiply; mask-image: none; overflow: visible; }
+:root[data-theme="light"] .learning-persona-art img { width: 100%; height: 100%; object-fit: contain; }
+:root[data-theme="light"] .learning-persona-caption strong { color: #16538d; }
+:root[data-theme="light"] .learning-persona-caption small { border-color: #bdcedc; }
+/* Avoid showing a black-backed avatar before saved light preference hydrates. */
+:root[data-theme="light"] [data-avatar-theme="dark"] { visibility: hidden; }
+
+:root[data-theme="light"] .login-shell { background: #fffdf8; border-color: #d5dde2; box-shadow: var(--shadow); }
+:root[data-theme="light"] .login-brand { background: #eaf1f8; color: #163f67; }
+:root[data-theme="light"] .login-brand h1 { color: #163f67; }
+:root[data-theme="light"] .login-brand h1 span { color: #16538d; }
+:root[data-theme="light"] .login-brand .eyebrow, :root[data-theme="light"] .login-brand > div > p:last-child { color: #4b637b; }
+:root[data-theme="light"] .login-panel { background: #fffdf8; }
+:root[data-theme="light"] .login-step { color: #684b13; background: #f6ce69; }
+:root[data-theme="light"] .login-brand .auth-signal { visibility: visible; gap: 10px; }
+:root[data-theme="light"] .auth-signal span { background: #16538d; }
+:root[data-theme="light"] .auth-signal span:nth-child(2), :root[data-theme="light"] .auth-signal span:nth-child(5) { background: #e7472a; }
+:root[data-theme="light"] .auth-signal span:nth-child(3) { background: #f4b72d; }
+:root[data-theme="light"] .knowledge-constellation { --starlight: #16538d; }
+:root[data-theme="light"] .constellation-assembly { animation-name: constellation-radiance-light; filter: none; }
+:root[data-theme="light"] .constellation-letter-thread { stroke: #16538d; }
+:root[data-theme="light"] .constellation-letter-bloom { stroke: #91adc7; }
+:root[data-theme="light"] .constellation-source-star .constellation-star-core { fill: #b63c27; }
+@keyframes constellation-radiance-light { 0%, 100% { opacity: 0; } 8%, 86% { opacity: 1; } 96% { opacity: 0; } }
+
+@media (max-width: 560px) {
+  .aura-brand { gap: .45rem; flex-shrink: 0; }
+  .aura-brand .attention-wordmark { gap: .45rem; white-space: nowrap; }
+  .aura-brand .attention-wordmark > span { padding-left: .55rem; }
+  .header-tools { gap: .4rem; }
+  .header-tools .theme-toggle { width: 44px; padding: .5rem; }
+  .header-tools .theme-toggle span { display: none; }
+  .auth-theme-controls { top: .75rem; right: 1rem; }
+  .login-page { padding-top: 4.5rem; }
+}

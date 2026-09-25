@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { parseLearningReflections, serializeLearningReflections } from "@/lib/domain/learning-reflections";
 import {
   applyAiResultToDraft,
   deleteAttentionDraftDatabase,
@@ -64,6 +65,7 @@ describe("draft storage", () => {
 
   it("keeps optional active AI metadata while old rows remain valid", async () => {
     await saveDraft({
+      entryMode: "ai",
       userId: "user-1",
       date,
       attention: "",
@@ -83,14 +85,17 @@ describe("draft storage", () => {
       },
     });
 
-    expect((await loadDraft("user-1", date))?.activeAiJob).toMatchObject({
+    expect((await loadDraft("user-1", date, "ai"))?.activeAiJob).toMatchObject({
       targetDate: date,
       sourceUrl: "https://example.com/article",
     });
     expect((await loadDraft("user-2", date))?.activeAiJob).toBeUndefined();
   });
 
-  it("applies AI output to the job target date and clears active metadata", async () => {
+  it.each([
+    "我现在理解了两个公式的展开关系",
+    serializeLearningReflections({ explanation: "我会这样解释", insights: "新知道的内容", ideas: "一个有趣的联想" }),
+  ])("applies AI output to the job target date while preserving personal reflections: %s", async (reflection) => {
     const targetDate = "2026-07-24";
     const job = {
       jobId: "10000000-0000-4000-8000-000000000001",
@@ -99,12 +104,13 @@ describe("draft storage", () => {
       createdAt: "2026-07-24T10:00:00.000Z",
     };
     await saveDraft({
+      entryMode: "ai",
       userId: "user-1",
       date: targetDate,
       attention: "旧草稿",
       sourceUrl: job.sourceUrl,
       summary: "",
-      inspiration: "",
+      inspiration: reflection,
       imageBlob: null,
       imageName: "",
       removeImage: false,
@@ -121,14 +127,47 @@ describe("draft storage", () => {
       warnings: [],
     });
 
-    expect(await loadDraft("user-1", targetDate)).toMatchObject({
+    expect(await loadDraft("user-1", targetDate, "ai")).toMatchObject({
       attention: "AI 标题",
       summary: "AI 小结",
-      inspiration: "AI 灵感",
+      inspiration: reflection,
       sourceUrl: job.sourceUrl,
     });
-    expect((await loadDraft("user-1", targetDate))?.activeAiJob).toBeUndefined();
+    expect((await loadDraft("user-1", targetDate, "ai"))?.activeAiJob).toBeUndefined();
+    expect(parseLearningReflections((await loadDraft("user-1", targetDate, "ai"))!.inspiration)).toEqual(parseLearningReflections(reflection));
     expect(await loadDraft("user-1", date)).toBeUndefined();
+  });
+
+  it("leaves personal reflections empty when an AI result creates a new draft", async () => {
+    await applyAiResultToDraft("user-1", {
+      jobId: "10000000-0000-4000-8000-000000000001",
+      targetDate: date,
+      sourceUrl: "https://example.com/agent",
+      createdAt: "2026-07-23T10:00:00.000Z",
+    }, {
+      attention: "Agent 的组成",
+      summary: "Agent = Model + Harness",
+      inspiration: "旧版本 AI 生成的感想",
+      sourceTitle: "Agent 入门",
+      warnings: [],
+    });
+    expect((await loadDraft("user-1", date, "ai"))?.inspiration).toBe("");
+  });
+
+  it("restores saved reflections and their version when the local draft was cleared after saving", async () => {
+    await applyAiResultToDraft("user-1", {
+      jobId: "10000000-0000-4000-8000-000000000001",
+      targetDate: date,
+      sourceUrl: "https://example.com/agent",
+      createdAt: "2026-07-23T10:00:00.000Z",
+    }, {
+      attention: "Agent 的组成",
+      summary: "Agent = Model + Harness",
+      inspiration: "",
+      sourceTitle: "Agent 入门",
+      warnings: [],
+    }, { entryMode: "ai", inspiration: "已经保存的个人理解", version: 3 });
+    expect(await loadDraft("user-1", date, "ai")).toMatchObject({ inspiration: "已经保存的个人理解", baseVersion: 3 });
   });
 
   it("does not write when aborted before the database opens", async () => {

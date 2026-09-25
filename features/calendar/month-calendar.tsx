@@ -8,6 +8,8 @@ import type { CheckInSummary } from "@/features/checkins/types";
 type MonthCalendarProps = {
   month: string;
   selectedDate: string;
+  selectedDates?: string[];
+  maxSelectedDates?: number;
   summaries: CheckInSummary[] | undefined;
   today: string;
   disabled?: boolean;
@@ -38,6 +40,8 @@ function calendarLabel(
 export function MonthCalendar({
   month,
   selectedDate,
+  selectedDates,
+  maxSelectedDates = 14,
   summaries,
   today,
   disabled = false,
@@ -51,24 +55,35 @@ export function MonthCalendar({
 }: MonthCalendarProps) {
   const [previewDate, setPreviewDate] = useState<string | null>(null);
   const previewId = useId();
+  const titleId = useId();
   const current = monthDate(month);
   const year = current.getFullYear();
   const monthIndex = current.getMonth();
   const firstWeekday = current.getDay();
   const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
   const hasMonthData = summaries !== undefined;
-  const summaryByDate = new Map(
-    (summaries ?? []).map((summary) => [summary.date, summary]),
-  );
+  const groupedSummaries = new Map<string, CheckInSummary[]>();
+  for (const summary of summaries ?? []) {
+    groupedSummaries.set(summary.date, [...(groupedSummaries.get(summary.date) ?? []), summary]);
+  }
+  const summaryByDate = new Map([...groupedSummaries].map(([date, records]) => {
+    if (records.length === 1) return [date, records[0]] as const;
+    const ordered = [...records].sort((left, right) => Number(left.entryMode === "ai") - Number(right.entryMode === "ai"));
+    return [date, {
+      ...ordered[0],
+      attention: ordered.map(record => `${record.entryMode === "ai" ? "AI" : "手动"}：${record.attention}`).join(" · "),
+      hasImage: ordered.some(record => record.hasImage),
+    }] as const;
+  }));
   const isCurrentMonth = month === monthKeyForDate(today);
 
   return (
-    <section className="calendar-section" aria-labelledby="calendar-title" data-testid="month-calendar">
+    <section className="calendar-section" aria-labelledby={titleId} data-testid="month-calendar">
       <div className="calendar-heading">
         <div>
-          <p className="eyebrow">ATTENTION MAP</p>
-          <h2 id="calendar-title">{formatMonth(month)}</h2>
-          <p className="section-description">选一天，记录或回看当日的学习收获</p>
+          <p className="eyebrow">LEARNING MAP</p>
+          <h2 id={titleId}>{formatMonth(month)}</h2>
+          <p className="section-description">{selectedDates ? "选择 2–14 个已保存日期，可跨月、不连续选择" : "选一天，记录或回看当日的学习收获"}</p>
         </div>
         <div className="calendar-actions">
           <button
@@ -149,7 +164,8 @@ export function MonthCalendar({
               const day = index + 1;
               const date = dateKey(year, monthIndex, day);
               const summary = summaryByDate.get(date);
-              const selected = date === selectedDate;
+              const selected = selectedDates ? selectedDates.includes(date) : date === selectedDate;
+              const dateDisabled = disabled || Boolean(selectedDates && (!summary || (!selected && selectedDates.length >= maxSelectedDates)));
               const isToday = date === today;
               const showPreview = !disabled && Boolean(summary) && previewDate === date;
               return (
@@ -158,7 +174,7 @@ export function MonthCalendar({
                   aria-pressed={selected}
                   aria-describedby={showPreview ? `${previewId}-${date}` : undefined}
                   className={`calendar-cell${summary ? " recorded" : ""}${isToday ? " today" : ""}${selected ? " selected" : ""}`}
-                  disabled={disabled}
+                  disabled={dateDisabled}
                   key={date}
                   onClick={() => onSelectDate(date)}
                   onPointerEnter={() => { if (!disabled && summary) setPreviewDate(date); }}

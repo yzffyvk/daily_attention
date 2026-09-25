@@ -1,0 +1,50 @@
+/* Relations use the existing Aura palette. Arrows encode direction, never layout order. */
+.relation-reader { --relation-accent: var(--theme-accent, #d8bc83); --relation-border: var(--theme-border, #343941); --relation-muted: var(--theme-text-secondary, #a4abb5); color: var(--theme-text, #e2e5e8); container-type: inline-size; margin-top: 1.6rem; min-width: 0; }
+.relation-question { border-left: 2px solid var(--relation-accent); padding: .2rem 0 .3rem 1rem; margin-bottom: 1rem; }
+.relation-eyebrow { color: var(--relation-muted); font-size: .7rem; line-height: 1.8; }
+.relation-question h4 { font-size: 1.1rem; line-height: 1.75; margin: .35rem 0 .65rem; font-weight: 550; }
+.relation-types { display: flex; gap: .45rem; flex-wrap: wrap; }
+.relation-types span { font-size: .65rem; color: var(--relation-accent); background: var(--theme-accent-wash, #d8bc8310); padding: .2rem .5rem; border-radius: 4px; }
+.relation-reader button { font: inherit; cursor: pointer; color: inherit; }
+.relation-reader button:focus-visible, .relation-reader summary:focus-visible { outline: 2px solid var(--relation-accent); outline-offset: 3px; }
+.relation-reading-order { border-bottom: 1px solid var(--relation-border); padding: .7rem 0 1rem; margin-bottom: 1rem; }
+.relation-reader summary { cursor: pointer; color: var(--relation-muted); font-size: .72rem; line-height: 1.8; }
+.relation-reading-order summary svg { display: inline-block; vertical-align: middle; margin-right: .4rem; }
+.relation-reading-order p { font-size: .7rem; color: var(--relation-muted); margin: .8rem 0; }
+.relation-reading-order ol { display: flex; flex-wrap: wrap; gap: .7rem 1.8rem; padding-left: 1.4rem; font-size: .75rem; list-style: decimal; }
+.relation-reading-order li::marker { color: var(--relation-accent); }
+.relation-reading-order button { background: transparent; border: 0; border-bottom: 1px solid var(--relation-border); min-height: 32px; padding: .2rem; }
+.relation-navigation { display: flex; gap: .45rem; flex-wrap: wrap; margin: 1rem 0 1.3rem; }
+.relation-navigation button { display: inline-flex; align-items: center; gap: .4rem; min-height: 36px; max-width: 100%; border: 1px solid var(--relation-border); border-radius: 5px; padding: .45rem .6rem; background: transparent; font-size: .72rem; text-align: left; overflow-wrap: anywhere; }
+.relation-navigation button small { color: var(--relation-muted); font-size: .6rem; white-space: nowrap; }
+.relation-navigation button[aria-pressed="true"] { color: var(--relation-accent); border-color: var(--relation-accent); background: var(--theme-accent-wash, #d8bc8310); }
+.relation-navigation button[data-related="false"] { opacity: .58; }
+.relation-detail { padding: 1rem; border: 1px solid var(--relation-border); border-left: 2px solid var(--relation-accent); border-radius: 5px; margin-bottom: 1.4rem; background: var(--theme-surface-soft, #12161b); }
+.relation-detail h4 { font-size: 1.1rem; margin: .5rem 0; }
+.relation-detail p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; line-height: 1.95; }
+.relation-detail details { margin-top: .8rem; }
+.relation-map-heading { display: flex; align-items: center; gap: .45rem; font-size: .76rem; padding-bottom: .8rem; border-bottom: 1px solid var(--relation-border); }
+.relation-map-heading svg { color: var(--relation-accent); flex-shrink: 0; }
+.relation-map-heading small { margin-left: auto; color: var(--relation-muted); white-space: nowrap; font-size: .65rem; }
+.relation-group { margin-top: 1.25rem; }
+.relation-group h5 { color: var(--relation-muted); font-size: .7rem; font-weight: 500; margin: 0 0 .65rem; }
+.relation-group ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .55rem; }
+.relation-edge { padding: .8rem .85rem .55rem; border: 1px solid var(--relation-border); border-radius: 6px; background: var(--theme-surface, #0c1015); min-width: 0; }
+.relation-edge-line { display: grid; grid-template-columns: minmax(0, 1fr) minmax(80px, 1.1fr) minmax(0, 1fr); align-items: center; gap: .55rem; }
+.relation-edge-line > button { min-height: 42px; width: 100%; font-size: .8rem; font-weight: 550; line-height: 1.6; border: 1px solid transparent; border-radius: 4px; padding: .3rem .2rem; background: var(--theme-surface-soft, #161b22); overflow-wrap: anywhere; }
+.relation-edge-line > button:hover, .relation-edge-line > button[aria-pressed="true"] { border-color: var(--relation-accent); color: var(--relation-accent); }
+.relation-link { display: flex; align-items: center; flex-direction: column; gap: .15rem; min-width: 0; color: var(--relation-accent); text-align: center; font-size: .68rem; line-height: 1.55; overflow-wrap: anywhere; }
+.relation-link svg { width: 100%; height: 16px; }
+.relation-link small { color: var(--relation-muted); font-size: .6rem; }
+.relation-link small:empty { display: none; }
+.relation-condition { color: var(--relation-muted); font-size: .7rem; line-height: 1.8; margin: .6rem 0 .3rem; padding-left: .6rem; border-left: 1px solid var(--relation-accent); overflow-wrap: anywhere; }
+.relation-evidence { margin-top: .45rem; }
+.relation-evidence summary { font-size: .65rem; }
+.relation-reader blockquote { margin: .5rem 0; padding: .6rem .75rem; border-left: 2px solid var(--relation-border); color: var(--relation-muted); background: var(--theme-surface-soft, #161b22); font-size: .75rem; line-height: 1.9; overflow-wrap: anywhere; }
+.relation-empty { color: var(--relation-muted); font-size: .8rem; line-height: 1.9; padding: 1rem 0; }
+@container (max-width: 380px) {
+  .relation-edge { padding: .7rem .5rem; }
+  .relation-edge-line { grid-template-columns: minmax(0, 1fr) minmax(70px, 1fr) minmax(0, 1fr); gap: .3rem; }
+  .relation-edge-line > button { font-size: .73rem; }
+  .relation-link { font-size: .64rem; }
+}

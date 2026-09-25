@@ -1,7 +1,8 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { CheckInInput } from "@/lib/domain/checkin";
+import { checkInEntryModeSchema, type CheckInEntryMode, type CheckInInput } from "@/lib/domain/checkin";
+import { aiGenerationContextSchema, aiUserPromptSchema } from "@/lib/domain/ai-prompt";
 import type { Database, Tables } from "@/lib/supabase/database.types";
 import type {
   CheckInRecord,
@@ -15,8 +16,13 @@ function mapRecord(row: CheckInRow): CheckInRecord {
   return {
     id: row.id,
     date: row.checkin_date,
+    entryMode: checkInEntryModeSchema.parse(row.entry_mode ?? "manual"),
     attention: row.attention,
     sourceUrl: row.source_url ?? "",
+    userPrompt: row.entry_mode === "ai" ? row.user_prompt ?? "" : "",
+    aiGenerationContext: row.entry_mode === "ai"
+      ? aiGenerationContextSchema.nullable().parse(row.ai_generation_context ?? null)
+      : null,
     summary: row.summary,
     inspiration: row.inspiration,
     imagePath: row.image_path,
@@ -35,7 +41,7 @@ function nextMonth(month: string) {
 }
 
 export interface CheckInRepository {
-  findByDate(userId: string, date: string): Promise<CheckInRecord | null>;
+  findByDate(userId: string, date: string, entryMode?: CheckInEntryMode): Promise<CheckInRecord | null>;
   findByMonth(userId: string, month: string): Promise<CheckInSummary[]>;
   getStats(today: string): Promise<CheckInStats>;
   insert(
@@ -55,12 +61,13 @@ export function createCheckInRepository(
   supabase: SupabaseClient<Database>,
 ): CheckInRepository {
   return {
-    async findByDate(userId, date) {
+    async findByDate(userId, date, entryMode = "manual") {
       const { data, error } = await supabase
         .from("check_ins")
         .select()
         .eq("user_id", userId)
         .eq("checkin_date", date)
+        .eq("entry_mode", entryMode)
         .maybeSingle();
       if (error) throw error;
       return data ? mapRecord(data) : null;
@@ -69,7 +76,7 @@ export function createCheckInRepository(
     async findByMonth(userId, month) {
       const { data, error } = await supabase
         .from("check_ins")
-        .select("checkin_date, attention, image_path, version, updated_at")
+        .select("checkin_date, entry_mode, attention, image_path, version, updated_at")
         .eq("user_id", userId)
         .gte("checkin_date", `${month}-01`)
         .lt("checkin_date", `${nextMonth(month)}-01`)
@@ -77,6 +84,7 @@ export function createCheckInRepository(
       if (error) throw error;
       return (data ?? []).map((row) => ({
         date: row.checkin_date,
+        entryMode: checkInEntryModeSchema.parse(row.entry_mode ?? "manual"),
         attention: row.attention,
         hasImage: row.image_path !== null,
         version: row.version,
@@ -102,8 +110,11 @@ export function createCheckInRepository(
         .insert({
           user_id: userId,
           checkin_date: date,
+          entry_mode: input.entryMode ?? "manual",
           attention: input.attention,
           source_url: input.sourceUrl || null,
+          user_prompt: input.entryMode === "ai" ? aiUserPromptSchema.parse(input.userPrompt ?? "") : "",
+          ai_generation_context: input.entryMode === "ai" ? input.aiGenerationContext ?? null : null,
           summary: input.summary,
           inspiration: input.inspiration,
           image_path: input.imagePath,
@@ -117,11 +128,19 @@ export function createCheckInRepository(
     },
 
     async updateAtVersion(userId, date, expectedVersion, input) {
+      // Older clients omit these fields when editing content or reflections.
+      const promptUpdates = input.entryMode === "ai"
+        ? {
+          ...(input.userPrompt !== undefined ? { user_prompt: aiUserPromptSchema.parse(input.userPrompt) } : {}),
+          ...(input.aiGenerationContext !== undefined ? { ai_generation_context: input.aiGenerationContext } : {}),
+        }
+        : { user_prompt: "", ai_generation_context: null };
       const { data, error } = await supabase
         .from("check_ins")
         .update({
           attention: input.attention,
           source_url: input.sourceUrl || null,
+          ...promptUpdates,
           summary: input.summary,
           inspiration: input.inspiration,
           image_path: input.imagePath,
@@ -130,6 +149,7 @@ export function createCheckInRepository(
         })
         .eq("user_id", userId)
         .eq("checkin_date", date)
+        .eq("entry_mode", input.entryMode ?? "manual")
         .eq("version", expectedVersion)
         .select()
         .maybeSingle();

@@ -138,7 +138,7 @@ describe("useCheckInDraft", () => {
     const onRestore = vi.fn();
     draftStore.loadDraft.mockResolvedValue({ ...storedDraft(), activeAiJob });
 
-    renderHook(() => useDraft({ onRestore }));
+    renderHook(() => useDraft({ entryMode: "ai", onRestore }));
     await flushDraftEffects();
 
     expect(onRestore).toHaveBeenCalledWith(
@@ -272,6 +272,89 @@ describe("useCheckInDraft", () => {
     });
 
     expect(onRestore).not.toHaveBeenCalled();
+  });
+
+  it("suppresses an outgoing mode restore that resolves during the incoming mode layout", async () => {
+    const manualLoad = layoutDeferred<ReturnType<typeof storedDraft> | undefined>();
+    const onRestore = vi.fn();
+    draftStore.loadDraft.mockReturnValueOnce(manualLoad.promise).mockResolvedValue(undefined);
+    const { rerender } = renderHook(
+      ({ entryMode, resolveInLayout }) => {
+        const value = useDraft({ entryMode, draft: emptyDraft, isDirty: false, onRestore });
+        useLayoutEffect(() => {
+          if (resolveInLayout) manualLoad.resolve(storedDraft());
+        }, [resolveInLayout]);
+        return value;
+      },
+      { initialProps: { entryMode: "manual" as "manual" | "ai", resolveInLayout: false } },
+    );
+    await flushDraftEffects();
+    rerender({ entryMode: "ai", resolveInLayout: true });
+    expect(onRestore).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["mode", "auth-user-1", date, "ai"],
+    ["date", "auth-user-1", "2026-07-24", "manual"],
+    ["account", "auth-user-2", date, "manual"],
+  ] as const)("reports the new %s identity unready immediately before passive effects", async (
+    _reason, nextUserId, nextDate, nextMode,
+  ) => {
+    const incomingLoad = deferred<ReturnType<typeof storedDraft> | undefined>();
+    draftStore.loadDraft.mockResolvedValueOnce(undefined).mockReturnValue(incomingLoad.promise);
+    const readinessDuringLayout: boolean[] = [];
+    const { result, rerender } = renderHook(
+      ({ currentUserId, selectedDate, entryMode, capture }) => {
+        const value = useDraft({
+          userId: currentUserId, date: selectedDate, entryMode, cloudRecord: null,
+          draft: emptyDraft, isDirty: false,
+        });
+        useLayoutEffect(() => {
+          if (capture) readinessDuringLayout.push(value.isReadyForCurrentIdentity);
+        }, [capture, value.isReadyForCurrentIdentity]);
+        return value;
+      },
+      { initialProps: { currentUserId: "auth-user-1", selectedDate: date, entryMode: "manual" as "manual" | "ai", capture: false } },
+    );
+    await flushDraftEffects();
+    expect(result.current.isReadyForCurrentIdentity).toBe(true);
+    rerender({ currentUserId: nextUserId, selectedDate: nextDate, entryMode: nextMode, capture: true });
+    expect(readinessDuringLayout).toEqual([false]);
+    expect(result.current.isReadyForCurrentIdentity).toBe(false);
+    await act(async () => { incomingLoad.resolve(undefined); await incomingLoad.promise; });
+    expect(result.current.isReadyForCurrentIdentity).toBe(true);
+    rerender({ currentUserId: "auth-user-1", selectedDate: date, entryMode: "manual", capture: true });
+    expect(readinessDuringLayout.at(-1)).toBe(false);
+    await flushDraftEffects();
+    expect(result.current.isReadyForCurrentIdentity).toBe(true);
+  });
+
+  it("aborts and awaits a started debounce before flushing the latest captured draft", async () => {
+    let resolveWrite!: () => void;
+    let oldWriteSignal: AbortSignal | undefined;
+    draftStore.saveDraft.mockImplementationOnce((
+      _stored: ReturnType<typeof storedDraft>, options?: { signal?: AbortSignal },
+    ) => new Promise<void>((resolve) => {
+      oldWriteSignal = options?.signal;
+      resolveWrite = resolve;
+    }));
+    const { result, rerender } = renderHook(
+      ({ currentDraft }) => useDraft({ draft: currentDraft, cloudRecord: null }),
+      { initialProps: { currentDraft: { ...emptyDraft, attention: "old edit" } } },
+    );
+    await flushDraftEffects();
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    rerender({ currentDraft: { ...emptyDraft, attention: "latest edit" } });
+    let flushing!: Promise<void>;
+    act(() => { flushing = result.current.flushCurrentDraft(); });
+    expect(oldWriteSignal?.aborted).toBe(true);
+    expect(draftStore.saveDraft).toHaveBeenCalledTimes(1);
+    await act(async () => { resolveWrite(); await flushing; });
+    expect(draftStore.saveDraft).toHaveBeenLastCalledWith(expect.objectContaining({
+      entryMode: "manual", attention: "latest edit", baseVersion: 3,
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(draftStore.saveDraft).toHaveBeenCalledTimes(2);
   });
 
   it("debounces dirty writes and cancels the old date when selection changes", async () => {
@@ -439,7 +522,7 @@ describe("useCheckInDraft", () => {
     expect(result.current.storageState).toBe("ready");
   });
 
-  it("never snapshots uploaded image paths in a local draft", () => {
+  it("preserves uploaded image paths in a local draft for a later save retry", () => {
     const snapshot = storedDraftFromEditor(
       "auth-user-1",
       date,
@@ -451,8 +534,7 @@ describe("useCheckInDraft", () => {
       3,
     );
 
-    expect(snapshot).not.toHaveProperty("uploadedImagePath");
-    expect(JSON.stringify(snapshot)).not.toContain("checkin-images/");
+    expect(snapshot).toHaveProperty("uploadedImagePath", "checkin-images/auth-user-1/remote.png");
   });
 
   it("deletes only when the workspace confirms a cloud save", async () => {
@@ -462,7 +544,7 @@ describe("useCheckInDraft", () => {
       await result.current.deleteAfterCloudSave();
     });
 
-    expect(draftStore.deleteDraft).toHaveBeenCalledWith("auth-user-1", date);
+    expect(draftStore.deleteDraft).toHaveBeenCalledWith("auth-user-1", date, "manual");
   });
 
   it("cancels a due debounced write before deleting after a cloud save", async () => {
@@ -476,7 +558,7 @@ describe("useCheckInDraft", () => {
     });
 
     expect(draftStore.saveDraft).not.toHaveBeenCalled();
-    expect(draftStore.deleteDraft).toHaveBeenCalledWith("auth-user-1", date);
+    expect(draftStore.deleteDraft).toHaveBeenCalledWith("auth-user-1", date, "manual");
   });
 
   it("waits for a late write to settle before deleting after a cloud save", async () => {
@@ -506,7 +588,28 @@ describe("useCheckInDraft", () => {
       resolveWrite();
       await deletion;
     });
-    expect(draftStore.deleteDraft).toHaveBeenCalledWith("auth-user-1", date);
+    expect(draftStore.deleteDraft).toHaveBeenCalledWith("auth-user-1", date, "manual");
+  });
+
+  it("aborts and awaits an immediate flush before deleting its cloud-saved draft", async () => {
+    let resolveWrite!: () => void;
+    let flushSignal: AbortSignal | undefined;
+    draftStore.saveDraft.mockImplementation((
+      _stored: ReturnType<typeof storedDraft>, options?: { signal?: AbortSignal },
+    ) => new Promise<void>((resolve) => {
+      flushSignal = options?.signal;
+      resolveWrite = resolve;
+    }));
+    const { result } = renderHook(() => useDraft({ cloudRecord: null }));
+    await flushDraftEffects();
+    let flushing!: Promise<void>;
+    await act(async () => { flushing = result.current.flushCurrentDraft(); await Promise.resolve(); });
+    let deletion!: Promise<void>;
+    act(() => { deletion = result.current.deleteAfterCloudSave(); });
+    expect(flushSignal?.aborted).toBe(true);
+    expect(draftStore.deleteDraft).not.toHaveBeenCalled();
+    await act(async () => { resolveWrite(); await Promise.all([flushing, deletion]); });
+    expect(draftStore.deleteDraft).toHaveBeenCalledWith("auth-user-1", date, "manual");
   });
 
   it("tracks offline and online events without submitting anything", async () => {

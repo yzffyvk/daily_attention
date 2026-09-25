@@ -1,0 +1,66 @@
+begin;
+select no_plan();
+select has_table('public', 'knowledge_narratives', 'durable narrative storage exists');
+select table_privs_are('public','knowledge_narratives','anon',array[]::text[],'anonymous clients cannot read narratives');
+select table_privs_are('public','knowledge_narratives','authenticated',array['SELECT'],'clients cannot forge snapshots or generation state');
+select function_privs_are('public','create_knowledge_narrative',array['uuid','date[]','text','uuid','text'],'authenticated',array[]::text[],'clients cannot invoke privileged create');
+select function_privs_are('public','claim_knowledge_narrative',array[]::text[],'authenticated',array[]::text[],'clients cannot claim work');
+insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,created_at,updated_at) values
+ ('00000000-0000-4000-8000-000000009401','00000000-0000-0000-0000-000000000000','authenticated','authenticated','narrative-one@internal.invalid','',now(),now(),now()),
+ ('00000000-0000-4000-8000-000000009402','00000000-0000-0000-0000-000000000000','authenticated','authenticated','narrative-two@internal.invalid','',now(),now(),now());
+insert into public.check_ins(user_id,checkin_date,attention,summary) values
+ ('00000000-0000-4000-8000-000000009401','2026-08-31','记录学习','原始版本'),
+ ('00000000-0000-4000-8000-000000009401','2026-09-02','复盘学习','寻找联系');
+create temporary table narrative_test_job as select * from public.create_knowledge_narrative(
+ '00000000-0000-4000-8000-000000009401',array['2026-09-02','2026-08-31']::date[],' 如何理解？ ','11111111-1111-4111-8111-111111119401');
+select is((select status from narrative_test_job),'queued','create persists queued state');
+select is((select dates from narrative_test_job),array['2026-08-31','2026-09-02']::date[],'dates canonicalized across months');
+select is((select question from narrative_test_job),'如何理解？','question normalized');
+select is((select source_snapshot->0->>'summary' from narrative_test_job),'原始版本','saved source captured');
+select is((select reserved_count::integer from private.ai_daily_quotas where user_id='00000000-0000-4000-8000-000000009401'),1,'generation reserves shared quota');
+select is((select id from public.create_knowledge_narrative('00000000-0000-4000-8000-000000009401',array['2026-08-31','2026-09-02']::date[],'如何理解？','11111111-1111-4111-8111-111111119401')),(select id from narrative_test_job),'network retry returns identical job');
+select is((select reserved_count::integer from private.ai_daily_quotas where user_id='00000000-0000-4000-8000-000000009401'),1,'idempotent retry does not charge twice');
+select throws_ok($$select public.create_knowledge_narrative('00000000-0000-4000-8000-000000009401',array['2026-08-31','2026-09-02']::date[],'不同问题','11111111-1111-4111-8111-111111119401')$$,'P0001','NARRATIVE_IDEMPOTENCY_CONFLICT','changed payload cannot reuse idempotency key');
+select throws_ok($$select public.create_knowledge_narrative('00000000-0000-4000-8000-000000009401',array['2026-08-31','2026-08-31']::date[],'','11111111-1111-4111-8111-111111119403')$$,'P0001','NARRATIVE_INVALID_INPUT','duplicate days refused in database');
+select throws_ok($$select public.create_knowledge_narrative('00000000-0000-4000-8000-000000009402',array['2026-08-31','2026-09-02']::date[],'','11111111-1111-4111-8111-111111119404')$$,'P0001','NARRATIVE_SOURCES_MISSING','other account cannot use owner sources');
+update public.check_ins set summary='新版',version=2 where user_id='00000000-0000-4000-8000-000000009401' and checkin_date='2026-08-31';
+select is((select source_snapshot->0->>'summary' from public.knowledge_narratives where user_id='00000000-0000-4000-8000-000000009401'),'原始版本','source snapshot does not mutate with note');
+set local role authenticated;
+set local request.jwt.claim.sub='00000000-0000-4000-8000-000000009402';
+select is((select count(*)::integer from public.knowledge_narratives where user_id='00000000-0000-4000-8000-000000009401'),0,'RLS hides another users narratives');
+set local request.jwt.claim.sub='00000000-0000-4000-8000-000000009401';
+select is((select count(*)::integer from public.knowledge_narratives where user_id='00000000-0000-4000-8000-000000009401'),1,'owner can read saved narrative');
+reset role;
+create temporary table narrative_claim_one as select * from public.claim_knowledge_narrative();
+select is((select status from narrative_claim_one),'generating','worker claim transitions state');
+select is((select consumed_count::integer from private.ai_daily_quotas where user_id='00000000-0000-4000-8000-000000009401'),1,'first claim consumes reservation');
+select is((select reserved_count::integer from private.ai_daily_quotas where user_id='00000000-0000-4000-8000-000000009401'),0,'reservation released on first start');
+select is((select count(*)::integer from public.claim_knowledge_narrative()),0,'live lease cannot be claimed twice');
+select is(public.finish_knowledge_narrative((select id from narrative_claim_one),gen_random_uuid(),null,'MODEL_SERVICE_ERROR',true),false,'wrong claim token cannot finish job');
+update public.knowledge_narratives set lease_expires_at=now()-interval '1 second' where id=(select id from narrative_test_job);
+create temporary table narrative_claim_two as select * from public.claim_knowledge_narrative();
+select isnt((select claim_token from narrative_claim_two),(select claim_token from narrative_claim_one),'crashed worker receives a new fenced lease');
+select is(public.finish_knowledge_narrative((select id from narrative_claim_one),(select claim_token from narrative_claim_one),'{"title":"旧结果"}',null,false),false,'old worker cannot overwrite newly claimed job');
+select is((select consumed_count::integer from private.ai_daily_quotas where user_id='00000000-0000-4000-8000-000000009401'),1,'recovery does not consume another quota');
+select is(public.finish_knowledge_narrative((select id from narrative_claim_two),(select claim_token from narrative_claim_two),'{"title":"已串联","nodes":[]}',null,false),true,'current worker can save result');
+select is((select title from public.knowledge_narratives where id=(select id from narrative_test_job)),'已串联','completed title persisted');
+select is(public.finish_knowledge_narrative((select id from narrative_claim_two),(select claim_token from narrative_claim_two),null,'MODEL_SERVICE_ERROR',false),false,'terminal result cannot be overwritten');
+update private.ai_daily_quotas set consumed_count=5 where user_id='00000000-0000-4000-8000-000000009401';
+select throws_ok($$select public.create_knowledge_narrative('00000000-0000-4000-8000-000000009401',array['2026-08-31','2026-09-02']::date[],'','11111111-1111-4111-8111-111111119405')$$,'P0001','DAILY_AI_LIMIT_REACHED','narratives obey daily shared limit');
+select throws_ok($$select public.create_ai_generation_job('00000000-0000-4000-8000-000000009401','2026-09-02','11111111-1111-4111-8111-111111119406','https://example.invalid','example.invalid')$$,'P0001','DAILY_AI_LIMIT_REACHED','single-day AI observes same quota');
+select is((select id from public.create_knowledge_narrative('00000000-0000-4000-8000-000000009401',array['2026-08-31','2026-09-02']::date[],'如何理解？','11111111-1111-4111-8111-111111119401')),(select id from narrative_test_job),'existing idempotent job remains accessible at quota limit');
+update private.ai_daily_quotas set consumed_count=1 where user_id='00000000-0000-4000-8000-000000009401';
+create temporary table narrative_retry_job as select * from public.create_knowledge_narrative('00000000-0000-4000-8000-000000009401',array['2026-08-31','2026-09-02']::date[],'重试','11111111-1111-4111-8111-111111119407');
+create temporary table narrative_retry_claim as select * from public.claim_knowledge_narrative();
+select is(public.finish_knowledge_narrative((select id from narrative_retry_claim),(select claim_token from narrative_retry_claim),null,'MODEL_RATE_LIMITED',true),true,'transient failure can requeue');
+select is((select status from public.knowledge_narratives where id=(select id from narrative_retry_job)),'queued','transient failure stored as queued');
+select is((select count(*)::integer from public.claim_knowledge_narrative()),0,'retry waits for backoff');
+update public.knowledge_narratives set available_at=now()-interval '1 second' where id=(select id from narrative_retry_job);
+select count(*) from public.claim_knowledge_narrative();
+update public.knowledge_narratives set lease_expires_at=now()-interval '1 second' where id=(select id from narrative_retry_job);
+select count(*) from public.claim_knowledge_narrative();
+update public.knowledge_narratives set lease_expires_at=now()-interval '1 second' where id=(select id from narrative_retry_job);
+select is((select count(*)::integer from public.claim_knowledge_narrative()),0,'a crashed third attempt is not retried indefinitely');
+select is((select status from public.knowledge_narratives where id=(select id from narrative_retry_job)),'failed','exhausted crashed job is terminal');
+select * from finish();
+rollback;

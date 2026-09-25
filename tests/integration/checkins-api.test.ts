@@ -52,6 +52,73 @@ afterAll(async () => {
 });
 
 describe("check-in routes", () => {
+  it("preserves AI metadata omitted by old clients and permits explicit clearing", async () => {
+    const user = await registeredSession();
+    const aiGenerationContext = { userPrompt: "原要求", promptVersion: "knowledge-skeleton-user-prompt-v1" };
+    const input = { ...entry(null), entryMode: "ai", userPrompt: "当前要求", aiGenerationContext };
+    expect((await user.put(`/api/checkins/${date}`, input)).status).toBe(200);
+    const legacySave = await user.put(`/api/checkins/${date}`, { ...entry(1), entryMode: "ai", inspiration: "旧客户端保存的新反思" });
+    expect(legacySave.status).toBe(200);
+    expect(legacySave.body.data).toMatchObject({ userPrompt: "当前要求", aiGenerationContext, version: 2 });
+    expect((await user.get(`/api/checkins/${date}?mode=ai`)).body.data)
+      .toMatchObject({ userPrompt: "当前要求", aiGenerationContext, inspiration: "旧客户端保存的新反思" });
+    const cleared = await user.put(`/api/checkins/${date}`, { ...entry(2), entryMode: "ai", userPrompt: "", aiGenerationContext: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.data).toMatchObject({ userPrompt: "", aiGenerationContext: null, version: 3 });
+  });
+
+  it("persists current AI requirements separately from the context used for the saved summary", async () => {
+    const user = await registeredSession();
+    const promptDate = "2026-09-23";
+    const aiGenerationContext = { userPrompt: "旧要求", promptVersion: "knowledge-skeleton-user-prompt-v1" };
+    const input = { ...entry(null), entryMode: "ai", userPrompt: "新要求", aiGenerationContext };
+    const created = await user.put(`/api/checkins/${promptDate}`, input);
+    expect(created.status).toBe(200);
+    expect(created.body.data).toMatchObject({ userPrompt: "新要求", aiGenerationContext });
+    const updated = await user.put(`/api/checkins/${promptDate}`, { ...input, userPrompt: "第三个要求", version: 1 });
+    expect(updated.status).toBe(200);
+    const read = await user.get(`/api/checkins/${promptDate}?mode=ai`);
+    expect(read.body.data).toMatchObject({ userPrompt: "第三个要求", aiGenerationContext, version: 2 });
+    const conflict = await user.put(`/api/checkins/${promptDate}`, { ...input, version: 1 });
+    expect(conflict.status).toBe(409);
+    expect(conflict.body.error.details.current).toMatchObject({ userPrompt: "第三个要求", aiGenerationContext });
+    const manual = await user.put(`/api/checkins/${promptDate}`, { ...input, entryMode: "manual" });
+    expect(manual.status).toBe(200);
+    expect(manual.body.data).toMatchObject({ userPrompt: "", aiGenerationContext: null });
+  });
+
+  it("keeps same-day manual and AI content and versions independent while counting one date", async () => {
+    const user = await registeredSession();
+    const modeDate = "2026-09-16";
+    const manualInput = { ...entry(null), attention: "手写内容", summary: "手写小结", inspiration: "手写反思" };
+    const aiInput = { ...entry(null), entryMode: "ai", attention: "AI 内容", summary: "AI 小结", inspiration: "AI 反思" };
+    const manual = await user.put(`/api/checkins/${modeDate}`, manualInput);
+    const ai = await user.put(`/api/checkins/${modeDate}`, aiInput);
+    expect(manual.status).toBe(200);
+    expect(ai.status).toBe(200);
+    expect(manual.body.data).toMatchObject({ entryMode: "manual", version: 1, attention: "手写内容" });
+    expect(ai.body.data).toMatchObject({ entryMode: "ai", version: 1, attention: "AI 内容" });
+    expect(ai.body.data.id).not.toBe(manual.body.data.id);
+    const updatedAi = await user.put(`/api/checkins/${modeDate}`, { ...aiInput, version: 1, summary: "AI 更新" });
+    expect(updatedAi.status).toBe(200);
+    expect(updatedAi.body.data.version).toBe(2);
+    const staleAi = await user.put(`/api/checkins/${modeDate}`, { ...aiInput, version: 1 });
+    expect(staleAi.status).toBe(409);
+    expect(staleAi.body.error.details.current).toMatchObject({ id: ai.body.data.id, entryMode: "ai", version: 2 });
+    const manualRead = await user.get(`/api/checkins/${modeDate}`);
+    expect(manualRead.body.data).toMatchObject({ ...manualInput, entryMode: "manual", version: 1 });
+    expect((await user.get(`/api/checkins/${modeDate}?mode=ai`)).body.data).toMatchObject({ entryMode: "ai", summary: "AI 更新", version: 2 });
+    const month = await user.get("/api/checkins?month=2026-09");
+    expect(month.body.data).toHaveLength(2);
+    expect(month.body.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ date: modeDate, entryMode: "manual", version: 1 }),
+      expect.objectContaining({ date: modeDate, entryMode: "ai", version: 2 }),
+    ]));
+    expect((await user.get(`/api/checkins/stats?today=${modeDate}`)).body.data).toEqual({ totalCount: 1, currentStreak: 1, hasTodayRecord: true });
+    const invalid = await user.get(`/api/checkins/${modeDate}?mode=other`);
+    expect(invalid.status).toBe(422);
+    expect(invalid.body.error.details.field).toBe("mode");
+  });
   it("uses optimistic versions and isolates records by authenticated user", async () => {
     const userOne = await registeredSession();
     const userTwo = await registeredSession();

@@ -29,6 +29,10 @@ const mappedErrors = {
     status: 409,
     message: "任务已经开始，无法取消",
   },
+  AI_IDEMPOTENCY_CONFLICT: {
+    status: 409,
+    message: "本次请求的日期、链接或提炼要求已变化，请重新发起生成",
+  },
   VALIDATION_ERROR: {
     status: 422,
     message: "请求格式不正确",
@@ -39,7 +43,7 @@ const mappedErrors = {
   },
   DAILY_AI_LIMIT_REACHED: {
     status: 429,
-    message: "今天的 5 次生成机会已用完",
+    message: "本账号今天的 5 次 AI 生成机会已用完，知识提炼与知识串联共用额度，北京时间 0 点重置",
   },
   RATE_LIMITED: {
     status: 429,

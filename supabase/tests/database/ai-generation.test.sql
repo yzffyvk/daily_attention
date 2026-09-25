@@ -75,7 +75,7 @@ select table_privs_are(
 select function_privs_are(
   'public',
   'create_ai_generation_job',
-  array['uuid', 'date', 'uuid', 'text', 'text'],
+  array['uuid', 'date', 'uuid', 'text', 'text', 'text'],
   'authenticated',
   array[]::text[],
   'authenticated users cannot create AI jobs through the service RPC'
@@ -83,7 +83,7 @@ select function_privs_are(
 select function_privs_are(
   'public',
   'create_ai_generation_job',
-  array['uuid', 'date', 'uuid', 'text', 'text'],
+  array['uuid', 'date', 'uuid', 'text', 'text', 'text'],
   'service_role',
   array['EXECUTE'],
   'service role can create AI jobs'

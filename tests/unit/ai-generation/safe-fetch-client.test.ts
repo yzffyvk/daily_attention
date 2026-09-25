@@ -2,6 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 import { createSafeFetchClient } from "@/supabase/functions/_shared/ai/safe-fetch-client";
 
 describe("safe-fetch Edge client", () => {
+  it("reports gateway connection failure as service unavailable instead of blocked content", async () => {
+    const fetchPublic = createSafeFetchClient({
+      baseUrl: "https://gateway.example.test",
+      token: "dedicated-gateway-token-with-32-characters",
+      fetchImpl: vi.fn().mockRejectedValue(new TypeError("fetch failed: ECONNREFUSED")),
+    });
+    await expect(fetchPublic("https://example.com/article", new AbortController().signal))
+      .rejects.toMatchObject({ code: "FETCH_SERVICE_UNAVAILABLE" });
+  });
+
   it("allows explicitly enabled loopback HTTP only", () => {
     const token = "dedicated-gateway-token-with-32-characters";
     expect(() => createSafeFetchClient({ baseUrl: "http://127.0.0.1:8788", token,

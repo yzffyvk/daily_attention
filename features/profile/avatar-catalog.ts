@@ -7,6 +7,11 @@ export const avatarOptions = [
   { key: 5, name: "行动派", description: "把学到的，变成做到的", src: "/avatars/aura-doer.png" },
 ] as const;
 
-export function avatarPath(key: number) {
-  return (avatarOptions.find(option => option.key === key) ?? avatarOptions[0]).src;
+export function avatarPath(key: number, theme: "dark" | "light" = "dark") {
+  const source = avatarForKey(key).src;
+  return theme === "light" ? source.replace(/\.png$/, "-light.png") : source;
+}
+
+export function avatarForKey(key: number) {
+  return avatarOptions.find(option => option.key === key) ?? avatarOptions[0];
 }

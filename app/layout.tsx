@@ -2,6 +2,10 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import "./attention-theme.css";
+import "./knowledge-theme.css";
+import "./knowledge-structure.css";
+import "./light-theme.css";
+import { themeBootstrapScript } from "@/features/theme/theme-bootstrap";
 import { Providers } from "./providers";
 
 const geistSans = Geist({
@@ -31,18 +35,18 @@ function metadataOrigin() {
 export async function generateMetadata(): Promise<Metadata> {
   const metadataBase = metadataOrigin();
   const ogImage = new URL("/og.png", metadataBase).toString();
-  const description = "知序 Aura · 专注，让知识有序。记录每日学习，积累自己的知识。Attention is all you need.";
+  const description = "让每一次学习，连成自己的知识地图。以点成线，以线成面。在记录中积累，在关联中理解。";
 
   return {
     metadataBase,
-    title: "知序 Aura｜专注，让知识有序",
+    title: "知序 Aura｜让每一次学习，连成自己的知识地图。",
     description,
     icons: {
       icon: "/aura-icon.svg",
       shortcut: "/aura-icon.svg",
     },
     openGraph: {
-      title: "知序 Aura｜专注，让知识有序",
+      title: "知序 Aura｜让每一次学习，连成自己的知识地图。",
       description,
       images: [{ url: ogImage, width: 1731, height: 909 }],
       type: "website",
@@ -50,7 +54,7 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     twitter: {
       card: "summary_large_image",
-      title: "知序 Aura｜专注，让知识有序",
+      title: "知序 Aura｜让每一次学习，连成自己的知识地图。",
       description,
       images: [ogImage],
     },
@@ -63,7 +67,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN">
+    <html lang="zh-CN" data-theme="dark" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootstrapScript }} />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >

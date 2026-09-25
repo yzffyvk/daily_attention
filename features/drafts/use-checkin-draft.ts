@@ -4,6 +4,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import type { CheckInDraft } from "@/features/checkins/checkin-editor";
 import type { CheckInRecord } from "@/features/checkins/types";
 import type { ActiveAiJob } from "@/features/ai-generation/types";
+import type { CheckInEntryMode } from "@/lib/domain/checkin";
+import { sameAiGenerationContext } from "@/lib/domain/ai-prompt";
 import {
   deleteDraft,
   loadDraft,
@@ -11,7 +13,7 @@ import {
   type StoredDraft,
 } from "@/lib/indexed-db/drafts";
 
-export type DraftStorageState = "loading" | "ready" | "unavailable";
+export type DraftStorageState = "loading" | "ready" | "unavailable" | "blocked";
 
 type ActiveWrite = {
   controller: AbortController;
@@ -27,6 +29,7 @@ type EditTokenState = {
 type UseCheckInDraftOptions = {
   userId: string | null;
   date: string;
+  entryMode?: CheckInEntryMode;
   cloudRecord: CheckInRecord | null | undefined;
   draft: CheckInDraft;
   isDirty: boolean;
@@ -48,6 +51,13 @@ function isAbortError(error: unknown) {
   );
 }
 
+function storageStateForError(error: unknown): DraftStorageState {
+  return typeof error === "object" && error !== null
+    && "name" in error && error.name === "DraftDatabaseBlockedError"
+    ? "blocked"
+    : "unavailable";
+}
+
 function abortActiveWrites(activeWrites: Set<ActiveWrite>) {
   for (const write of activeWrites) write.controller.abort();
 }
@@ -56,6 +66,8 @@ function editorDraftsMatch(left: CheckInDraft, right: CheckInDraft) {
   return (
     left.attention === right.attention
     && left.sourceUrl === right.sourceUrl
+    && (left.userPrompt ?? "") === (right.userPrompt ?? "")
+    && sameAiGenerationContext(left.aiGenerationContext, right.aiGenerationContext)
     && left.summary === right.summary
     && left.inspiration === right.inspiration
     && left.imageFile === right.imageFile
@@ -75,11 +87,13 @@ function editorDraftFromStored(stored: StoredDraft): CheckInDraft {
   return {
     attention: stored.attention,
     sourceUrl: stored.sourceUrl,
+    userPrompt: stored.entryMode === "ai" ? stored.userPrompt ?? "" : "",
+    aiGenerationContext: stored.entryMode === "ai" ? stored.aiGenerationContext ?? null : null,
     summary: stored.summary,
     inspiration: stored.inspiration,
     imageFile,
     removeImage: stored.removeImage,
-    uploadedImagePath: null,
+    uploadedImagePath: stored.uploadedImagePath ?? null,
   };
 }
 
@@ -89,26 +103,32 @@ function storedDraftFromEditor(
   draft: CheckInDraft,
   baseVersion: number | null,
   activeAiJob: ActiveAiJob | null = null,
+  entryMode: CheckInEntryMode = "manual",
 ): StoredDraft {
   return {
     userId,
     date,
+    entryMode,
     attention: draft.attention,
     sourceUrl: draft.sourceUrl,
+    userPrompt: entryMode === "ai" ? draft.userPrompt ?? "" : "",
+    aiGenerationContext: entryMode === "ai" ? draft.aiGenerationContext ?? null : null,
     summary: draft.summary,
     inspiration: draft.inspiration,
     imageBlob: draft.imageFile,
     imageName: draft.imageFile?.name ?? "",
     removeImage: draft.removeImage,
+    uploadedImagePath: draft.uploadedImagePath,
     baseVersion,
     updatedAt: new Date().toISOString(),
-    ...(activeAiJob ? { activeAiJob } : {}),
+    ...(entryMode === "ai" && activeAiJob ? { activeAiJob } : {}),
   };
 }
 
 export function useCheckInDraft({
   userId,
   date,
+  entryMode = "manual",
   cloudRecord,
   draft,
   isDirty,
@@ -116,7 +136,19 @@ export function useCheckInDraft({
   activeAiJob = null,
   onRestore,
 }: UseCheckInDraftOptions) {
+  const identity = JSON.stringify([userId, date, entryMode]);
+  const [identityLoadState, setIdentityLoadState] = useState(() => ({
+    identity,
+    loadedIdentity: null as string | null,
+  }));
+  if (identityLoadState.identity !== identity) {
+    setIdentityLoadState({ identity, loadedIdentity: null });
+  }
+  const hasLoadedCurrentIdentity = identityLoadState.identity === identity
+    && identityLoadState.loadedIdentity === identity;
+  const [loadRetry, setLoadRetry] = useState(0);
   const [storageState, setStorageState] = useState<DraftStorageState>("loading");
+  const isReadyForCurrentIdentity = storageState === "ready" && hasLoadedCurrentIdentity;
   const [isOffline, setIsOffline] = useState(() =>
     typeof navigator !== "undefined" && !navigator.onLine,
   );
@@ -127,6 +159,7 @@ export function useCheckInDraft({
   const onRestoreRef = useRef(onRestore);
   const persistedActiveJobIdRef = useRef<string | null>(null);
   const isCloudRecordLoading = cloudRecord === undefined;
+  const modeActiveAiJob = entryMode === "ai" ? activeAiJob : null;
   const cloudUpdatedAt = cloudRecord
     ? Date.parse(cloudRecord.updatedAt)
     : Number.NEGATIVE_INFINITY;
@@ -160,9 +193,18 @@ export function useCheckInDraft({
     return activeWrites;
   }, []);
 
-  useLayoutEffect(() => () => {
+  const retryDraftLoad = useCallback(() => {
+    loadGenerationRef.current += 1;
     cancelPendingWrites();
-  }, [cancelPendingWrites, date, userId]);
+    setIdentityLoadState({ identity, loadedIdentity: null });
+    setStorageState("loading");
+    setLoadRetry((retry) => retry + 1);
+  }, [cancelPendingWrites, identity]);
+
+  useLayoutEffect(() => () => {
+    loadGenerationRef.current += 1;
+    cancelPendingWrites();
+  }, [cancelPendingWrites, date, entryMode, userId]);
 
   useEffect(() => {
     onRestoreRef.current = onRestore;
@@ -198,39 +240,42 @@ export function useCheckInDraft({
       };
     }
 
-    void loadDraft(userId, date)
+    persistedActiveJobIdRef.current = null;
+    void loadDraft(userId, date, entryMode)
       .then((stored) => {
         if (!active || generation !== loadGenerationRef.current) return;
+        setIdentityLoadState({ identity, loadedIdentity: identity });
         setStorageState("ready");
         if (editGeneration !== editGenerationRef.current) return;
         const localUpdatedAt = stored ? Date.parse(stored.updatedAt) : Number.NaN;
-        persistedActiveJobIdRef.current = stored?.activeAiJob?.jobId ?? null;
+        const restoredActiveAiJob = entryMode === "ai" ? stored?.activeAiJob : undefined;
+        persistedActiveJobIdRef.current = restoredActiveAiJob?.jobId ?? null;
         if (stored && Number.isFinite(localUpdatedAt) && localUpdatedAt > cloudUpdatedAt) {
           const restoredDraft = editorDraftFromStored(stored);
-          if (stored.activeAiJob) {
-            onRestoreRef.current(restoredDraft, stored.baseVersion, stored.activeAiJob);
+          if (restoredActiveAiJob) {
+            onRestoreRef.current(restoredDraft, stored.baseVersion, restoredActiveAiJob);
           } else {
             onRestoreRef.current(restoredDraft, stored.baseVersion);
           }
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!active || generation !== loadGenerationRef.current) return;
-        setStorageState("unavailable");
+        setStorageState(storageStateForError(error));
       });
 
     return () => {
       active = false;
     };
-  }, [cloudUpdatedAt, date, isCloudRecordLoading, isOffline, userId]);
+  }, [cloudUpdatedAt, date, entryMode, identity, isCloudRecordLoading, isOffline, loadRetry, userId]);
 
   useEffect(() => {
-    const activeMetadataChanged = persistedActiveJobIdRef.current !== activeAiJob?.jobId;
+    const activeMetadataChanged = persistedActiveJobIdRef.current !== (modeActiveAiJob?.jobId ?? null);
     if (
       !userId
       || (isCloudRecordLoading && !isOffline)
-      || storageState !== "ready"
-      || (!isDirty && !activeAiJob && !activeMetadataChanged)
+      || !isReadyForCurrentIdentity
+      || (!isDirty && !modeActiveAiJob && !activeMetadataChanged)
     ) return;
 
     const generation = writeGenerationRef.current + 1;
@@ -240,15 +285,15 @@ export function useCheckInDraft({
       if (writeTimerRef.current === timer) writeTimerRef.current = null;
       const controller = new AbortController();
       const write = saveDraft(
-        storedDraftFromEditor(userId, date, draft, baseVersion, activeAiJob),
+        storedDraftFromEditor(userId, date, draft, baseVersion, modeActiveAiJob, entryMode),
         { signal: controller.signal },
       ).then(() => {
         if (generation === writeGenerationRef.current) {
-          persistedActiveJobIdRef.current = activeAiJob?.jobId ?? null;
+          persistedActiveJobIdRef.current = modeActiveAiJob?.jobId ?? null;
         }
       }).catch((error: unknown) => {
         if (isAbortError(error)) return;
-        if (generation === writeGenerationRef.current) setStorageState("unavailable");
+        if (generation === writeGenerationRef.current) setStorageState(storageStateForError(error));
       });
       const activeWrite = { controller, promise: write };
       activeWritesRef.current.add(activeWrite);
@@ -266,7 +311,39 @@ export function useCheckInDraft({
       if (generation === writeGenerationRef.current) writeGenerationRef.current += 1;
       abortActiveWrites(effectWrites);
     };
-  }, [activeAiJob, baseVersion, date, draft, isCloudRecordLoading, isDirty, isOffline, storageState, userId]);
+  }, [baseVersion, date, draft, entryMode, isCloudRecordLoading, isDirty, isOffline, isReadyForCurrentIdentity, modeActiveAiJob, userId]);
+
+  async function flushCurrentDraft() {
+    const activeWrites = cancelPendingWrites();
+    const generation = loadGenerationRef.current;
+    const snapshot = userId
+      ? storedDraftFromEditor(userId, date, draft, baseVersion, modeActiveAiJob, entryMode)
+      : null;
+    await Promise.allSettled(activeWrites.map((write) => write.promise));
+    if (!snapshot || storageState === "loading" || !hasLoadedCurrentIdentity) {
+      throw new Error("Local draft storage is not ready. Keep the current draft open and retry.");
+    }
+    const controller = new AbortController();
+    const activeWrite = {
+      controller,
+      promise: saveDraft(snapshot, { signal: controller.signal }),
+    };
+    activeWritesRef.current.add(activeWrite);
+    try {
+      await activeWrite.promise;
+      if (generation === loadGenerationRef.current) {
+        setStorageState("ready");
+        persistedActiveJobIdRef.current = modeActiveAiJob?.jobId ?? null;
+      }
+    } catch (error) {
+      if (!isAbortError(error) && generation === loadGenerationRef.current) {
+        setStorageState(storageStateForError(error));
+      }
+      throw error;
+    } finally {
+      activeWritesRef.current.delete(activeWrite);
+    }
+  }
 
   async function deleteAfterCloudSave() {
     if (!userId) return;
@@ -274,15 +351,18 @@ export function useCheckInDraft({
     await Promise.allSettled(activeWrites.map((write) => write.promise));
     const generation = loadGenerationRef.current;
     try {
-      await deleteDraft(userId, date);
-    } catch {
-      if (generation === loadGenerationRef.current) setStorageState("unavailable");
+      await deleteDraft(userId, date, entryMode);
+    } catch (error) {
+      if (generation === loadGenerationRef.current) setStorageState(storageStateForError(error));
     }
   }
 
   return {
     deleteAfterCloudSave,
+    flushCurrentDraft,
     isOffline,
+    isReadyForCurrentIdentity,
+    retryDraftLoad,
     storageState,
   };
 }

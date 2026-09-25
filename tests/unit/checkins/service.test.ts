@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CheckInRepository } from "@/server/checkins/repository";
 import { saveCheckIn } from "@/server/checkins/service";
+import type { CheckInRecord } from "@/features/checkins/types";
 
 const input = {
+  entryMode: "manual" as const,
   attention: "local",
   sourceUrl: "",
   summary: "",
@@ -43,6 +45,41 @@ function repository(
 }
 
 describe("saveCheckIn", () => {
+  it("creates and updates the AI record without conflicting with the same-day manual record", async () => {
+    const manual = {
+      id: "manual-id", date: "2026-07-23", entryMode: "manual" as const,
+      attention: "手写内容", sourceUrl: "", summary: "手写小结", inspiration: "手写启发",
+      imagePath: "manual-image", imageName: "manual.png", imageUrl: null, version: 4,
+      createdAt: "2026-07-23T00:00:00Z", updatedAt: "2026-07-23T00:00:00Z",
+    };
+    const rows = new Map<string, CheckInRecord>([["manual", manual]]);
+    const store = repository({
+      async findByDate(_userId, _date, mode = "manual") { return rows.get(mode) ?? null; },
+      async insert(_userId, date, value) {
+        const record = { ...manual, ...value, id: "ai-id", date, version: 1 };
+        rows.set(value.entryMode, record);
+        return record;
+      },
+      async updateAtVersion(_userId, _date, expectedVersion, value) {
+        const current = rows.get(value.entryMode);
+        if (!current || current.version !== expectedVersion) return null;
+        const record = { ...current, ...value, version: expectedVersion + 1 };
+        rows.set(value.entryMode, record);
+        return record;
+      },
+    });
+    const aiInput = { ...input, entryMode: "ai" as const, attention: "AI 内容" };
+    expect(await saveCheckIn("user-1", "2026-07-23", aiInput, store)).toMatchObject({
+      ok: true, record: { id: "ai-id", entryMode: "ai", version: 1 },
+    });
+    expect(await saveCheckIn("user-1", "2026-07-23", { ...aiInput, version: 1 }, store)).toMatchObject({
+      ok: true, record: { id: "ai-id", entryMode: "ai", version: 2 },
+    });
+    expect(rows.get("manual")).toEqual(manual);
+    expect(await saveCheckIn("user-1", "2026-07-23", { ...aiInput, version: 1 }, store)).toMatchObject({
+      ok: false, current: { id: "ai-id", entryMode: "ai", version: 2 },
+    });
+  });
   it("inserts version one when no cloud record exists", async () => {
     const store = repository();
 

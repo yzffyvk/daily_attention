@@ -47,13 +47,13 @@ async function pageFor(viewport, reducedMotion = "no-preference") {
     else { failures.push(`Unhandled test request: ${url.pathname}`); return route.abort(); }
     return route.fulfill({ json: { ok: true, data, requestId: "isolated-visual-qa" } });
   });
-  await page.goto("http://127.0.0.1:4300/", { waitUntil: "networkidle" });
-  await expect(page.getByRole("textbox", { name: "我的注意力", exact: true })).toBeEnabled();
+  await page.goto("http://127.0.0.1:4300/?fixture=1", { waitUntil: "networkidle" });
+  await expect(page.getByRole("textbox", { name: "今日知识主题", exact: true })).toBeEnabled();
   return page;
 }
 
 async function fillReferenceDraft(page) {
-  await page.getByRole("textbox", { name: "我的注意力", exact: true }).fill("让知识不止停留在收藏夹");
+  await page.getByRole("textbox", { name: "今日知识主题", exact: true }).fill("让知识不止停留在收藏夹");
   await page.locator("#summary").fill("今天阅读了一篇关于深度工作的文章，重新思考了注意力的分配方式。\n真正的成长，来自于把感兴趣的内容，转化为可实践的行动。");
   await page.locator("#source-url").fill("https://example.com");
   await page.locator("#inspiration").fill("或许可以尝试一个更专注的晨间时段，减少不必要的信息输入。");
@@ -132,7 +132,7 @@ try {
   await expect(page.getByRole("dialog", { name: "尚未保存" })).toBeVisible();
   await capture(page, "dirty-dialog.png", false);
   await page.getByRole("button", { name: "放弃修改", exact: true }).click();
-  await expect(page.getByRole("textbox", { name: "我的注意力", exact: true })).toHaveValue("把想法变成一次小实践");
+  await expect(page.getByRole("textbox", { name: "今日知识主题", exact: true })).toHaveValue("把想法变成一次小实践");
   await page.getByRole("button", { name: "AI 提炼" }).click();
   await expect(page.getByRole("button", { name: "生成知识小结" })).toBeEnabled();
   await capture(page, "ai-mode.png");

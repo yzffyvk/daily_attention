@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AiGenerationResult } from "@/lib/domain/ai-generation";
+import { aiUserPromptSchema, type AiGenerationContext } from "@/lib/domain/ai-prompt";
 import {
   cancelAiGeneration,
   createAiGeneration,
@@ -17,6 +18,7 @@ const slowPollDelay = 15_000;
 const longRunningAfterMs = 120_000;
 
 type CreateRequest = {
+  userPrompt: string;
   sourceUrl: string;
   targetDate: string;
   idempotencyKey: string;
@@ -25,7 +27,7 @@ type CreateRequest = {
 type UseAiGenerationInput = {
   activeJob: ActiveAiJob | null;
   onActiveJobChange?: (activeJob: ActiveAiJob | null) => void;
-  onSucceeded(result: AiGenerationResult, targetDate: string): void;
+  onSucceeded(result: AiGenerationResult, targetDate: string, generationContext?: AiGenerationContext): void;
   onTerminal(jobId: string): void;
 };
 
@@ -38,7 +40,7 @@ export type AiGenerationController = {
   isCreating: boolean;
   canRetryCreate: boolean;
   clearError(): void;
-  generate(input: { sourceUrl: string; targetDate: string }): Promise<void>;
+  generate(input: { sourceUrl: string; targetDate: string; userPrompt?: string }): Promise<void>;
   retryCreate(): Promise<void>;
   cancel(): Promise<void>;
 };
@@ -65,6 +67,7 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
   const requestRef = useRef<AbortController | null>(null);
   const pollIndexRef = useRef(0);
   const pendingCreateRef = useRef<CreateRequest | null>(null);
+  const creatingRef = useRef(false);
   const callbacksRef = useRef(input);
 
   useEffect(() => {
@@ -120,7 +123,7 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
       setStage(next.stage);
       setError("");
       if (next.status === "succeeded" && next.result) {
-        callbacksRef.current.onSucceeded(next.result, job.targetDate);
+        callbacksRef.current.onSucceeded(next.result, job.targetDate, next.generationContext ?? job.generationContext);
         finish(job.jobId);
         return;
       }
@@ -146,6 +149,8 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
   }, [poll]);
 
   const performCreate = useCallback(async (request: CreateRequest) => {
+    if (creatingRef.current || activeJobRef.current) return;
+    creatingRef.current = true;
     clearPolling();
     setStage("creating");
     setError("");
@@ -155,6 +160,8 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
         jobId: created.jobId,
         targetDate: request.targetDate,
         sourceUrl: request.sourceUrl,
+        userPrompt: request.userPrompt,
+        generationContext: created.generationContext,
         createdAt: new Date().toISOString(),
       };
       pendingCreateRef.current = null;
@@ -170,17 +177,27 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
       setStage("idle");
       setCanRetryCreate(true);
       setError(errorMessage(nextError));
+    } finally {
+      creatingRef.current = false;
     }
   }, [clearPolling, schedulePoll]);
 
-  const generate = useCallback(async ({ sourceUrl, targetDate }: {
+  const generate = useCallback(async ({ sourceUrl, targetDate, userPrompt = "" }: {
     sourceUrl: string;
     targetDate: string;
+    userPrompt?: string;
   }) => {
+    if (creatingRef.current || activeJobRef.current) return;
+    const parsedPrompt = aiUserPromptSchema.safeParse(userPrompt);
+    if (!parsedPrompt.success) {
+      setError(parsedPrompt.error.issues[0].message);
+      return;
+    }
+    const normalizedPrompt = parsedPrompt.data;
     const pending = pendingCreateRef.current;
-    const request = pending?.sourceUrl === sourceUrl && pending.targetDate === targetDate
+    const request = pending?.sourceUrl === sourceUrl && pending.targetDate === targetDate && pending.userPrompt === normalizedPrompt
       ? pending
-      : { sourceUrl, targetDate, idempotencyKey: crypto.randomUUID() };
+      : { sourceUrl, targetDate, userPrompt: normalizedPrompt, idempotencyKey: crypto.randomUUID() };
     pendingCreateRef.current = request;
     setCanRetryCreate(false);
     await performCreate(request);

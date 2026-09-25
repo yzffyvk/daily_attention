@@ -3,6 +3,7 @@ import "server-only";
 import { z } from "zod";
 import type { AiGenerationStatus } from "@/features/ai-generation/types";
 import { dateKeySchema } from "@/lib/domain/checkin";
+import { aiUserPromptSchema } from "@/lib/domain/ai-prompt";
 import { createAdminSupabase } from "@/lib/supabase/admin";
 
 const statusSchema = z.enum([
@@ -38,6 +39,7 @@ const jobSchema = z.object({
   thinking_enabled: z.boolean(),
   reasoning_effort: z.enum(["high", "max"]),
   prompt_version: z.string().min(1).max(40),
+  user_prompt: aiUserPromptSchema.optional().default(""),
   prompt_tokens: z.number().int().nonnegative().nullable(),
   prompt_cache_hit_tokens: z.number().int().nonnegative().nullable(),
   prompt_cache_miss_tokens: z.number().int().nonnegative().nullable(),
@@ -108,6 +110,7 @@ export type AiJob = {
   thinkingEnabled: boolean;
   reasoningEffort: "high" | "max";
   promptVersion: string;
+  userPrompt?: string;
   promptTokens: number | null;
   promptCacheHitTokens: number | null;
   promptCacheMissTokens: number | null;
@@ -139,6 +142,7 @@ export type CreateAiJob = {
   idempotencyKey: string;
   sourceUrl: string;
   sourceHost: string;
+  userPrompt?: string;
 };
 
 export interface AiGenerationRepository {
@@ -170,6 +174,7 @@ function mapJob(row: z.infer<typeof jobSchema>): AiJob {
     thinkingEnabled: row.thinking_enabled,
     reasoningEffort: row.reasoning_effort,
     promptVersion: row.prompt_version,
+    userPrompt: row.user_prompt,
     promptTokens: row.prompt_tokens,
     promptCacheHitTokens: row.prompt_cache_hit_tokens,
     promptCacheMissTokens: row.prompt_cache_miss_tokens,
@@ -215,6 +220,7 @@ export function createAiGenerationRepository(
         target_idempotency_key: input.idempotencyKey,
         target_source_url: input.sourceUrl,
         target_source_host: input.sourceHost,
+        target_user_prompt: aiUserPromptSchema.parse(input.userPrompt ?? ""),
       });
       if (error) throw error;
       return mapWithQuota(oneWithQuota(data));

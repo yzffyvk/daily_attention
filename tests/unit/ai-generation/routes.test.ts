@@ -39,7 +39,7 @@ const requestBody = {
   idempotencyKey: "20000000-0000-4000-8000-000000000001",
 };
 const result = {
-  job: { id: jobId, userId, status: "queued" },
+  job: { id: jobId, userId, status: "queued", userPrompt: "", promptVersion: "knowledge-skeleton-user-prompt-v1" },
   quota: { used: 1, reserved: 1, consumed: 0, limit: 5, remaining: 4 },
 } as AiJobWithQuota;
 
@@ -98,7 +98,7 @@ describe("AI generation routes", () => {
     const response = await POST(postRequest());
 
     expect(response.status).toBe(202);
-    expect(mocks.create).toHaveBeenCalledWith(userId, requestBody, {});
+    expect(mocks.create).toHaveBeenCalledWith(userId, { ...requestBody, userPrompt: "" }, {});
     expect(mocks.trigger).not.toHaveBeenCalled();
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     await expect(response.json()).resolves.toMatchObject({
@@ -108,6 +108,7 @@ describe("AI generation routes", () => {
         status: "queued",
         pollAfterMs: 1500,
         quota: result.quota,
+        generationContext: { userPrompt: "", promptVersion: "knowledge-skeleton-user-prompt-v1" },
       },
     });
     expect(mocks.consume).toHaveBeenCalledWith(
@@ -121,7 +122,7 @@ describe("AI generation routes", () => {
   it("passes the full article URL without its section anchor to job creation", async () => {
     const response = await POST(postRequest({...requestBody, sourceUrl: requestBody.sourceUrl + "#skills"}));
     expect(response.status).toBe(202);
-    expect(mocks.create).toHaveBeenCalledWith(userId, requestBody, {});
+    expect(mocks.create).toHaveBeenCalledWith(userId, { ...requestBody, userPrompt: "" }, {});
   });
 
   it("maps the daily quota error without leaking database details", async () => {

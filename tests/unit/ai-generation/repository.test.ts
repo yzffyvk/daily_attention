@@ -73,7 +73,27 @@ describe("AI generation repository", () => {
       target_idempotency_key: "20000000-0000-4000-8000-000000000001",
       target_source_url: "https://example.com/article",
       target_source_host: "example.com",
+      target_user_prompt: "",
     });
+  });
+
+  it("snapshots the trimmed user prompt and reads it with the stored version", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: [{
+      job: rpcJob({ user_prompt: "聚焦实现细节", prompt_version: "knowledge-skeleton-user-prompt-v1" }),
+      quota_used: 1, quota_reserved: 1, quota_consumed: 0, quota_remaining: 4,
+    }], error: null });
+    const repository = createAiGenerationRepository({ rpc });
+    const created = await repository.create({
+      userId, targetDate: "2026-07-31", idempotencyKey: "20000000-0000-4000-8000-000000000001",
+      sourceUrl: "https://example.com/article", sourceHost: "example.com", userPrompt: "  聚焦实现细节  ",
+    });
+    expect(created.job).toMatchObject({ userPrompt: "聚焦实现细节", promptVersion: "knowledge-skeleton-user-prompt-v1" });
+    expect(rpc.mock.calls[0][1].target_user_prompt).toBe("聚焦实现细节");
+  });
+
+  it("normalizes a legacy job without a stored user prompt to an empty prompt", async () => {
+    const repository = createAiGenerationRepository({ rpc: async () => ({ data: [rpcJob()], error: null }) });
+    expect(await repository.findOwned(userId, jobId)).toMatchObject({ userPrompt: "", promptVersion: "ai-summary-v1" });
   });
 
   it("returns null for an unowned or missing job", async () => {

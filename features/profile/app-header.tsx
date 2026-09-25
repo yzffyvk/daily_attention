@@ -1,8 +1,7 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarDays, Check, ChevronDown, KeyRound, LogOut, Pencil, Volume2, VolumeX, X } from "lucide-react";
+import { CalendarDays, Check, ChevronDown, GitBranch, KeyRound, LogOut, Pencil, Volume2, VolumeX, X } from "lucide-react";
 import type { FormEvent, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import { RecoveryCodeDialog } from "@/features/auth/recovery-code-dialog";
@@ -11,8 +10,11 @@ import { AttentionAtmosphere } from "./attention-atmosphere";
 import { AuraMark } from "@/features/brand/aura-mark";
 import { useCheckInStats } from "@/features/checkins/queries";
 import type { AccountProfile } from "@/server/auth/ports";
-import { avatarPath } from "./avatar-catalog";
+import { avatarForKey } from "./avatar-catalog";
+import { AvatarImage } from "./avatar-image";
+import { ThemeToggle } from "@/features/theme/theme-toggle";
 import { AvatarSelector } from "./avatar-selector";
+import { LearningPersona } from "./learning-persona";
 
 const profileKey = ["profile"] as const;
 
@@ -26,6 +28,8 @@ type AppHeaderProps = {
   onSelectToday: () => void;
   onToggleMuted: () => void;
   onRequestLogout: () => void;
+  onOpenKnowledge?: () => void;
+  knowledgeOpen?: boolean;
 };
 
 function normalizeDisplayName(value: string) {
@@ -323,12 +327,15 @@ export function AppHeader({
   onSelectToday,
   onToggleMuted,
   onRequestLogout,
+  onOpenKnowledge,
+  knowledgeOpen = false,
 }: AppHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [recoveryRotationOpen, setRecoveryRotationOpen] = useState(false);
   const [rotatedRecoveryCode, setRotatedRecoveryCode] = useState("");
   const accountTriggerRef = useRef<HTMLButtonElement>(null);
+  const profileReturnFocusRef = useRef<HTMLButtonElement>(null);
   const [previousBusy, setPreviousBusy] = useState(isBusy);
   const profileQuery = useQuery({
     queryKey: profileKey,
@@ -361,7 +368,7 @@ export function AppHeader({
 
   return (
     <>
-      <header className={`app-header${isCelebrating ? " celebrating" : ""}`}>
+      <header className={`app-header${isCelebrating ? " celebrating" : ""}${profile ? " has-learning-persona" : ""}`}>
         <AttentionAtmosphere />
         <div className="header-copy">
           <div className="header-topline">
@@ -369,6 +376,8 @@ export function AppHeader({
               <AuraMark />
               <p className="attention-wordmark">Aura<span lang="zh-CN">知序</span></p>
             </div>
+            <div className="header-tools">
+            <ThemeToggle />
             {profile ? (
               <div className="account-menu-wrap">
                 <button
@@ -381,7 +390,7 @@ export function AppHeader({
                   ref={accountTriggerRef}
                   type="button"
                 >
-                  <img alt="" src={avatarPath(profile.avatarKey)} />
+                  <span className="account-portrait" aria-hidden="true"><AvatarImage avatarKey={profile.avatarKey} /></span>
                   <strong>{profile.displayName}</strong>
                   <ChevronDown aria-hidden="true" size={14} />
                 </button>
@@ -390,6 +399,7 @@ export function AppHeader({
                     <button
                       disabled={isBusy}
                       onClick={() => {
+                        profileReturnFocusRef.current = accountTriggerRef.current;
                         setMenuOpen(false);
                         setProfileOpen(true);
                       }}
@@ -420,11 +430,20 @@ export function AppHeader({
                 <LogOut aria-hidden="true" size={16} />
               </button>
             )}
+            </div>
           </div>
+          <div className={profile ? "personal-hero" : undefined}>
           <div className="brand-title-row">
-            <h1>今天，你的注意力在哪里？</h1>
+            <h1>让每一次学习，连成自己的知识地图。</h1>
           </div>
-          <p className="hero-copy">让每一次学习，留下自己的回响。</p>
+          <p className="hero-copy">以点成线，以线成面。在记录中积累，在关联中理解。</p>
+          {profile ? <button className="personal-hero-persona" type="button" disabled={isBusy}
+            aria-label={`更换学习形象，当前为${avatarForKey(profile.avatarKey).name}`}
+            onClick={event => { profileReturnFocusRef.current = event.currentTarget; setMenuOpen(false); setProfileOpen(true); }}>
+            <LearningPersona avatarKey={profile.avatarKey} />
+            <span className="persona-edit-hint">更换形象 ↗</span>
+          </button> : null}
+          </div>
         </div>
 
         <div className="header-dashboard">
@@ -448,7 +467,7 @@ export function AppHeader({
                 {stats
                   ? hasTodayRecord
                     ? "已经打卡"
-                    : "等待 attention"
+                    : "等待今日记录"
                   : statsQuery.isError
                     ? "统计待重试"
                     : "正在读取"}
@@ -493,9 +512,10 @@ export function AppHeader({
                 : "开始今日打卡"
               : "查看今日"}
           </button>
+          {onOpenKnowledge ? <button className="knowledge-entry" id="knowledge-entry" type="button" disabled={isBusy} aria-pressed={knowledgeOpen} onClick={onOpenKnowledge}><GitBranch size={17} aria-hidden="true" />串联知识</button> : null}
         </div>
       </header>
-      {profileOpen && profile && !isBusy ? <ProfileDialog onClose={() => setProfileOpen(false)} profile={profile} returnFocusRef={accountTriggerRef} /> : null}
+      {profileOpen && profile && !isBusy ? <ProfileDialog onClose={() => setProfileOpen(false)} profile={profile} returnFocusRef={profileReturnFocusRef} /> : null}
       {recoveryRotationOpen && profile && !isBusy ? (
         <RecoveryCodeRotationDialog
           onClose={() => setRecoveryRotationOpen(false)}

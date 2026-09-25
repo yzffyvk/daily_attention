@@ -2,6 +2,19 @@ import { describe, expect, it } from "vitest";
 import { checkInInputSchema, dateKeySchema } from "@/lib/domain/checkin";
 
 describe("check-in contracts", () => {
+  const legacyInput = {
+    attention: "学习记录", sourceUrl: "", summary: "", inspiration: "",
+    imagePath: null, imageName: "", version: null,
+  };
+
+  it("defaults legacy writes to manual while retaining explicit AI mode", () => {
+    expect(checkInInputSchema.parse(legacyInput)).toMatchObject({ entryMode: "manual" });
+    expect(checkInInputSchema.parse({ ...legacyInput, entryMode: "ai" })).toMatchObject({ entryMode: "ai" });
+  });
+
+  it("rejects unsupported entry modes", () => {
+    expect(checkInInputSchema.safeParse({ ...legacyInput, entryMode: "other" }).success).toBe(false);
+  });
   it("accepts a complete dated entry", () => {
     expect(
       checkInInputSchema.parse({

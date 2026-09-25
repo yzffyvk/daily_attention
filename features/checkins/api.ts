@@ -1,7 +1,7 @@
 import type { ApiFailure, ApiSuccess } from "@/lib/api/result";
 import { createBrowserSupabase } from "@/lib/supabase/browser";
 import type { AccountProfile } from "@/server/auth/ports";
-import type { CheckInInput } from "@/lib/domain/checkin";
+import type { CheckInEntryMode, CheckInInput } from "@/lib/domain/checkin";
 import type { CheckInRecord, CheckInStats, CheckInSummary } from "./types";
 
 type ApiEnvelope<T> = ApiSuccess<T> | ApiFailure;
@@ -171,9 +171,9 @@ export async function getCheckInStats(today: string) {
   );
 }
 
-export async function getCheckIn(date: string): Promise<CheckInRecord | null> {
+export async function getCheckIn(date: string, entryMode: CheckInEntryMode = "manual"): Promise<CheckInRecord | null> {
   try {
-    return await requestApi<CheckInRecord>(`/api/checkins/${encodeURIComponent(date)}`);
+    return await requestApi<CheckInRecord>(`/api/checkins/${encodeURIComponent(date)}${entryMode === "ai" ? "?mode=ai" : ""}`);
   } catch (error) {
     if (error instanceof ApiError && error.status === 404 && error.code === "NOT_FOUND") {
       return null;

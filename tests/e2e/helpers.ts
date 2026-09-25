@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export const password = "password123";
-export const appHeading = /今天你\s*attention\s*了吗？/;
+export const appHeading = "让每一次学习，连成自己的知识地图。";
 
 export async function waitForClient(page: Page) {
   await page.waitForLoadState("load");
@@ -189,7 +189,9 @@ export async function register(page: Page, email?: string) {
   await waitForClient(page);
   await page.getByLabel("名称").fill("E2E 学习者");
   await expect(page.getByLabel("名称")).toHaveValue("E2E 学习者");
-  await page.getByRole("radio", { name: "摸鱼家", exact: true }).check();
+  const avatar = page.getByRole("radio", { name: "摸鱼家", exact: true });
+  await page.locator("label").filter({ has: avatar }).click();
+  await expect(avatar).toBeChecked();
   const onboardingResponse = page.waitForResponse((response) => {
     const url = new URL(response.url());
     return url.pathname === "/api/onboarding" && response.request().method() === "POST";
@@ -213,7 +215,7 @@ export async function logout(page: Page) {
 }
 
 export async function saveCheckIn(page: Page, attention: string) {
-  await page.getByRole("textbox", { name: "我的注意力", exact: true }).fill(attention);
+  await page.getByRole("textbox", { name: "今日知识主题", exact: true }).fill(attention);
   await page.getByRole("button", { name: /完成打卡|保存修改/ }).click();
   await expect(page.getByText(`${attention}`, { exact: true }).first()).toBeVisible();
 }

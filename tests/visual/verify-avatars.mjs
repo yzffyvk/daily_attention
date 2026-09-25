@@ -11,9 +11,12 @@ const failures = [];
 const names = ["白日梦家", "学者", "技术发烧友", "摸鱼家", "行动派"];
 const files = ["dreamer", "scholar", "technophile", "lounger", "doer"];
 const origin = "http://127.0.0.1:4300";
+const theme = process.env.AURA_VISUAL_THEME === "light" ? "light" : "dark";
+const assetSuffix = theme === "light" ? "-light" : "";
 
 async function fixture(width, view, avatarKey = 5, height = 900, reducedMotion = "no-preference") {
   const page = await browser.newPage({ viewport: { width, height }, reducedMotion, timezoneId: "Asia/Shanghai" });
+  await page.addInitScript(theme => localStorage.setItem("aura-color-theme", theme), theme);
   let profile = { id: "visual-fixture", email: "visual@example.invalid", displayName: "学习者", avatarKey, onboardingCompleted: true };
   const writes = [];
   page.on("pageerror", error => failures.push(error.message));
@@ -45,8 +48,8 @@ async function fixture(width, view, avatarKey = 5, height = 900, reducedMotion =
     }
     return route.fulfill({ json: { ok: true, data, requestId: "avatar-isolated-qa" } });
   });
-  await page.goto(`${origin}/?view=${view}`, { waitUntil: "networkidle" });
-  if (view !== "onboarding") await expect(page.locator(".current-account img")).toHaveAttribute("src", `/avatars/aura-${files[avatarKey - 1]}.png`);
+  await page.goto(`${origin}/?view=${view}&fixture=1`, { waitUntil: "networkidle" });
+  if (view !== "onboarding") await expect(page.locator(".current-account img")).toHaveAttribute("src", `/avatars/aura-${files[avatarKey - 1]}${assetSuffix}.png`);
   return { page, writes };
 }
 
@@ -64,7 +67,7 @@ async function inspectChoices(page, width) {
     await expect(radio).toHaveValue(String(index + 1));
     const card = page.locator(".aura-avatar-card").nth(index);
     await card.scrollIntoViewIfNeeded();
-    await expect(card.locator("img")).toHaveAttribute("src", `/avatars/aura-${files[index]}.png`);
+    await expect(card.locator("img")).toHaveAttribute("src", `/avatars/aura-${files[index]}${assetSuffix}.png`);
     await expect.poll(() => card.locator("img").evaluate(el => el.complete && el.naturalWidth > 0)).toBe(true);
     expect(await card.evaluate(el => el.scrollWidth <= el.clientWidth), `${name} card has no clipped text`).toBe(true);
     const target = await card.boundingBox();
@@ -125,7 +128,7 @@ try {
     await profile.page.locator(".aura-avatar-card").nth(1).click();
     await profile.page.getByRole("button", { name: "保存资料", exact: true }).click();
     await expect(profile.page.getByRole("dialog", { name: "编辑资料" })).toHaveCount(0);
-    await expect(profile.page.locator(".current-account img")).toHaveAttribute("src", "/avatars/aura-scholar.png");
+    await expect(profile.page.locator(".current-account img")).toHaveAttribute("src", `/avatars/aura-scholar${assetSuffix}.png`);
     expect(profile.writes).toEqual([{ method: "PATCH", path: "/api/me", body: { displayName: "学习者", avatarKey: 2 } }]);
     await openProfile(profile.page);
     await expect(profile.page.getByRole("radio", { name: "学者", exact: true })).toBeChecked();
@@ -145,7 +148,7 @@ try {
   await expect(page.getByRole("button", { name: "打开账户菜单" })).toBeFocused();
   await page.close();
   expect(failures).toEqual([]);
-  console.log(JSON.stringify({ result: "PASS", viewports: [1440, 768, 390, 320], shortViewport: "1024×600", verified: "five assets/IDs, centered rows, no overflow, keyboard/focus, cancel, simulated save, existing avatar persistence, reduced motion", realApiWrites: 0, screenshots: output }, null, 2));
+  console.log(JSON.stringify({ result: "PASS", theme, viewports: [1440, 768, 390, 320], shortViewport: "1024×600", verified: "five assets/IDs, centered rows, no overflow, keyboard/focus, cancel, simulated save, existing avatar persistence, reduced motion", realApiWrites: 0, screenshots: output }, null, 2));
 } finally {
   await browser.close();
 }

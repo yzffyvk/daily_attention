@@ -1,4 +1,8 @@
 import { z } from "zod";
+import { aiGenerationContextSchema, aiUserPromptSchema } from "./ai-prompt.ts";
+
+export const checkInEntryModeSchema = z.enum(["manual", "ai"]);
+export type CheckInEntryMode = z.infer<typeof checkInEntryModeSchema>;
 
 export const dateKeySchema = z.string().refine((value) => {
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
@@ -12,8 +16,11 @@ const sourceUrlSchema = z.union([
 ]);
 
 export const checkInInputSchema = z.object({
+  entryMode: checkInEntryModeSchema.default("manual"),
   attention: z.string().trim().min(1, "请填写 attention").max(120),
   sourceUrl: sourceUrlSchema,
+  userPrompt: aiUserPromptSchema.optional(),
+  aiGenerationContext: aiGenerationContextSchema.nullable().optional(),
   summary: z.string().max(5000),
   inspiration: z.string().max(2000),
   imagePath: z

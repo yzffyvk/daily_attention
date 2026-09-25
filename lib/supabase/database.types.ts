@@ -36,8 +36,10 @@ export type Database = {
     Tables: {
       check_ins: {
         Row: {
+          ai_generation_context: Json | null
           attention: string
           checkin_date: string
+          entry_mode: string
           created_at: string
           id: string
           image_name: string
@@ -47,11 +49,14 @@ export type Database = {
           summary: string
           updated_at: string
           user_id: string
+          user_prompt: string
           version: number
         }
         Insert: {
+          ai_generation_context?: Json | null
           attention: string
           checkin_date: string
+          entry_mode?: string
           created_at?: string
           id?: string
           image_name?: string
@@ -61,11 +66,14 @@ export type Database = {
           summary?: string
           updated_at?: string
           user_id: string
+          user_prompt?: string
           version?: number
         }
         Update: {
+          ai_generation_context?: Json | null
           attention?: string
           checkin_date?: string
+          entry_mode?: string
           created_at?: string
           id?: string
           image_name?: string
@@ -75,7 +83,80 @@ export type Database = {
           summary?: string
           updated_at?: string
           user_id?: string
+          user_prompt?: string
           version?: number
+        }
+        Relationships: []
+      }
+      knowledge_narratives: {
+        Row: {
+          attempt_count: number
+          available_at: string
+          claim_token: string | null
+          copy_request_key: string | null
+          copy_source_id: string | null
+          created_at: string
+          dates: string[]
+          error_code: string | null
+          finished_at: string | null
+          id: string
+          idempotency_key: string
+          lease_expires_at: string | null
+          question: string
+          quota_date: string
+          result: Json | null
+          source_snapshot: Json
+          started_at: string | null
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          attempt_count?: number
+          available_at?: string
+          claim_token?: string | null
+          copy_request_key?: string | null
+          copy_source_id?: string | null
+          created_at?: string
+          dates: string[]
+          error_code?: string | null
+          finished_at?: string | null
+          id?: string
+          idempotency_key: string
+          lease_expires_at?: string | null
+          question?: string
+          quota_date: string
+          result?: Json | null
+          source_snapshot: Json
+          started_at?: string | null
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          attempt_count?: number
+          available_at?: string
+          claim_token?: string | null
+          copy_request_key?: string | null
+          copy_source_id?: string | null
+          created_at?: string
+          dates?: string[]
+          error_code?: string | null
+          finished_at?: string | null
+          id?: string
+          idempotency_key?: string
+          lease_expires_at?: string | null
+          question?: string
+          quota_date?: string
+          result?: Json | null
+          source_snapshot?: Json
+          started_at?: string | null
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -140,6 +221,38 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "ai_generation_job_record"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      claim_knowledge_narrative: {
+        Args: never
+        Returns: {
+          attempt_count: number
+          available_at: string
+          claim_token: string | null
+          copy_request_key: string | null
+          copy_source_id: string | null
+          created_at: string
+          dates: string[]
+          error_code: string | null
+          finished_at: string | null
+          id: string
+          idempotency_key: string
+          lease_expires_at: string | null
+          question: string
+          quota_date: string
+          result: Json | null
+          source_snapshot: Json
+          started_at: string | null
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "knowledge_narratives"
           isOneToOne: false
           isSetofReturn: true
         }
@@ -230,6 +343,42 @@ export type Database = {
           retry_after_seconds: number
         }[]
       }
+      copy_knowledge_narrative: {
+        Args: {
+          target_id: string
+          target_idempotency_key: string
+          target_user_id: string
+        }
+        Returns: {
+          attempt_count: number
+          available_at: string
+          claim_token: string | null
+          copy_request_key: string | null
+          copy_source_id: string | null
+          created_at: string
+          dates: string[]
+          error_code: string | null
+          finished_at: string | null
+          id: string
+          idempotency_key: string
+          lease_expires_at: string | null
+          question: string
+          quota_date: string
+          result: Json | null
+          source_snapshot: Json
+          started_at: string | null
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "knowledge_narratives"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       create_ai_generation_job: {
         Args: {
           target_date: string
@@ -237,11 +386,50 @@ export type Database = {
           target_source_host: string
           target_source_url: string
           target_user_id: string
+          target_user_prompt?: string
         }
         Returns: Database["public"]["CompositeTypes"]["ai_generation_job_with_quota"][]
         SetofOptions: {
           from: "*"
           to: "ai_generation_job_with_quota"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      create_knowledge_narrative: {
+        Args: {
+          target_entry_mode?: string
+          target_dates: string[]
+          target_idempotency_key: string
+          target_question: string
+          target_user_id: string
+        }
+        Returns: {
+          attempt_count: number
+          available_at: string
+          claim_token: string | null
+          copy_request_key: string | null
+          copy_source_id: string | null
+          created_at: string
+          dates: string[]
+          error_code: string | null
+          finished_at: string | null
+          id: string
+          idempotency_key: string
+          lease_expires_at: string | null
+          question: string
+          quota_date: string
+          result: Json | null
+          source_snapshot: Json
+          started_at: string | null
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "knowledge_narratives"
           isOneToOne: false
           isSetofReturn: true
         }
@@ -258,12 +446,26 @@ export type Database = {
         Args: { target_limit: number }
         Returns: number
       }
+      delete_knowledge_narrative: {
+        Args: { target_id: string; target_user_id: string }
+        Returns: boolean
+      }
       expire_ai_generation_data: {
         Args: { target_limit: number }
         Returns: {
           cleared_results: number
           deleted_jobs: number
         }[]
+      }
+      finish_knowledge_narrative: {
+        Args: {
+          target_claim_token: string
+          target_error_code: string
+          target_id: string
+          target_result: Json
+          target_retryable: boolean
+        }
+        Returns: boolean
       }
       get_check_in_stats: {
         Args: { target_today: string }
@@ -394,6 +596,44 @@ export type Database = {
           user_id: string
         }[]
       }
+      update_knowledge_narrative: {
+        Args: {
+          target_expected_updated_at?: string
+          target_id: string
+          target_result?: Json
+          target_title?: string
+          target_user_id: string
+        }
+        Returns: {
+          attempt_count: number
+          available_at: string
+          claim_token: string | null
+          copy_request_key: string | null
+          copy_source_id: string | null
+          created_at: string
+          dates: string[]
+          error_code: string | null
+          finished_at: string | null
+          id: string
+          idempotency_key: string
+          lease_expires_at: string | null
+          question: string
+          quota_date: string
+          result: Json | null
+          source_snapshot: Json
+          started_at: string | null
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "knowledge_narratives"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       update_profile: {
         Args: {
           target_avatar_key: number
@@ -455,6 +695,7 @@ export type Database = {
         result_expires_at: string | null
         metadata_expires_at: string | null
         updated_at: string | null
+        user_prompt: string | null
       }
       ai_generation_job_with_quota: {
         job:
