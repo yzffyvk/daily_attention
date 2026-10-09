@@ -1,12 +1,14 @@
 import { z } from "zod";
+import { SUMMARY_MAX_LENGTH } from "../../../../lib/domain/summary-limits.ts";
 
+export const AI_QUESTION_PROMPT_VERSION = "knowledge-questions-v1";
 export const AI_RELATION_PROMPT_VERSION = "knowledge-relations-v2";
 export const AI_SUMMARY_PROMPT_VERSION = "knowledge-skeleton-user-prompt-v1";
 export const AI_LEGACY_PROMPT_VERSION = "ai-summary-v1";
 
 export const aiGenerationResultSchema = z.object({
   attention: z.string().trim().min(1).max(120),
-  summary: z.string().trim().min(1).max(5000),
+  summary: z.string().trim().min(1).max(SUMMARY_MAX_LENGTH),
   inspiration: z.string().trim().max(2000),
   sourceTitle: z.string().trim().min(1).max(300),
   warnings: z.array(z.string().trim().min(1).max(500)).max(10),

@@ -10,6 +10,7 @@ import {
 } from "../_shared/ai/runner.ts";
 import { createSafeFetchClient } from "../_shared/ai/safe-fetch-client.ts";
 import { dedicatedAiTiming } from "../_shared/ai/timeouts.ts";
+import { sourceDownloadUrl } from "../_shared/ai/source-url.ts";
 
 declare const Deno: {
   env: { get(name: string): string | undefined };
@@ -247,7 +248,7 @@ async function hmacSha256Hex(secret: string, value: string) {
 
 export function createProductionDependencies(
   readEnvironment: ReadEnvironment = (name) => Deno.env.get(name),
-  options: { dedicatedWorker?: boolean } = {},
+  options: { dedicatedWorker?: boolean; scope?: { userId: string; createdAfter: string } | null } = {},
 ): AiWorkerDependencies {
   const environment = requiredEnvironment(readEnvironment, !options.dedicatedWorker);
   const client = createClient(environment.supabaseUrl, environment.secretKey, {
@@ -306,8 +307,8 @@ export function createProductionDependencies(
         : null;
     },
     async loadSource(sourceUrl) {
-      const fetched = await safeFetch(sourceUrl, AbortSignal.timeout(25_000));
-      return extractLearningSource({ html: fetched.body, finalUrl: fetched.finalUrl });
+      const fetched = await safeFetch(sourceDownloadUrl(sourceUrl), AbortSignal.timeout(25_000));
+      return extractLearningSource({ html: fetched.body, finalUrl: fetched.finalUrl, contentType: fetched.contentType });
     },
     async begin(jobId) {
       singleRow(
@@ -371,13 +372,21 @@ export function createProductionDependencies(
   return {
     triggerToken: environment.triggerToken,
     async readMessages() {
-      const data = await rpc(client, "read_ai_generation_queue", {
+      const data = await rpc(client, options.scope ? "read_owned_ai_generation_queue" : "read_ai_generation_queue", {
+        ...(options.scope ? { target_user_id: options.scope.userId, target_created_after: options.scope.createdAfter } : {}),
         target_visibility_timeout: options.dedicatedWorker
           ? dedicatedAiTiming.queueVisibilitySeconds
           : QUEUE_VISIBILITY_TIMEOUT_SECONDS,
         // Dedicated workers claim only as many deliveries as can start immediately.
         target_batch_limit: options.dedicatedWorker ? WORKER_CONCURRENCY : QUEUE_BATCH_LIMIT,
       });
+      if (options.scope) {
+        const scoped = z.array(queueRowSchema.extend({ user_id: z.uuid(), created_at: z.iso.datetime({ offset: true }) })).max(WORKER_CONCURRENCY).safeParse(data);
+        if (!scoped.success || scoped.data.some(row => row.user_id !== options.scope!.userId
+          || Date.parse(row.created_at) < Date.parse(options.scope!.createdAfter))) {
+          throw new Error("AI_WORKER_SCOPE_MISMATCH");
+        }
+      }
       const parsed = z.array(queueRowSchema).max(QUEUE_BATCH_LIMIT).safeParse(data);
       if (!parsed.success) throw new Error("AI_WORKER_RPC_MALFORMED");
       return parsed.data.map((row) => ({

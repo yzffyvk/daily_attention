@@ -1,6 +1,7 @@
 // Test-only entry, served by serve.mjs, never registered as an application route.
 // The browser runner intercepts all APIs. No credentials or real accounts are used.
 import { createRoot } from "react-dom/client";
+import { installTakeawayDemoApi } from "./daily-takeaway-demo";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { CheckInWorkspace } from "@/features/checkins/checkin-workspace";
 import { AuthCard } from "@/features/auth/auth-card";
@@ -15,6 +16,13 @@ import "@/app/light-theme.css";
 import { themeBootstrapScript } from "@/features/theme/theme-bootstrap";
 import { setColorTheme } from "@/features/theme/theme";
 import { ThemeToggle } from "@/features/theme/theme-toggle";
+import { KnowledgeStructureView } from "@/features/checkins/knowledge-structure-view";
+import { knowledgeStructureSchema } from "@/lib/domain/knowledge-structure";
+import { relationSummaryFixture } from "@/tests/helpers/knowledge-structure-fixture";
+import { KnowledgeSummaryView } from "@/features/checkins/knowledge-summary-view";
+import { serializeQuestionSummary } from "@/lib/domain/knowledge-questions";
+import { questionSummaryFixture } from "@/tests/helpers/knowledge-questions-fixture";
+import "@/app/knowledge-structure.css";
 import { installThemeDemoApi } from "./theme-demo-api";
 import { DemoToolbar, type DemoScenario } from "./demo-toolbar";
 
@@ -35,9 +43,18 @@ if (requestedTheme === "dark" || requestedTheme === "light") {
   } else document.documentElement.dataset.theme = requestedTheme;
 }
 const demo = isDemo ? installThemeDemoApi() : null;
+if (demo) installTakeawayDemoApi(demo.profile.id, previewParameters.get("takeaway"));
 const scenario: DemoScenario = previewParameters.get("scenario") === "mixed" ? "mixed" : previewParameters.get("scenario") === "map" ? "map" : "ai";
 const starCount = previewParameters.get("stars") === "14" ? 14 : 3;
 const mapPreviewResult = previewParameters.get("mode") === "records" ? sourceRecordsFixture() : knowledgeMapFixture();
+const readerPreview = knowledgeStructureSchema.parse(relationSummaryFixture().structure);
+if (previewParameters.get("stress") === "1") {
+  const original = readerPreview.nodes[0].name;
+  const longName = 'A'.repeat(60);
+  readerPreview.nodes[0].name = longName;
+  readerPreview.readingOrder = readerPreview.readingOrder.map(name => name === original ? longName : name);
+  readerPreview.relations = readerPreview.relations.map(edge => ({ ...edge, from: edge.from === original ? longName : edge.from, to: edge.to === original ? longName : edge.to }));
+}
 const mapPreviewSources = knowledgeMapSourcesFixture().map((source, index) => mapPreviewResult.mode === "source_records" ? {
   ...source, attention: ["手冲咖啡", "宋词阅读", "周末徒步"][index],
   summary: ["今天对比了两种研磨粗细，记录水温和萃取时间。", "读了苏轼的词，整理其中的意象与写作背景。", "沿山脊步道走了两小时，记录补水和休息的位置。"][index],
@@ -46,7 +63,11 @@ const mapPreviewSources = knowledgeMapSourcesFixture().map((source, index) => ma
 createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={client}>
     {demo ? <DemoToolbar demo={demo} scenario={scenario} /> : null}
-    {previewParameters.get("view") === "knowledge-map" ? (
+    {previewParameters.get("view") === "question-reader" ? (
+      <main style={{ maxWidth: 1380, padding: 16, margin: "0 auto" }}><KnowledgeSummaryView value={(window as Window & { __auraQuestionSummary?: string }).__auraQuestionSummary ?? serializeQuestionSummary(questionSummaryFixture())} title="问题结构阅读" /></main>
+    ) : previewParameters.get("view") === "structure-reader" ? (
+      <main style={{ maxWidth: 1380, padding: 16, margin: "0 auto" }}><KnowledgeStructureView structure={readerPreview} title="结构阅读边界验收" /></main>
+    ) : previewParameters.get("view") === "knowledge-map" ? (
       <main className="knowledge-workspace" style={{ maxWidth: 1200, margin: "0 auto", padding: "clamp(16px, 5vw, 64px) clamp(12px, 3vw, 32px)" }}>
         <ThemeToggle />
         <p className="knowledge-muted">知识串联 · 虚构学习材料示例</p>

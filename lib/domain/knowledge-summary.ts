@@ -1,4 +1,5 @@
 import { parseKnowledgeStructure, type KnowledgeStructure } from "./knowledge-structure.ts";
+import { parseQuestionSummary, type QuestionSummary } from "./knowledge-questions.ts";
 
 /** Conservative presentation only: original is always the unchanged stored document. */
 export interface KnowledgeNode {
@@ -9,6 +10,7 @@ export interface KnowledgeNode {
   details: string[];
 }
 export interface KnowledgeSummary {
+  questions: QuestionSummary | null;
   structure: KnowledgeStructure | null;
   thesis: string;
   roots: KnowledgeNode[];
@@ -50,7 +52,12 @@ function scanFence(line: string, current: Fence): { fence: Fence; protected: boo
 }
 
 export function parseKnowledgeSummary(text: string): KnowledgeSummary {
-  const result: KnowledgeSummary = { structure: parseKnowledgeStructure(text), thesis: "", roots: [], explanation: "", distinctions: "", prompts: [], unmapped: "", original: text };
+  const questions = parseQuestionSummary(text);
+  const result: KnowledgeSummary = { questions, structure: null, thesis: "", roots: [], explanation: "", distinctions: "", prompts: [], unmapped: "", original: text };
+  if (questions) return { ...result, thesis: questions.thesis, distinctions: questions.distinctions, prompts: questions.prompts };
+  // An edited/unknown question format must remain complete text, never a partial legacy graph.
+  if (/知识结构版本：/u.test(text)) return result;
+  result.structure = parseKnowledgeStructure(text);
   const bodies: Partial<Record<Section, string[]>> = {};
   const unknown: string[] = [];
   let section: Section | null = null;

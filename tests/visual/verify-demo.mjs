@@ -22,10 +22,17 @@ try {
   await page.getByRole("button", { name: /AI 提炼/ }).click();
   await page.locator("#source-url").fill("https://example.com/learning/user-interviews");
   await page.getByRole("button", { name: "生成知识小结", exact: true }).click();
-  await expect(page.getByRole("region", { name: "知识结构图" })).toBeVisible({ timeout: 18000 });
-  await page.getByRole("button", { name: "具体经历", exact: true }).click();
+  await expect(page.getByRole("region", { name: "本题局部结构图" })).toBeVisible({ timeout: 18000 });
+  await page.getByRole("button", { name: "展开阅读", exact: true }).click();
+  await page.getByRole("group", { name: "骨架节点" }).getByRole("button", { name: "具体经历", exact: true }).click();
+  await expect(page.getByRole("region", { name: "节点解释" })).toContainText("上一次");
+  await page.getByRole("button", { name: "阅读问题：怎样区分愿望与需求证据？", exact: true }).click();
+  await page.getByRole("group", { name: "骨架节点" }).getByRole("button", { name: "具体经历", exact: true }).click();
+  await page.getByRole("button", { name: "查看完整解释：怎样问出真实经历？", exact: true }).click();
+  await page.getByRole("button", { name: "返回来源问题：怎样区分愿望与需求证据？", exact: true }).click();
   await expect(page.getByRole("region", { name: "节点解释" })).toContainText("上一次");
   await page.screenshot({ path: `${output}/ai-result-1440.png`, fullPage: true });
+  await page.keyboard.press("Escape");
   await page.locator("#inspiration").fill("访谈时先问用户上一次怎么做，再问为什么。不能把用户想要的功能直接当成需求。");
   await page.getByRole("button", { name: "AI 润色", exact: true }).click();
   await expect(page.getByRole("region", { name: "AI 润色建议" })).toBeVisible();
@@ -33,7 +40,7 @@ try {
   await page.getByRole("button", { name: "保存修改", exact: true }).click();
   await expect(page.locator(".editor-state")).toContainText("已保存");
   await page.reload({ waitUntil: "networkidle" });
-  await expect(page.getByRole("region", { name: "知识结构图" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "本题局部结构图" })).toBeVisible();
   await page.getByRole("link", { name: "同主题串联", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await page.getByRole("button", { name: "串联知识", exact: true }).click();

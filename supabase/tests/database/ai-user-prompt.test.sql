@@ -12,7 +12,7 @@ select (created.job).* from public.create_ai_generation_job(
 ) created;
 
 select is((select user_prompt from prompt_job), '聚焦实现', 'job snapshots the normalized prompt');
-select is((select prompt_version::text from prompt_job), 'knowledge-relations-v2', 'new jobs snapshot the current prompt version');
+select is((select prompt_version::text from prompt_job), 'knowledge-questions-v1', 'new jobs snapshot the current prompt version');
 select is((select (created.job).id from public.create_ai_generation_job(
   '00000000-0000-4000-8000-000000000971', '2026-09-23',
   '10000000-0000-4000-8000-000000000971', 'https://example.com/prompt', 'example.com', '聚焦实现'

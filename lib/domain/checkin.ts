@@ -1,3 +1,4 @@
+import { SUMMARY_MAX_LENGTH } from "./summary-limits.ts";
 import { z } from "zod";
 import { aiGenerationContextSchema, aiUserPromptSchema } from "./ai-prompt.ts";
 
@@ -21,7 +22,7 @@ export const checkInInputSchema = z.object({
   sourceUrl: sourceUrlSchema,
   userPrompt: aiUserPromptSchema.optional(),
   aiGenerationContext: aiGenerationContextSchema.nullable().optional(),
-  summary: z.string().max(5000),
+  summary: z.string().max(SUMMARY_MAX_LENGTH),
   inspiration: z.string().max(2000),
   imagePath: z
     .string()

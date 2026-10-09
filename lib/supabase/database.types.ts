@@ -88,6 +88,99 @@ export type Database = {
         }
         Relationships: []
       }
+      daily_takeaway_lessons: {
+        Row: {
+          content: Json
+          id: string
+          published: boolean
+          reviewed_at: string | null
+          reviewed_by: string | null
+          sequence: number
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          content: Json
+          id: string
+          published?: boolean
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          sequence: number
+          updated_at?: string
+          version: number
+        }
+        Update: {
+          content?: Json
+          id?: string
+          published?: boolean
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          sequence?: number
+          updated_at?: string
+          version?: number
+        }
+        Relationships: []
+      }
+      daily_takeaway_progress: {
+        Row: {
+          acted_at: string
+          content_version: number
+          learning_date: string
+          lesson_id: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          acted_at?: string
+          content_version: number
+          learning_date: string
+          lesson_id: string
+          status: string
+          user_id: string
+        }
+        Update: {
+          acted_at?: string
+          content_version?: number
+          learning_date?: string
+          lesson_id?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          { foreignKeyName: "daily_takeaway_progress_lesson_id_fkey"; columns: ["lesson_id"]; isOneToOne: false; referencedRelation: "daily_takeaway_lessons"; referencedColumns: ["id"] },
+          { foreignKeyName: "daily_takeaway_progress_user_id_fkey"; columns: ["user_id"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] },
+        ]
+      }
+      daily_takeaway_quiz_results: {
+        Row: {
+          answer_index: number
+          answered_at: string
+          content_version: number
+          correct: boolean
+          lesson_id: string
+          user_id: string
+        }
+        Insert: {
+          answer_index: number
+          answered_at?: string
+          content_version: number
+          correct: boolean
+          lesson_id: string
+          user_id: string
+        }
+        Update: {
+          answer_index?: number
+          answered_at?: string
+          content_version?: number
+          correct?: boolean
+          lesson_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          { foreignKeyName: "daily_takeaway_quiz_results_lesson_id_fkey"; columns: ["lesson_id"]; isOneToOne: false; referencedRelation: "daily_takeaway_lessons"; referencedColumns: ["id"] },
+          { foreignKeyName: "daily_takeaway_quiz_results_user_id_fkey"; columns: ["user_id"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] },
+        ]
+      }
       knowledge_narratives: {
         Row: {
           attempt_count: number
@@ -195,6 +288,20 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      apply_daily_takeaway_action: {
+        Args: {
+          target_action: string
+          target_answer?: number
+          target_lesson_id: string
+          target_user_id: string
+          target_version: number
+        }
+        Returns: Json
+      }
+      get_daily_takeaway_state: {
+        Args: { target_user_id: string }
+        Returns: Json
+      }
       begin_ai_generation: {
         Args: { target_job_id: string }
         Returns: Database["public"]["CompositeTypes"]["ai_generation_job_record"][]

@@ -128,6 +128,7 @@ async function sha256Hex(value: string) {
 export async function extractLearningSource(input: {
   html: string;
   finalUrl: string;
+  contentType?: string;
 }): Promise<{
   title: string;
   text: string;
@@ -135,6 +136,14 @@ export async function extractLearningSource(input: {
   truncated: boolean;
 }> {
   try {
+    if (input.contentType?.split(";", 1)[0]?.trim().toLowerCase() === "text/plain") {
+      // Parsing Markdown as HTML loses headings and literal tags in code examples.
+      const completeText = input.html.normalize("NFC").replace(/\r\n?/gu, "\n").trim();
+      if (normalizedText(completeText).length < MIN_USEFUL_CHARACTERS) throw new Error("CONTENT_NOT_EXTRACTABLE");
+      const title = normalizedText(/^#\s+(.+)$/mu.exec(completeText)?.[1] ?? new URL(input.finalUrl).pathname.split("/").pop()).slice(0, 300) || "公开资料";
+      const text = completeText.slice(0, MAX_MODEL_CHARACTERS);
+      return { title, text, contentDigestHex: await sha256Hex(text), truncated: completeText.length > MAX_MODEL_CHARACTERS };
+    }
     const { document } = parseHTML(input.html);
     const title = documentTitle(document, input.finalUrl);
     removeNoise(document);

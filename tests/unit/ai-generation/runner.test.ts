@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { DeepSeekProviderError } from "@/supabase/functions/_shared/ai/deepseek";
 import { SafeFetchClientError } from "@/supabase/functions/_shared/ai/safe-fetch-client";
+import { parseQuestionSummary, serializeQuestionSummary } from '@/lib/domain/knowledge-questions';
+import { questionSummaryFixture } from '../../helpers/knowledge-questions-fixture';
 import {
   runAiJob,
   type AiJobRunnerPorts,
@@ -95,9 +97,23 @@ describe("AI job runner", () => {
     await expect(runAiJob(job.id, runnerPorts)).resolves.toBe("completed");
     expect(saved?.result.summary).toMatch(/^资料范围：/u);
     expect(saved?.result.summary).toContain("后续内容未纳入");
-    expect(saved!.result.summary.length).toBeLessThanOrEqual(5000);
+    expect(saved!.result.summary.length).toBeLessThanOrEqual(12000);
+    expect(saved!.result.summary).toContain('知'.repeat(5000));
     expect(saved?.result.warnings[0]).toContain("后续内容未纳入");
     expect(saved!.result.warnings.length).toBeLessThanOrEqual(10);
+  });
+
+  it('adds truncation warnings without breaking the editable question document', async () => {
+    const structured = questionSummaryFixture();
+    const runnerPorts = ports({
+      loadSource: async () => ({ ...source, truncated: true }),
+      generate: async () => ({ ...generated, result: { ...generated.result, summary: serializeQuestionSummary(structured) } }),
+    });
+    await runAiJob(job.id, runnerPorts);
+    const saved = vi.mocked(runnerPorts.complete).mock.calls[0][0];
+    const parsed = parseQuestionSummary(saved.result.summary);
+    expect(parsed?.structure).toEqual(structured.structure);
+    expect(parsed?.warnings[0]).toContain('后续内容未纳入');
   });
 
   it("retries a stopped gateway before consuming the model quota", async () => {

@@ -7,6 +7,9 @@ const projectRoot = fileURLToPath(new URL("../../", import.meta.url));
 const server = await createServer({
   configFile: false,
   root: fileURLToPath(new URL("./", import.meta.url)),
+  // The fixture shares the app's package.json; isolate its optimized dependencies
+  // so running the demo cannot replace the real app's React Server Components cache.
+  cacheDir: `${projectRoot}/node_modules/.vite-visual`,
   publicDir: `${projectRoot}/public`,
   envDir: false,
   plugins: [react(), {

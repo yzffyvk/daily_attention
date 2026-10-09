@@ -1,3 +1,4 @@
+import { SUMMARY_MAX_LENGTH } from "../../lib/domain/summary-limits.ts";
 import "server-only";
 
 import { z } from "zod";
@@ -29,7 +30,7 @@ const jobSchema = z.object({
   attempt_count: z.number().int().min(0).max(3),
   provider_call_count: z.number().int().nonnegative(),
   attention: z.string().max(120).nullable(),
-  summary: z.string().max(5000).nullable(),
+  summary: z.string().max(SUMMARY_MAX_LENGTH).nullable(),
   inspiration: z.string().max(2000).nullable(),
   warnings: z.array(z.string()).max(10),
   error_code: z.string().max(80).nullable(),

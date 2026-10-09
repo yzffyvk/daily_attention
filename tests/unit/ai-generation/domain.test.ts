@@ -78,7 +78,7 @@ describe("AI generation domain contracts", () => {
 
   it.each([
     ["attention", "a".repeat(121)],
-    ["summary", "s".repeat(5001)],
+    ["summary", "s".repeat(12001)],
     ["inspiration", "i".repeat(2001)],
     ["sourceTitle", "t".repeat(301)],
   ] as const)("enforces the %s output limit", (field, value) => {

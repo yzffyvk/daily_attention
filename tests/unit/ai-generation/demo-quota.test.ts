@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installThemeDemoApi } from "@/tests/visual/theme-demo-api";
+import { parseQuestionSummary } from "@/lib/domain/knowledge-questions";
 
 async function request(path: string, body?: unknown, method = "POST") {
   const response = await window.fetch(path, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
@@ -20,6 +21,18 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); sessionStorage.clear(); });
 
 describe("demo shared account quota", () => {
+  it("demonstrates the current question reader with valid cross-question references", async () => {
+    installThemeDemoApi();
+    const created = await request("/api/ai/generations", generation("2026-09-19"));
+    vi.setSystemTime(new Date("2026-09-19T04:00:10Z"));
+    const completed = await request(`/api/ai/generations/${created.data.jobId}`, undefined, "GET");
+    const document = parseQuestionSummary(completed.data.result.summary);
+    expect(document).not.toBeNull();
+    expect(document!.structure.questions.length).toBeGreaterThan(1);
+    expect(document!.structure.questions.flatMap(q => q.views).some(v => v.referenceNodeIds.length > 0)).toBe(true);
+    expect(completed.data.generationContext.promptVersion).toBe("knowledge-questions-v1");
+    expect(document!.warnings.join(" ")).toContain("演示");
+  });
   it("keeps requirements in the task snapshot and rejects idempotent replay with different requirements", async () => {
     installThemeDemoApi();
     const input = { ...generation("2026-09-19"), userPrompt: "  重点讲使用边界  " };

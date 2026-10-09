@@ -2,6 +2,7 @@
 
 import { ChevronDown, Layers3, Lightbulb } from "lucide-react";
 import { useMemo, useState, type CSSProperties } from "react";
+import { QuestionStructureView } from "./question-structure-view";
 import { KnowledgeStructureView } from "./knowledge-structure-view";
 import { parseKnowledgeSummary, type KnowledgeNode } from "@/lib/domain/knowledge-summary";
 
@@ -45,7 +46,7 @@ function KnowledgeBranch({ node, selectedId, onSelect }: {
   );
 }
 
-export function KnowledgeSummaryView({ value }: { value: string }) {
+export function KnowledgeSummaryView({ value, title }: { value: string; title?: string }) {
   const document = useMemo(() => parseKnowledgeSummary(value), [value]);
   const nodes = useMemo(() => flattenNodes(document.roots), [document.roots]);
   const [selection, setSelection] = useState<{ source: string; id: string } | null>(null);
@@ -65,9 +66,12 @@ export function KnowledgeSummaryView({ value }: { value: string }) {
   return (
     <div className="knowledge-summary-view">
       {document.thesis ? <p className="knowledge-thesis">{document.thesis}</p> : null}
-      {document.structure ? <>
+      {document.questions ? <>
+        {document.questions.warnings.map((warning, index) => <p key={index} className="knowledge-structure-notes">{warning}</p>)}
+        <QuestionStructureView structure={document.questions.structure} title={title} />
+      </> : document.structure ? <>
         {document.unmapped ? <div className="knowledge-structure-notes"><KnowledgeText value={document.unmapped} /></div> : null}
-        <KnowledgeStructureView structure={document.structure} />
+        <KnowledgeStructureView structure={document.structure} title={title} />
       </> : selected ? (
         <div className="knowledge-reader-grid">
           <section aria-label="知识结构图" className="knowledge-map">
@@ -90,19 +94,19 @@ export function KnowledgeSummaryView({ value }: { value: string }) {
           </section>
         </div>
       ) : (
-        <div className="knowledge-reading-fallback"><KnowledgeText value={value} /></div>
+        <div className="knowledge-reading-fallback">{/知识结构版本：/u.test(value) ? <p>结构格式已变更，以下保留完整小结内容。</p> : null}<KnowledgeText value={value} /></div>
       )}
-      {(document.structure || selected) && document.explanation ? (
+      {(document.questions || document.structure || selected) && document.explanation ? (
         <details className="knowledge-explanation">
           <summary><span>沿骨架展开</span><span>阅读全部解释与例子 <ChevronDown aria-hidden="true" size={16} /></span></summary>
           <KnowledgeText value={document.explanation} />
         </details>
       ) : null}
-      {(document.structure || selected) && document.distinctions ? <section className="knowledge-distinctions" aria-label="关键辨析">
+      {(document.questions || document.structure || selected) && document.distinctions ? <section className="knowledge-distinctions" aria-label="关键辨析">
         <h4><Lightbulb aria-hidden="true" size={18} />关键辨析</h4>
         <KnowledgeText value={document.distinctions} />
       </section> : null}
-      {(document.structure || selected) ? <details className="knowledge-complete">
+      {(document.questions || document.structure || selected) ? <details className="knowledge-complete">
         <summary>查看完整小结</summary>
         <div className="knowledge-original" data-testid="complete-summary">{document.original}</div>
       </details> : null}

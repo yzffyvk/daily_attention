@@ -1,3 +1,4 @@
+import { SUMMARY_MAX_LENGTH } from "./summary-limits.ts";
 import { z } from "zod";
 import { dateKeySchema } from "@/lib/domain/checkin";
 import { aiUserPromptSchema } from "@/lib/domain/ai-prompt";
@@ -66,7 +67,7 @@ export const createAiGenerationSchema = z.object({
 
 export const aiGenerationResultSchema = z.object({
   attention: z.string().trim().min(1).max(120),
-  summary: z.string().trim().min(1).max(5000),
+  summary: z.string().trim().min(1).max(SUMMARY_MAX_LENGTH),
   inspiration: z.string().trim().max(2000),
   sourceTitle: z.string().trim().min(1).max(300),
   warnings: z.array(z.string().trim().min(1).max(500)).max(10),

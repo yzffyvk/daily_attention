@@ -125,7 +125,7 @@ export function installThemeDemoApi() {
         if (sharedQuota().remaining === 0) return error(quotaLimitMessage, "DAILY_AI_LIMIT_REACHED", 429);
         job = { id: crypto.randomUUID(), started: Date.now(), failure: takeFailure(), cancelled: false, key: body.idempotencyKey, sourceUrl: parsed.data.sourceUrl, targetDate: parsed.data.targetDate, userPrompt: parsed.data.userPrompt }; state.aiJobs.push(job); save();
       }
-      const data: CreateAiGenerationData = { jobId: job.id, status: "queued", pollAfterMs: 1800, quota: sharedQuota(), generationContext: { userPrompt: job.userPrompt ?? "", promptVersion: "knowledge-skeleton-user-prompt-v1" } };
+      const data: CreateAiGenerationData = { jobId: job.id, status: "queued", pollAfterMs: 1800, quota: sharedQuota(), generationContext: { userPrompt: job.userPrompt ?? "", promptVersion: "knowledge-questions-v1" } };
       return ok(data, 202);
     }
     if (path.startsWith("/api/ai/generations/")) {
@@ -142,7 +142,7 @@ export function installThemeDemoApi() {
         : elapsed < 6500 ? { jobId: job.id, status: "generating", stage: "generating" }
         : job.failure ? { jobId: job.id, status: "failed", stage: "complete", error: { code: "MODEL_SERVICE_ERROR", message: "演示：AI 服务暂时不可用。再次点击生成即可体验重试成功。", retryable: true } }
         : { jobId: job.id, status: "succeeded", stage: "complete", result: demoAiResult };
-      return ok({ ...data, generationContext: { userPrompt: job.userPrompt ?? "", promptVersion: "knowledge-skeleton-user-prompt-v1" } });
+      return ok({ ...data, generationContext: { userPrompt: job.userPrompt ?? "", promptVersion: "knowledge-questions-v1" } });
     }
     if (path === "/api/ai/reflection-polish" && method === "POST") {
       await new Promise<void>((resolve, reject) => {

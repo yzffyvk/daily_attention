@@ -4,6 +4,15 @@ import { extractLearningSource } from "@/supabase/functions/_shared/ai/extract";
 const longParagraph = "注意力机制通过查询、键和值计算相关性，并把重要信息聚合为新的表示。".repeat(8);
 
 describe("learning source extraction", () => {
+  it("preserves Markdown headings, code and literal HTML in text/plain sources", async () => {
+    const body = `# 上下文工程\n\n## 动态维护\n\n${longParagraph}\n\n\u0060\u0060\u0060html\n<system>保留这段示例</system>\n\u0060\u0060\u0060`;
+    const extracted = await extractLearningSource({ html: body, finalUrl: "https://raw.githubusercontent.com/a/b/main/book.md", contentType: "text/plain" });
+    expect(extracted.title).toBe("上下文工程");
+    expect(extracted.text).toBe(body);
+    expect(extracted.contentDigestHex).toMatch(/^[0-9a-f]{64}$/);
+    expect(extracted.truncated).toBe(false);
+  });
+
   it("keeps the Agent formulas under their original headings and preserves repeated explanations", async () => {
     const extracted = await extractLearningSource({
       finalUrl: "https://example.com/agent",

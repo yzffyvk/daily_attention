@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SUMMARY_MAX_LENGTH } from './summary-limits.ts';
 
 export const knowledgeContentTypes = ['概念与边界', '组成与分类', '运行机制与流程', '原理与因果', '问题与解决方案', '对比与选型', '方法与决策规则', '观点与论证', '演化与历史', '案例与经验'] as const;
 export const knowledgeRelationKinds = ['包含', '分类', '作用', '依赖', '因果', '流程', '对照', '权衡', '支持', '例证', '演化', '条件', '反馈', '区别'] as const;
@@ -101,7 +102,7 @@ function tableRows(lines: string[], headers: string[]): string[][] | null {
   return rows;
 }
 export function parseKnowledgeStructure(text: string): KnowledgeStructure | null {
-  if (text.length > 5000) return null;
+  if (text.length > SUMMARY_MAX_LENGTH) return null;
   const skeleton = text.match(/^主要骨架：[ \t]*\r?\n([\s\S]*?)^沿骨架展开：[ \t]*\r?\n/mu)?.[1];
   if (!skeleton) return null;
   const lines = skeleton.split(/\r?\n/u);

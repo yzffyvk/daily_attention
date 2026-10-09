@@ -36,6 +36,7 @@ import {
 } from "./dates";
 import { DirtySwitchDialog, useDialogFocus } from "./dirty-switch-dialog";
 import { DailyEchoDialog } from "./daily-echo-dialog";
+import { DailyTakeawayEntry } from "@/features/daily-takeaways/daily-takeaway-entry";
 import type { ImageSelection } from "./image-note-uploader";
 import { checkInKeys, setMonthRecord, useCheckIn, useMonthCheckIns, useSaveCheckIn } from "./queries";
 import type { CheckInRecord } from "./types";
@@ -939,6 +940,9 @@ export function CheckInWorkspace({
           setKnowledgeOpen(false);
           requestAnimationFrame(() => document.getElementById("knowledge-entry")?.focus());
         }} /> : null}
+        <div hidden={knowledgeOpen}>
+          <DailyTakeawayEntry userId={userId ?? initialProfile?.id ?? "current-user"} />
+        </div>
         <div className="workspace-view-toolbar" hidden={knowledgeOpen}>
           <span><CalendarDays aria-hidden="true" size={16} />{formatDate(selectedDate)}</span>
           <div className="workspace-toolbar-actions">

@@ -49,7 +49,7 @@ describe("AI generation API", () => {
     const input = { ...generation(81), userPrompt: "  聚焦实现细节  " };
     const first = await owner.session.post("/api/ai/generations", input);
     expect(first.status).toBe(202);
-    const generationContext = { userPrompt: "聚焦实现细节", promptVersion: "knowledge-skeleton-user-prompt-v1" };
+    const generationContext = { userPrompt: "聚焦实现细节", promptVersion: "knowledge-questions-v1" };
     expect(first.body.data.generationContext).toEqual(generationContext);
     const repeated = await owner.session.post("/api/ai/generations", { ...input, userPrompt: "聚焦实现细节" });
     expect(repeated.status).toBe(202);

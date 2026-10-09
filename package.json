@@ -8,8 +8,10 @@
   "scripts": {
     "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
     "demo": "node tests/visual/serve.mjs",
+    "demo:seed": "node scripts/seed-local-demo.mjs",
     "dev:gateway": "npm --prefix services/safe-fetch-gateway run build && HOST=127.0.0.1 node --env-file=.dev.vars services/safe-fetch-gateway/dist/index.js",
     "dev:ai-worker": "NODE_ENV=development node --experimental-strip-types --env-file=.dev.vars services/ai-worker/index.ts",
+    "dev:ai-worker:acceptance": "NODE_ENV=development node --experimental-strip-types --env-file=.dev.vars.acceptance services/ai-worker/local.ts",
     "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "test": "npm run test:unit && npm run supabase:test && npm run test:integration && npm run test:rendered && npm run build",

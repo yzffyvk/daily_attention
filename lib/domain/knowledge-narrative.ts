@@ -1,3 +1,4 @@
+import { SUMMARY_MAX_LENGTH } from "./summary-limits.ts";
 import { z } from "zod";
 import { checkInEntryModeSchema, dateKeySchema, type CheckInEntryMode } from "./checkin.ts";
 import { knowledgeMapResultSchema, validateKnowledgeMapResult } from "./knowledge-map.ts";
@@ -16,7 +17,7 @@ export const createNarrativeSchema = z.object({
 export const renameNarrativeSchema = z.object({ title: z.string().trim().min(1, "请填写脉络名称").max(120, "名称不能超过 120 字") }).strict();
 export const narrativeSourceSchema = z.object({
   id: z.uuid().optional(), entryMode: checkInEntryModeSchema.optional(),
-  date: dateKeySchema, attention: z.string().min(1).max(120), summary: z.string().max(5000),
+  date: dateKeySchema, attention: z.string().min(1).max(120), summary: z.string().max(SUMMARY_MAX_LENGTH),
   inspiration: z.string().max(2000), version: z.number().int().positive(),
   sourceUrl: z.string().max(2048), hasImage: z.boolean(),
 }).strict();

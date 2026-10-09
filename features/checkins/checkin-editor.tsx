@@ -1,5 +1,6 @@
 "use client";
 
+import { SUMMARY_MAX_LENGTH } from "@/lib/domain/summary-limits";
 import {
   ArrowRight,
   Check,
@@ -275,12 +276,12 @@ export function CheckInEditor({
                 <SummaryEditor
                   disabled={isDisabled}
                   id="summary"
-                  maxLength={5000}
+                  maxLength={SUMMARY_MAX_LENGTH}
                   onChange={(summary) => onDraftChange({ summary })}
                   placeholder="今天真正理解了什么？试着用自己的话讲一遍。"
                   value={draft.summary}
                 />
-                <span className="character-count">{draft.summary.length}/5000</span>
+                <span className="character-count">{draft.summary.length}/{SUMMARY_MAX_LENGTH}</span>
               </div>
             </div>
 
@@ -449,14 +450,14 @@ export function CheckInEditor({
                   <SummaryEditor
                     disabled={isDisabled}
                     id="summary"
-                    maxLength={5000}
+                    maxLength={SUMMARY_MAX_LENGTH}
                     onChange={(summary) => onDraftChange({ summary })}
                     placeholder="AI 将先梳理资料的主要骨架，再沿着它解释知识点之间的关系。"
                     value={draft.summary}
                   />
-                  <span className="character-count">{draft.summary.length}/5000</span>
+                  <span className="character-count">{draft.summary.length}/{SUMMARY_MAX_LENGTH}</span>
                 </div>
-                ) : <KnowledgeSummaryView key={date} value={draft.summary} />}
+                ) : <KnowledgeSummaryView key={date} value={draft.summary} title={draft.attention} />}
               </div>
             </section>
 

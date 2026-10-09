@@ -20,13 +20,13 @@ try {
   await generate.click();
   await page.getByRole("button", { name: "取消任务", exact: true }).click();
   await expect(generate).toBeEnabled();
-  await expect(page.getByRole("region", { name: "知识结构图" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "本题局部结构图" })).toHaveCount(0);
   await page.getByRole("button", { name: "体验一次生成失败", exact: true }).click();
   await generate.click();
   await expect(page.getByRole("alert")).toContainText("再次点击生成", { timeout: 18000 });
   await page.screenshot({ path: `${output}/ai-failure-390.png`, fullPage: true });
   await generate.click();
-  await expect(page.getByRole("region", { name: "知识结构图" })).toBeVisible({ timeout: 18000 });
+  await expect(page.getByRole("region", { name: "本题局部结构图" })).toBeVisible({ timeout: 18000 });
   await page.getByRole("button", { name: "切换为深色", exact: true }).click();
   await page.screenshot({ path: `${output}/ai-result-dark-390.png`, fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

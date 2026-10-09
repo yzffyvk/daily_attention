@@ -1,3 +1,5 @@
+import { serializeQuestionSummary } from "@/lib/domain/knowledge-questions";
+import { demoQuestionSummary } from "./demo-question-result";
 import type { AiGenerationResult } from "@/lib/domain/ai-generation";
 import type { ConceptMapResult } from "@/lib/domain/knowledge-map";
 import type { NarrativeResult, NarrativeSource } from "@/lib/domain/knowledge-narrative";
@@ -7,50 +9,9 @@ import { serializeLearningReflections } from "@/lib/domain/learning-reflections"
 export const demoSourceUrl = "https://example.com/learning/user-interviews";
 export const demoAiResult: AiGenerationResult = {
   attention: "用户访谈：从具体经历中发现真实需求",
-  sourceTitle: "示例文章 · 怎样进行一次有效的用户访谈",
-  inspiration: "", warnings: [],
-  summary: `## 一句话主旨
-用户访谈的价值，是从真实发生过的行为中理解问题，而不是收集用户对未来功能的赞同。
-
-## 主要骨架
-- 用户访谈：用具体经历理解需求
-  - 还原情境：把问题放回实际生活
-    - 具体经历：追问上一次发生了什么
-    - 当前做法：了解用户现在怎样解决
-  - 识别问题：把愿望和证据分开
-    - 行为证据：关注行动、频率和代价
-    - 潜在需求：理解用户想达成的结果
-  - 形成判断：带着不确定性继续验证
-    - 交叉验证：寻找不同用户的共同模式
-    - 下一步假设：把发现写成可检验的问题
-
-## 沿骨架展开
-### 还原情境
-先请对方讲述一件具体发生过的事。时间、地点、参与者和限制条件，决定同一句“我想要”背后是不是同一个问题。
-### 具体经历
-把“你会使用学习打卡功能吗？”换成“上一次你想回顾学过的内容，具体是怎么找的？”。真实经历更容易暴露中断、绕路和遗忘。
-### 当前做法
-记录用户使用的工具、操作步骤和临时补救办法。例如：为了找到一条知识点，先翻收藏夹，再搜索聊天记录，最后重新看视频。
-### 识别问题
-“想要搜索框”是方案偏好，“无法快速找回学过的内容”才是需要进一步理解的问题。不要跳过情境直接设计功能。
-### 行为证据
-询问问题多久发生一次、用户花了多少时间、是否试过别的办法。主动付出的成本，比一句“这个功能不错”更能说明问题的重要性。
-### 潜在需求
-从做法中提炼目标：用户可能并不是想保存更多文章，而是希望需要表达时，能重新组织自己已经学到的知识。
-### 形成判断
-一场访谈只能提供线索。把相似经历放在一起比较，保留反例，再决定下一步要验证什么。
-### 交叉验证
-比较至少几种不同情境中的记录。重复出现的困难可能是共同问题；只出现一次的诉求需要更多证据，不能直接代表所有用户。
-### 下一步假设
-示例：如果把同主题笔记组织为概念图谱，用户能否更清晰地解释概念间的关系？接下来可以用原型任务观察，而不是仅询问喜好。
-
-## 关键辨析
-用户说“想要某个功能”，不等于这个功能已经被验证。访谈帮助发现问题，原型测试帮助检验方案；两者回答的问题不同。
-
-## 试着讲一遍
-1. 为什么“上一次你怎么做”比“你愿不愿意用”更有信息量？
-2. 用一个学习产品的例子，区分用户目标、当前做法和功能诉求。
-3. 访谈发现的问题，应该怎样进入下一轮验证？`,
+  sourceTitle: demoQuestionSummary.sourceTitle,
+  inspiration: "", warnings: demoQuestionSummary.warnings,
+  summary: serializeQuestionSummary(demoQuestionSummary),
 };
 
 export function shiftDemoDate(today: string, days: number) {

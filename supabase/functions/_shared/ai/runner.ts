@@ -1,3 +1,5 @@
+import { parseQuestionSummary, serializeQuestionSummary } from "../../../../lib/domain/knowledge-questions.ts";
+import { SUMMARY_MAX_LENGTH, SOURCE_TRUNCATION_NOTICE } from "../../../../lib/domain/summary-limits.ts";
 import type {
   AiGenerationResult,
   AiSummaryProviderResult,
@@ -151,9 +153,14 @@ export async function runAiJob(
     });
     const result = { ...generated.result };
     if (source.truncated) {
-      const notice = "资料范围：原文较长，本次仅依据开头至截取位置的内容梳理，后续内容未纳入。";
-      result.summary = `${notice}\n\n${result.summary.slice(0, 5000 - notice.length - 2).trimEnd()}`;
+      const notice = SOURCE_TRUNCATION_NOTICE;
       result.warnings = [...new Set([notice, ...result.warnings])].slice(0, 10);
+      const questions = parseQuestionSummary(result.summary);
+      if (questions) {
+        questions.warnings = result.warnings;
+        result.summary = serializeQuestionSummary(questions);
+      } else result.summary = `${notice}\n\n${result.summary}`;
+      if (result.summary.length > SUMMARY_MAX_LENGTH) throw new DeepSeekProviderError("MODEL_OUTPUT_INVALID", true, { usage: generated.usage, providerCallCount: generated.providerCallCount });
     }
     await ports.complete({
       jobId,

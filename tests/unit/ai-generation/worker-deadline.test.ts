@@ -5,7 +5,8 @@ import { createProductionDependencies } from "@/supabase/functions/ai-generation
 describe("real model request deadlines", () => {
   it.each([
     { dedicatedWorker: true, modelDelay: 200_000, expected: "completed" },
-    { dedicatedWorker: true, modelDelay: 350_000, expected: "retryable" },
+    { dedicatedWorker: true, modelDelay: 350_000, expected: "completed" },
+    { dedicatedWorker: true, modelDelay: 550_000, expected: "retryable" },
     { dedicatedWorker: false, modelDelay: 200_000, expected: "retryable" },
   ])("handles a $modelDelay ms model response with dedicated=$dedicatedWorker", async ({ dedicatedWorker, modelDelay, expected }) => {
     vi.useFakeTimers();
