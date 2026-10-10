@@ -192,7 +192,7 @@ function field<T extends HTMLInputElement | HTMLTextAreaElement>(id: string) {
 }
 
 async function waitForEditorReady() {
-  await waitFor(() => expect(screen.getByLabelText("我的注意力")).toBeEnabled());
+  await waitFor(() => expect(screen.getByLabelText("今日知识主题")).toBeEnabled());
 }
 
 async function flushFakeTimerWork() {
@@ -232,7 +232,85 @@ afterEach(async () => {
 });
 
 describe("CheckInWorkspace", () => {
-  it("places completed AI output into an editable local draft without saving it", async () => {
+  it("can toggle the calendar when browser preference storage is unavailable", async () => {
+    vi.stubGlobal("localStorage", {
+      getItem() { throw new Error("Storage unavailable"); },
+      setItem() { throw new Error("Storage unavailable"); },
+    });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.includes("/api/checkins?month=")) return Promise.resolve(response({ ok: true, data: [], requestId: "list" }));
+      if (path.startsWith("/api/checkins/stats")) return Promise.resolve(response({ ok: true, data: { totalCount: 0, currentStreak: 0, hasTodayRecord: false }, requestId: "stats" }));
+      if (path === "/api/me") return Promise.resolve(response({ ok: true, data: { profile: null }, requestId: "profile" }));
+      return Promise.resolve(missingCheckIn());
+    }));
+    renderWorkspace(getTodayKey());
+    await waitForEditorReady();
+    await userEvent.click(screen.getByRole("button", { name: "收起日历" }));
+    expect(document.getElementById("learning-calendar")).not.toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "展开日历" }));
+    expect(document.getElementById("learning-calendar")).toBeVisible();
+  });
+
+  it("collapses the calendar without remounting or losing unsaved writing, and remembers the choice", async () => {
+    const date = getTodayKey();
+    localStorage.removeItem("aura-calendar-collapsed");
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.includes("/api/checkins?month=")) return Promise.resolve(response({ ok: true, data: [], requestId: "list" }));
+      if (path.startsWith("/api/checkins/stats")) return Promise.resolve(response({ ok: true, data: { totalCount: 0, currentStreak: 0, hasTodayRecord: false }, requestId: "stats" }));
+      if (path === "/api/me") return Promise.resolve(response({ ok: true, data: { profile: null }, requestId: "profile" }));
+      return Promise.resolve(missingCheckIn());
+    }));
+    const view = renderWorkspace(date);
+    await waitForEditorReady();
+    const user = userEvent.setup();
+    const editor = screen.getByLabelText("今日知识主题");
+    await user.type(editor, "未保存的知识主题");
+    await user.type(field("inspiration"), "先保留我的解释");
+    await user.click(screen.getByRole("button", { name: "收起日历" }));
+    expect(screen.getByRole("button", { name: "展开日历" })).toHaveAttribute("aria-expanded", "false");
+    expect(document.getElementById("learning-calendar")).not.toBeVisible();
+    expect(screen.getByLabelText("今日知识主题")).toBe(editor);
+    expect(editor).toHaveValue("未保存的知识主题");
+    expect(field("inspiration")).toHaveValue("先保留我的解释");
+    expect(localStorage.getItem("aura-calendar-collapsed")).toBe("true");
+    view.unmount();
+    renderWorkspace(date);
+    await waitFor(() => expect(screen.getByRole("button", { name: "展开日历" })).toBeVisible());
+    await user.click(screen.getByRole("button", { name: "展开日历" }));
+    expect(document.getElementById("learning-calendar")).toBeVisible();
+    expect(localStorage.getItem("aura-calendar-collapsed")).toBe("false");
+    localStorage.removeItem("aura-calendar-collapsed");
+  });
+
+  it("keeps the same mounted editor and image draft when knowledge view opens and closes", async () => {
+    const date = getTodayKey();
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.includes("/api/checkins?month=") || path === "/api/knowledge-narratives") return Promise.resolve(response({ ok: true, data: [], requestId: "list" }));
+      if (path.startsWith("/api/checkins/stats")) return Promise.resolve(response({ ok: true, data: { totalCount: 0, currentStreak: 0, hasTodayRecord: false }, requestId: "stats" }));
+      if (path === "/api/me") return Promise.resolve(response({ ok: true, data: { profile: null }, requestId: "profile" }));
+      return Promise.resolve(missingCheckIn());
+    }));
+    renderWorkspace(date);
+    const user = userEvent.setup();
+    await waitForEditorReady();
+    const editor = screen.getByLabelText("今日知识主题");
+    await user.type(editor, "还没保存的理解");
+    await user.click(screen.getByRole("button", { name: "替换测试图片" }));
+    await user.click(screen.getByRole("button", { name: "串联知识" }));
+    expect(editor).toBeInTheDocument();
+    expect(editor).not.toBeVisible();
+    expect(screen.getByRole("heading", { name: "知识脉络" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "返回学习记录" }));
+    expect(screen.getByLabelText("今日知识主题")).toBe(editor);
+    expect(editor).toHaveValue("还没保存的理解");
+    expect(screen.getByLabelText("图片草稿状态")).toHaveTextContent("replacement.png:false");
+    expect(deleteCheckInImage).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "我觉得两个公式之间的展开关系很有趣"])("preserves personal reflection %j when AI output fills the draft", async (reflection) => {
     const date = getTodayKey();
     const jobId = "10000000-0000-4000-8000-000000000001";
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -278,6 +356,7 @@ describe("CheckInWorkspace", () => {
         }));
       }
       if (path.includes(`/api/checkins/${date}`)) return Promise.resolve(missingCheckIn());
+      if (path === "/api/me") return Promise.resolve(response({ ok: true, data: { profile: null }, requestId: "profile" }));
       return Promise.resolve(response({ ok: true, data: {}, requestId: "other" }));
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -289,16 +368,69 @@ describe("CheckInWorkspace", () => {
     await waitForEditorReady();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /AI 提炼/ }));
+    await waitForEditorReady();
     await user.type(
       screen.getByLabelText(/学习资料来源/),
       "https://example.com/article",
     );
+    if (reflection) await user.type(field<HTMLTextAreaElement>("inspiration"), reflection);
     await user.click(screen.getByRole("button", { name: "生成知识小结" }));
 
-    await waitFor(() => expect(screen.getByLabelText("我的注意力")).toHaveValue("AI 标题"));
-    expect(screen.getByLabelText(/学习知识点小结/)).toHaveValue("AI 结构化小结");
+    await waitFor(() => expect(screen.getByRole("heading", { name: "AI 标题" })).toBeVisible());
+    expect(screen.getByText("AI 结构化小结")).toBeVisible();
+    expect(field<HTMLTextAreaElement>("inspiration")).toHaveValue(reflection);
     expect(screen.getByText("AI 小结已生成，请审阅后手动保存")).toBeVisible();
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0);
+  });
+
+  it.each([false, true])("preserves saved reflections after saving and switching, with expired cache: %s", async (expireCache) => {
+    const date = getTodayKey();
+    const otherDate = `${date.slice(0, 8)}${date.endsWith("10") ? "11" : "10"}`;
+    const jobId = "10000000-0000-4000-8000-000000000001";
+    const completed = deferred<Response>();
+    let cloud: CheckInRecord | null = null;
+    let polling = false;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/ai/generations" && init?.method === "POST") return Promise.resolve(response({ ok: true, data: {
+        jobId, status: "queued", pollAfterMs: 1,
+        quota: { used: 1, reserved: 1, consumed: 0, limit: 5, remaining: 4 },
+      }, requestId: "create" }, 202));
+      if (path === `/api/ai/generations/${jobId}`) { polling = true; return completed.promise; }
+      if (path.startsWith(`/api/checkins/${date}`)) {
+        if (init?.method === "PUT") cloud = { ...record(date, "Agent 的组成"), ...JSON.parse(init.body as string), version: 1 };
+        return Promise.resolve(cloud ? response({ ok: true, data: cloud, requestId: "record" }) : missingCheckIn());
+      }
+      if (path.startsWith(`/api/checkins/${otherDate}`)) return Promise.resolve(missingCheckIn());
+      if (path.includes("/api/checkins?month=") || path === "/api/knowledge-narratives") return Promise.resolve(response({ ok: true, data: [], requestId: "list" }));
+      if (path.startsWith("/api/checkins/stats")) return Promise.resolve(response({ ok: true, data: { totalCount: cloud ? 1 : 0, currentStreak: 0, hasTodayRecord: !!cloud }, requestId: "stats" }));
+      if (path === "/api/me") return Promise.resolve(response({ ok: true, data: { profile: null }, requestId: "profile" }));
+      return Promise.resolve(missingCheckIn());
+    }));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><CheckInWorkspace initialDate={date} initialToday={date} userId="ai-user" /></QueryClientProvider>);
+    await waitForEditorReady();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /AI 提炼/ }));
+    await waitForEditorReady();
+    await user.type(screen.getByLabelText("今日知识主题"), "Agent 的组成");
+    await user.type(field("inspiration"), "已经保存的个人理解");
+    await user.type(field("source-url"), "https://example.com/agent");
+    await user.click(screen.getByRole("button", { name: "生成知识小结" }));
+    await waitFor(() => expect(polling).toBe(true));
+    await user.click(screen.getByRole("button", { name: `${formatCalendarDate(otherDate)}，暂无记录` }));
+    await user.click(screen.getByRole("button", { name: "保存并切换" }));
+    await waitFor(() => expect(screen.getByText(formatDate(otherDate), { selector: ".editor-date" })).toBeVisible());
+    await waitFor(() => expect(screen.getByLabelText("今日知识主题")).toHaveValue(""));
+    await waitFor(() => expect(screen.getByLabelText("今日知识主题")).toBeEnabled());
+    expect(await loadDraft("ai-user", date, "ai")).toBeUndefined();
+    if (expireCache) queryClient.removeQueries({ queryKey: checkInKeys.date(date, "ai"), exact: true });
+    completed.resolve(response({ ok: true, data: { jobId, status: "succeeded", stage: "complete", result: {
+      attention: "AI 标题", summary: "AI 骨架小结", inspiration: "旧版 AI 感想", sourceTitle: "Agent 入门", warnings: [],
+    } }, requestId: "complete" }));
+    await waitFor(async () => expect(await loadDraft("ai-user", date, "ai")).toMatchObject({
+      summary: "AI 骨架小结", inspiration: "已经保存的个人理解", baseVersion: 1,
+    }));
   });
 
   it("restores a newer local draft using the authenticated id even when the profile is unavailable", async () => {
@@ -361,8 +493,8 @@ describe("CheckInWorkspace", () => {
     );
 
     await waitFor(() => expect(screen.getByText("离线，内容已保存在此浏览器")).toBeVisible());
-    await waitFor(() => expect(screen.getByLabelText("我的注意力")).toBeEnabled());
-    const attention = screen.getByLabelText("我的注意力");
+    await waitFor(() => expect(screen.getByLabelText("今日知识主题")).toBeEnabled());
+    const attention = screen.getByLabelText("今日知识主题");
     await userEvent.setup().type(attention, "离线内容");
     expect(screen.getByRole("button", { name: /完成打卡/ })).toBeDisabled();
     expect(screen.getByLabelText("添加图片笔记")).toBeEnabled();
@@ -408,7 +540,7 @@ describe("CheckInWorkspace", () => {
     );
 
     await waitForEditorReady();
-    await userEvent.setup().type(screen.getByLabelText("我的注意力"), "离线图片");
+    await userEvent.setup().type(screen.getByLabelText("今日知识主题"), "离线图片");
     await userEvent.setup().click(screen.getByRole("button", { name: "开始测试图片整理" }));
     await waitFor(() => expect(screen.getByText("正在整理图片")).toBeVisible());
 
@@ -557,7 +689,7 @@ describe("CheckInWorkspace", () => {
 
     renderWorkspace(date);
 
-    const attention = screen.getByLabelText("我的注意力");
+    const attention = screen.getByLabelText("今日知识主题");
     expect(attention).toBeDisabled();
     expect(field<HTMLInputElement>("source-url")).toBeDisabled();
     expect(field<HTMLTextAreaElement>("summary")).toBeDisabled();
@@ -605,7 +737,7 @@ describe("CheckInWorkspace", () => {
     );
 
     await waitForEditorReady();
-    await userEvent.type(screen.getByLabelText("我的注意力"), "今天学习了 RAG");
+    await userEvent.type(screen.getByLabelText("今日知识主题"), "今天学习了 RAG");
     await userEvent.click(screen.getByRole("button", { name: /7月24日/ }));
 
     expect(screen.getByRole("dialog", { name: "尚未保存" })).toBeVisible();
@@ -630,7 +762,7 @@ describe("CheckInWorkspace", () => {
 
     const { container } = renderWorkspace("2026-07-23");
     const user = userEvent.setup();
-    const attention = screen.getByLabelText("我的注意力");
+    const attention = screen.getByLabelText("今日知识主题");
     const sourceUrl = field<HTMLInputElement>("source-url");
     const summary = field<HTMLTextAreaElement>("summary");
     const inspiration = field<HTMLTextAreaElement>("inspiration");
@@ -688,7 +820,7 @@ describe("CheckInWorkspace", () => {
 
     renderWorkspaceWithCachedRecord(date, cached);
     const user = userEvent.setup();
-    const attention = screen.getByLabelText("我的注意力");
+    const attention = screen.getByLabelText("今日知识主题");
     await waitFor(() => expect(attention).toHaveValue("缓存初版"));
     expect(attention).toBeDisabled();
     expect(screen.getByRole("button", { name: "保存修改" })).toBeDisabled();
@@ -742,7 +874,7 @@ describe("CheckInWorkspace", () => {
 
     const { queryClient } = renderWorkspaceWithCachedRecord(date, cached);
     const user = userEvent.setup();
-    const attention = screen.getByLabelText("我的注意力");
+    const attention = screen.getByLabelText("今日知识主题");
     await waitFor(() => expect(attention).toBeEnabled());
     await user.type(attention, "，本地补充");
 
@@ -792,7 +924,7 @@ describe("CheckInWorkspace", () => {
 
     renderWorkspace(date);
     const user = userEvent.setup();
-    const attention = screen.getByLabelText("我的注意力");
+    const attention = screen.getByLabelText("今日知识主题");
     await waitForEditorReady();
     await user.type(attention, "正在整理的内容");
     await user.click(screen.getByRole("button", { name: "开始测试图片整理" }));
@@ -866,21 +998,21 @@ describe("CheckInWorkspace", () => {
 
     renderWorkspace(date);
     const user = userEvent.setup();
-    const attention = screen.getByLabelText("我的注意力");
+    const attention = screen.getByLabelText("今日知识主题");
     await waitFor(() => expect(attention).toHaveValue("缓存中的初版"));
     await user.type(attention, "，本地修改");
     await user.click(screen.getByRole("button", { name: "保存修改" }));
 
     await waitFor(() => expect(screen.getByText("请稍后再试")).toBeVisible());
     expect(screen.queryByRole("dialog", { name: "云端记录已更新" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("我的注意力")).toHaveValue("缓存中的初版，本地修改");
+    expect(screen.getByLabelText("今日知识主题")).toHaveValue("缓存中的初版，本地修改");
     expect(screen.getByRole("button", { name: new RegExp(`${formatCalendarDate(date)}，已保存：缓存中的初版`) })).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "保存修改" }));
 
     await waitFor(() => expect(screen.getByText("服务返回内容不正确，请稍后再试")).toBeVisible());
     expect(screen.queryByRole("dialog", { name: "云端记录已更新" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("我的注意力")).toHaveValue("缓存中的初版，本地修改");
+    expect(screen.getByLabelText("今日知识主题")).toHaveValue("缓存中的初版，本地修改");
     expect(screen.getByRole("button", { name: new RegExp(`${formatCalendarDate(date)}，已保存：缓存中的初版`) })).toBeVisible();
   });
 
@@ -923,14 +1055,14 @@ describe("CheckInWorkspace", () => {
 
     renderWorkspace(date);
     const user = userEvent.setup();
-    await waitFor(() => expect(screen.getByLabelText("我的注意力")).toHaveValue("原本的云端记录"));
-    await user.clear(screen.getByLabelText("我的注意力"));
-    await user.type(screen.getByLabelText("我的注意力"), "保留本地后重新创建");
+    await waitFor(() => expect(screen.getByLabelText("今日知识主题")).toHaveValue("原本的云端记录"));
+    await user.clear(screen.getByLabelText("今日知识主题"));
+    await user.type(screen.getByLabelText("今日知识主题"), "保留本地后重新创建");
     await user.click(screen.getByRole("button", { name: "保存修改" }));
     await user.click(await screen.findByRole("button", { name: "保留本地内容" }));
     await user.click(screen.getByRole("button", { name: "保存修改" }));
 
-    expect(await screen.findByText("这一天的 attention 已收下")).toBeVisible();
+    expect(await screen.findByText("这一天的学习收获已收下")).toBeVisible();
     expect(screen.queryByText("修改已保存到云端")).not.toBeInTheDocument();
   });
 
@@ -971,13 +1103,13 @@ describe("CheckInWorkspace", () => {
     renderWorkspace(date);
     const user = userEvent.setup();
     await waitForEditorReady();
-    await user.type(screen.getByLabelText("我的注意力"), "保留本地后覆盖云端");
+    await user.type(screen.getByLabelText("今日知识主题"), "保留本地后覆盖云端");
     await user.click(screen.getByRole("button", { name: /完成打卡/ }));
     await user.click(await screen.findByRole("button", { name: "保留本地内容" }));
     await user.click(screen.getByRole("button", { name: /完成打卡/ }));
 
     expect(await screen.findByText("修改已保存到云端")).toBeVisible();
-    expect(screen.queryByText("这一天的 attention 已收下")).not.toBeInTheDocument();
+    expect(screen.queryByText("这一天的学习收获已收下")).not.toBeInTheDocument();
   });
 
   it("locks every workspace decision while reset waits for candidate image cleanup", async () => {
@@ -1013,14 +1145,14 @@ describe("CheckInWorkspace", () => {
 
     const { container } = renderWorkspace(date);
     const user = userEvent.setup();
-    await waitFor(() => expect(screen.getByLabelText("我的注意力")).toHaveValue("云端初版"));
+    await waitFor(() => expect(screen.getByLabelText("今日知识主题")).toHaveValue("云端初版"));
     await user.click(screen.getByRole("button", { name: "替换测试图片" }));
     await user.click(screen.getByRole("button", { name: "保存修改" }));
     await user.click(await screen.findByRole("button", { name: "保留本地内容" }));
     await user.click(screen.getByRole("button", { name: "还原未保存的修改" }));
 
     await waitFor(() => expect(deleteCheckInImage).toHaveBeenCalledWith("checkin-images/user/pending.png"));
-    expect(screen.getByLabelText("我的注意力")).toBeDisabled();
+    expect(screen.getByLabelText("今日知识主题")).toBeDisabled();
     expect(screen.getByLabelText("添加图片笔记")).toBeDisabled();
     expect(screen.getByRole("button", { name: "保存修改" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "还原未保存的修改" })).toBeDisabled();
@@ -1030,7 +1162,7 @@ describe("CheckInWorkspace", () => {
 
     cleanup.resolve();
 
-    await waitFor(() => expect(screen.getByLabelText("我的注意力")).toHaveValue("云端初版"));
+    await waitFor(() => expect(screen.getByLabelText("今日知识主题")).toHaveValue("云端初版"));
     expect(container.querySelector(".checkin-form")).toHaveAttribute("aria-busy", "false");
   });
 
@@ -1064,7 +1196,7 @@ describe("CheckInWorkspace", () => {
     renderWorkspace(date);
     const user = userEvent.setup();
     await waitForEditorReady();
-    await user.type(screen.getByLabelText("我的注意力"), "待放弃的内容");
+    await user.type(screen.getByLabelText("今日知识主题"), "待放弃的内容");
     await user.click(screen.getByRole("button", { name: "替换测试图片" }));
     await user.click(screen.getByRole("button", { name: /完成打卡/ }));
     await user.click(await screen.findByRole("button", { name: "保留本地内容" }));
@@ -1115,7 +1247,7 @@ describe("CheckInWorkspace", () => {
 
     renderWorkspace(date);
     const user = userEvent.setup();
-    await waitFor(() => expect(screen.getByLabelText("我的注意力")).toHaveValue("云端初版"));
+    await waitFor(() => expect(screen.getByLabelText("今日知识主题")).toHaveValue("云端初版"));
     await user.click(screen.getByRole("button", { name: "替换测试图片" }));
     await user.click(screen.getByRole("button", { name: "保存修改" }));
     await user.click(await screen.findByRole("button", { name: "载入云端版本" }));
@@ -1123,11 +1255,11 @@ describe("CheckInWorkspace", () => {
     await waitFor(() => expect(deleteCheckInImage).toHaveBeenCalledWith("checkin-images/user/pending.png"));
     expect(screen.getByRole("button", { name: "保留本地内容" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "载入云端版本" })).toBeDisabled();
-    expect(screen.getByLabelText("我的注意力")).toHaveValue("云端初版");
+    expect(screen.getByLabelText("今日知识主题")).toHaveValue("云端初版");
 
     cleanup.resolve();
 
-    await waitFor(() => expect(screen.getByLabelText("我的注意力")).toHaveValue("云端新版本"));
+    await waitFor(() => expect(screen.getByLabelText("今日知识主题")).toHaveValue("云端新版本"));
     expect(screen.queryByRole("dialog", { name: "云端记录已更新" })).not.toBeInTheDocument();
   });
 
@@ -1161,13 +1293,13 @@ describe("CheckInWorkspace", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("登录已失效，请重新登录");
-    expect(screen.getByLabelText("我的注意力")).toBeDisabled();
+    expect(screen.getByLabelText("今日知识主题")).toBeDisabled();
     expect(screen.getByRole("button", { name: "重试" })).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: "重试" }));
 
-    await waitFor(() => expect(screen.getByLabelText("我的注意力")).toBeEnabled());
-    expect(screen.getByLabelText("我的注意力")).toHaveValue("重试后的云端内容");
+    await waitFor(() => expect(screen.getByLabelText("今日知识主题")).toBeEnabled());
+    expect(screen.getByLabelText("今日知识主题")).toHaveValue("重试后的云端内容");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -1246,13 +1378,13 @@ describe("CheckInWorkspace", () => {
     const { queryClient } = renderWorkspaceWithCachedRecord(date, initial);
     const user = userEvent.setup();
     await waitForEditorReady();
-    await user.type(screen.getByLabelText("我的注意力"), "，本地修改");
+    await user.type(screen.getByLabelText("今日知识主题"), "，本地修改");
 
     act(() => {
       void queryClient.invalidateQueries({ queryKey: checkInKeys.date(date) });
     });
     await waitFor(() => expect(reads).toBe(2));
-    expect(screen.getByLabelText("我的注意力")).toBeDisabled();
+    expect(screen.getByLabelText("今日知识主题")).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "退出当前用户" }));
 
@@ -1263,7 +1395,7 @@ describe("CheckInWorkspace", () => {
     expect(screen.queryByRole("dialog", { name: "退出前还有修改没有保存" })).not.toBeInTheDocument();
 
     refresh.resolve(response({ ok: true, data: initial, requestId: "refresh-request" }));
-    await waitFor(() => expect(screen.getByLabelText("我的注意力")).toBeEnabled());
+    await waitFor(() => expect(screen.getByLabelText("今日知识主题")).toBeEnabled());
   });
 
   it("allows discard-and-logout after a dirty record revalidation error", async () => {
@@ -1303,7 +1435,7 @@ describe("CheckInWorkspace", () => {
     const { queryClient } = renderWorkspaceWithCachedRecord(date, initial);
     const user = userEvent.setup();
     await waitForEditorReady();
-    await user.type(screen.getByLabelText("我的注意力"), "，准备放弃");
+    await user.type(screen.getByLabelText("今日知识主题"), "，准备放弃");
 
     act(() => {
       void queryClient.invalidateQueries({ queryKey: checkInKeys.date(date) });
@@ -1365,7 +1497,7 @@ describe("CheckInWorkspace", () => {
     const { queryClient } = renderWorkspaceWithCachedRecord(date, initial);
     const user = userEvent.setup();
     await waitForEditorReady();
-    await user.type(screen.getByLabelText("我的注意力"), "，本地修改");
+    await user.type(screen.getByLabelText("今日知识主题"), "，本地修改");
     await user.click(screen.getByRole("button", { name: "替换测试图片" }));
     await user.click(screen.getByRole("button", { name: "保存修改" }));
     await user.click(await screen.findByRole("button", { name: "保留本地内容" }));
@@ -1383,7 +1515,7 @@ describe("CheckInWorkspace", () => {
     await waitFor(() => expect(logoutRequests).toBe(1));
     expect(await screen.findByText("暂时无法退出")).toBeVisible();
     await waitFor(() => {
-      expect(screen.getByLabelText("我的注意力")).toHaveValue("清理期间刷新的云端版本");
+      expect(screen.getByLabelText("今日知识主题")).toHaveValue("清理期间刷新的云端版本");
     });
   });
 
@@ -1406,7 +1538,7 @@ describe("CheckInWorkspace", () => {
     renderWorkspace(initialDate);
     const user = userEvent.setup();
     await waitForEditorReady();
-    await user.type(screen.getByLabelText("我的注意力"), "还没保存的内容");
+    await user.type(screen.getByLabelText("今日知识主题"), "还没保存的内容");
     await user.click(screen.getByRole("button", { name: /今日/ }));
 
     expect(screen.getByRole("dialog", { name: "尚未保存" })).toBeVisible();
@@ -1441,7 +1573,7 @@ describe("CheckInWorkspace", () => {
     renderWorkspace(initialDate);
     const user = userEvent.setup();
     await waitForEditorReady();
-    await user.type(screen.getByLabelText("我的注意力"), "等待确认的 Today 切换");
+    await user.type(screen.getByLabelText("今日知识主题"), "等待确认的 Today 切换");
     await user.click(screen.getByRole("button", { name: /今日/ }));
 
     expect(screen.getByRole("dialog", { name: "尚未保存" })).toBeVisible();
@@ -1473,7 +1605,7 @@ describe("CheckInWorkspace", () => {
     renderWorkspace(initialDate);
     const user = userEvent.setup();
     await waitForEditorReady();
-    await user.type(screen.getByLabelText("我的注意力"), "浏览后仍未保存");
+    await user.type(screen.getByLabelText("今日知识主题"), "浏览后仍未保存");
     await user.click(screen.getByRole("button", { name: "下个月" }));
     await waitFor(() => expect(screen.getByRole("heading", { name: formatMonth(browsedMonth) })).toBeVisible());
     await user.click(screen.getByRole("button", { name: new RegExp(formatCalendarDate(targetDate)) }));
@@ -1510,7 +1642,7 @@ describe("CheckInWorkspace", () => {
     renderWorkspace(initialDate);
     const user = userEvent.setup();
     await waitForEditorReady();
-    await user.type(screen.getByLabelText("我的注意力"), "保存后切换");
+    await user.type(screen.getByLabelText("今日知识主题"), "保存后切换");
     await user.click(screen.getByRole("button", { name: /今日/ }));
     await user.click(screen.getByRole("button", { name: "保存并切换" }));
 
@@ -1539,12 +1671,12 @@ describe("CheckInWorkspace", () => {
     renderWorkspace(initialDate);
     const user = userEvent.setup();
     await waitForEditorReady();
-    await user.type(screen.getByLabelText("我的注意力"), "放弃后切换");
+    await user.type(screen.getByLabelText("今日知识主题"), "放弃后切换");
     await user.click(screen.getByRole("button", { name: /今日/ }));
     await user.click(screen.getByRole("button", { name: "放弃修改" }));
 
     await waitFor(() => expect(screen.getByRole("heading", { name: formatMonth(todayMonth) })).toBeVisible());
-    expect(screen.getByLabelText("我的注意力")).toHaveValue("");
+    expect(screen.getByLabelText("今日知识主题")).toHaveValue("");
     expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "PUT")).toBe(false);
   });
 
@@ -1595,7 +1727,7 @@ describe("CheckInWorkspace", () => {
     renderWorkspace("2026-07-23");
     const user = userEvent.setup();
     await waitForEditorReady();
-    await user.type(screen.getByLabelText("我的注意力"), "待保存内容");
+    await user.type(screen.getByLabelText("今日知识主题"), "待保存内容");
     await user.click(screen.getByRole("button", { name: /7月24日/ }));
 
     const save = screen.getByRole("button", { name: "保存并切换" });
@@ -1654,7 +1786,7 @@ describe("CheckInWorkspace", () => {
 
     renderWorkspace(date);
     const user = userEvent.setup();
-    await waitFor(() => expect(screen.getByLabelText("我的注意力")).toHaveValue("云端初版"));
+    await waitFor(() => expect(screen.getByLabelText("今日知识主题")).toHaveValue("云端初版"));
     await user.click(screen.getByRole("button", { name: "替换测试图片" }));
     await user.click(screen.getByRole("button", { name: "保存修改" }));
     await user.click(await screen.findByRole("button", { name: "保留本地内容" }));
@@ -1704,7 +1836,7 @@ describe("CheckInWorkspace", () => {
       </TestQueryProvider>,
     );
     const user = userEvent.setup();
-    const attention = screen.getByLabelText("我的注意力");
+    const attention = screen.getByLabelText("今日知识主题");
     await waitFor(() => expect(attention).toHaveValue("云端初版"));
     await user.type(attention, "，本地补充");
     await user.click(screen.getByRole("button", { name: "打开账户菜单" }));
@@ -1783,7 +1915,7 @@ describe("CheckInWorkspace", () => {
 
     renderWorkspace(date);
     const user = userEvent.setup();
-    const attention = screen.getByLabelText("我的注意力");
+    const attention = screen.getByLabelText("今日知识主题");
     await waitFor(() => expect(attention).toHaveValue("云端初版"));
     await user.type(attention, "，本地补充");
     const targetButton = screen.getByRole("button", { name: /7月24日/ });
@@ -1860,7 +1992,7 @@ describe("CheckInWorkspace", () => {
 
     renderWorkspace(date);
     const user = userEvent.setup();
-    const attention = screen.getByLabelText("我的注意力");
+    const attention = screen.getByLabelText("今日知识主题");
     await waitFor(() => expect(attention).toHaveValue("云端初版"));
     await user.type(attention, "，本地补充");
     await user.click(screen.getByRole("button", { name: "保存修改" }));
@@ -1938,7 +2070,7 @@ describe("CheckInWorkspace", () => {
     renderWorkspace(date);
     const user = userEvent.setup();
     await waitForEditorReady();
-    await user.type(screen.getByLabelText("我的注意力"), "保留候选图片");
+    await user.type(screen.getByLabelText("今日知识主题"), "保留候选图片");
     await user.click(screen.getByRole("button", { name: "替换测试图片" }));
     await user.click(screen.getByRole("button", { name: /完成打卡/ }));
 
@@ -1975,7 +2107,7 @@ describe("CheckInWorkspace", () => {
     renderWorkspace(date);
     const user = userEvent.setup();
     await waitForEditorReady();
-    await user.type(screen.getByLabelText("我的注意力"), "可能已经写入云端");
+    await user.type(screen.getByLabelText("今日知识主题"), "可能已经写入云端");
     await user.click(screen.getByRole("button", { name: "替换测试图片" }));
     await user.click(screen.getByRole("button", { name: /完成打卡/ }));
     await waitFor(() => {
@@ -1984,7 +2116,7 @@ describe("CheckInWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "还原未保存的修改" }));
 
-    await waitFor(() => expect(screen.getByLabelText("我的注意力")).toHaveValue(""));
+    await waitFor(() => expect(screen.getByLabelText("今日知识主题")).toHaveValue(""));
     expect(deleteCheckInImage).not.toHaveBeenCalled();
   });
 
@@ -2019,7 +2151,7 @@ describe("CheckInWorkspace", () => {
     renderWorkspace(date);
     const user = userEvent.setup();
     await waitForEditorReady();
-    await user.type(screen.getByLabelText("我的注意力"), "明确拒绝");
+    await user.type(screen.getByLabelText("今日知识主题"), "明确拒绝");
     await user.click(screen.getByRole("button", { name: "替换测试图片" }));
     await user.click(screen.getByRole("button", { name: /完成打卡/ }));
 
@@ -2111,7 +2243,7 @@ describe("CheckInWorkspace", () => {
       </TestQueryProvider>,
     );
     await flushFakeTimerWork();
-    const attention = screen.getByLabelText("我的注意力");
+    const attention = screen.getByLabelText("今日知识主题");
     expect(attention).toBeEnabled();
     fireEvent.change(attention, { target: { value: "跨过午夜也不能丢" } });
 
@@ -2133,4 +2265,42 @@ describe("CheckInWorkspace", () => {
     );
     expect(attention).toHaveValue("跨过午夜也不能丢");
   });
+});
+
+it("returns the header knowledge entry to the library after confirming unsaved narrative edits", async () => {
+  const date = getTodayKey();
+  const savedDates = ["2026-09-01", "2026-09-02"];
+  const narrative = { id: "library-entry", title: "学习脉络", status: "succeeded", dates: savedDates, question: "", error: null,
+    createdAt: "2026-09-10T08:00:00Z", updatedAt: "2026-09-10T08:00:00Z", changedDates: [],
+    sources: savedDates.map(date => ({ date, attention: "知识", summary: "小结", inspiration: "", version: 1, sourceUrl: "", hasImage: false })),
+    result: { title: "学习脉络", overview: "初始理解", nodes: savedDates.map(date => ({ date, label: "节点", takeaway: "理解" })),
+      connections: [{ fromDate: savedDates[0], toDate: savedDates[1], relation: "递进", explanation: "逐渐深入" }],
+      sections: [{ title: "叙事", body: "正文", sourceDates: savedDates }], framework: [{ title: "框架", body: "正文", sourceDates: savedDates }], gaps: [], nextSteps: ["继续学习"] } };
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+    const path = String(input);
+    if (path === "/api/knowledge-narratives") return Promise.resolve(response({ ok: true, data: [narrative], requestId: "library" }));
+    if (path === "/api/knowledge-narratives/library-entry") return Promise.resolve(response({ ok: true, data: narrative, requestId: "detail" }));
+    if (path.includes("/api/checkins?month=")) return Promise.resolve(response({ ok: true, data: [], requestId: "list" }));
+    if (path.startsWith("/api/checkins/stats")) return Promise.resolve(response({ ok: true, data: { totalCount: 0, currentStreak: 0, hasTodayRecord: false }, requestId: "stats" }));
+    if (path === "/api/me") return Promise.resolve(response({ ok: true, data: { profile: null }, requestId: "profile" }));
+    return Promise.resolve(missingCheckIn());
+  }));
+  renderWorkspace(date); const user = userEvent.setup(); await waitForEditorReady();
+  await user.click(screen.getByRole("button", { name: "串联知识" }));
+  await user.click(await screen.findByRole("button", { name: "编辑 学习脉络" }));
+  await user.type(await screen.findByLabelText("总览"), "尚未保存");
+  await user.click(screen.getByRole("button", { name: "串联知识" }));
+  expect(screen.getByRole("dialog", { name: "放弃未保存的修改？" })).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "继续编辑" }));
+  expect(screen.getByLabelText("总览")).toHaveValue("初始理解尚未保存");
+  for (const name of ["开始今日打卡", "退出当前用户"]) {
+    await user.click(screen.getByRole("button", { name }));
+    expect(screen.getByRole("dialog", { name: "放弃未保存的修改？" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "继续编辑" }));
+    expect(screen.getByLabelText("总览")).toHaveValue("初始理解尚未保存");
+  }
+  await user.click(screen.getByRole("button", { name: "串联知识" }));
+  await user.click(screen.getByRole("button", { name: "放弃修改" }));
+  expect(await screen.findByRole("region", { name: "已保存的脉络" })).toBeVisible();
+  expect(screen.queryByRole("form", { name: "编辑知识脉络" })).not.toBeInTheDocument();
 });

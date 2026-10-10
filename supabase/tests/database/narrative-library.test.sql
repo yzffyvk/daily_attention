@@ -1,0 +1,62 @@
+begin;
+select no_plan();
+select function_privs_are('public','copy_knowledge_narrative',array['uuid','uuid','uuid'],'authenticated',array[]::text[],'copies require the trusted server');
+select function_privs_are('public','update_knowledge_narrative',array['uuid','uuid','jsonb','text','timestamp with time zone'],'authenticated',array[]::text[],'edits require the trusted server');
+select function_privs_are('public','delete_knowledge_narrative',array['uuid','uuid'],'authenticated',array[]::text[],'deletion requires the trusted server');
+insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,created_at,updated_at) values
+ ('00000000-0000-4000-8000-000000009501','00000000-0000-0000-0000-000000000000','authenticated','authenticated','library-one@internal.invalid','',now(),now(),now()),
+ ('00000000-0000-4000-8000-000000009502','00000000-0000-0000-0000-000000000000','authenticated','authenticated','library-two@internal.invalid','',now(),now(),now());
+insert into public.check_ins(user_id,checkin_date,attention,summary) values
+ ('00000000-0000-4000-8000-000000009501','2026-08-31','记录学习','原始版本'),
+ ('00000000-0000-4000-8000-000000009501','2026-09-02','复盘学习','寻找联系');
+create temporary table library_job as select * from public.create_knowledge_narrative(
+ '00000000-0000-4000-8000-000000009501',array['2026-08-31','2026-09-02']::date[],'如何理解？',gen_random_uuid());
+select throws_ok($$select public.copy_knowledge_narrative('00000000-0000-4000-8000-000000009501',(select id from library_job),gen_random_uuid())$$,'P0001','NARRATIVE_NOT_READY','pending results cannot be copied');
+update public.knowledge_narratives set status='succeeded',title='知识脉络',result='{"title":"知识脉络","overview":"原始总结"}',started_at=now(),finished_at=now() where id=(select id from library_job);
+update private.ai_daily_quotas set reserved_count=0,consumed_count=5 where user_id='00000000-0000-4000-8000-000000009501';
+create temporary table library_copy as select * from public.copy_knowledge_narrative('00000000-0000-4000-8000-000000009501',(select id from library_job),'11111111-1111-4111-8111-111111119501');
+select is((select title from library_copy),'知识脉络 cp','first copy receives cp suffix');
+select isnt((select id from library_copy),(select id from library_job),'copy has an independent identity');
+select is((select source_snapshot from library_copy),(select source_snapshot from library_job),'copy preserves original source snapshots');
+select is((select result->>'title' from library_copy),'知识脉络 cp','copy result title matches list title');
+select is((select result->>'overview' from library_copy),'原始总结','copy preserves the summary');
+select is((select status from library_copy),'succeeded','copy never queues a model job');
+select is((select reserved_count::integer+consumed_count::integer from private.ai_daily_quotas where user_id='00000000-0000-4000-8000-000000009501'),5,'copy succeeds at quota limit without charging');
+select is((select id from public.copy_knowledge_narrative('00000000-0000-4000-8000-000000009501',(select id from library_job),'11111111-1111-4111-8111-111111119501')),(select id from library_copy),'uncertain retry returns the same copy');
+select is((select title from public.copy_knowledge_narrative('00000000-0000-4000-8000-000000009501',(select id from library_job),gen_random_uuid())),'知识脉络 2 cp','repeated copies avoid duplicate names');
+select throws_ok($$select public.copy_knowledge_narrative('00000000-0000-4000-8000-000000009502',(select id from library_job),gen_random_uuid())$$,'P0001','NARRATIVE_NOT_FOUND','copy cannot cross owners');
+select throws_ok($$select public.copy_knowledge_narrative('00000000-0000-4000-8000-000000009501',(select id from library_copy),'11111111-1111-4111-8111-111111119501')$$,'P0001','NARRATIVE_IDEMPOTENCY_CONFLICT','retry key cannot be reused for another source');
+create temporary table library_edit as select * from public.update_knowledge_narrative('00000000-0000-4000-8000-000000009501',(select id from library_copy),'{"title":"自己的理解","overview":"人工编辑"}',null,(select updated_at from library_copy));
+select is((select title from library_edit),'自己的理解','editing updates list title');
+select is((select result->>'overview' from library_edit),'人工编辑','editing persists user content');
+select is((select result->>'overview' from public.knowledge_narratives where id=(select id from library_job)),'原始总结','editing a copy leaves original unchanged');
+select is((select source_snapshot from library_edit),(select source_snapshot from library_job),'editing preserves source snapshot');
+select isnt((select updated_at from library_edit),(select updated_at from library_copy),'revision advances even within the same transaction');
+select throws_ok($$select public.update_knowledge_narrative('00000000-0000-4000-8000-000000009501',(select id from library_copy),'{"title":"过时编辑"}',null,(select updated_at from library_copy))$$,'P0001','NARRATIVE_EDIT_CONFLICT','stale revisions cannot overwrite content');
+select throws_ok($$select public.update_knowledge_narrative('00000000-0000-4000-8000-000000009502',(select id from library_copy),null,'别人的名称',null)$$,'P0001','NARRATIVE_NOT_FOUND','editing cannot cross owners');
+select is((select result->>'title' from public.update_knowledge_narrative('00000000-0000-4000-8000-000000009501',(select id from library_copy),null,'重命名',null)),'重命名','legacy title edits keep result title synchronized');
+select is((select title from public.update_knowledge_narrative('00000000-0000-4000-8000-000000009501',(select id from library_job),null,repeat('长',120),null)),repeat('长',120),'maximum title accepted');
+select is((select length(title) from public.copy_knowledge_narrative('00000000-0000-4000-8000-000000009501',(select id from library_job),gen_random_uuid())),120,'copy makes room for suffix at title limit');
+create temporary table library_emoji_source as select * from public.update_knowledge_narrative('00000000-0000-4000-8000-000000009501',(select id from library_job),null,repeat('😀',60),null);
+create temporary table library_emoji_copy as select * from public.copy_knowledge_narrative('00000000-0000-4000-8000-000000009501',(select id from library_emoji_source),gen_random_uuid());
+select is((select title from library_emoji_copy),repeat('😀',58)||' cp','copy preserves complete emoji and makes room for the cp suffix');
+select ok((select sum(case when ascii(character) > 65535 then 2 else 1 end) <= 120 from library_emoji_copy cross join lateral regexp_split_to_table(title,'') character),'copy title respects the API UTF-16 length limit');
+select is((select title from public.copy_knowledge_narrative('00000000-0000-4000-8000-000000009501',(select id from library_emoji_source),gen_random_uuid())),repeat('😀',57)||' 2 cp','numbered copies include the longer suffix in their UTF-16 budget');
+select throws_ok($$select public.delete_knowledge_narrative('00000000-0000-4000-8000-000000009502',(select id from library_job))$$,'P0001','NARRATIVE_NOT_FOUND','deletion cannot cross owners');
+select is(public.delete_knowledge_narrative('00000000-0000-4000-8000-000000009501',(select id from library_job)),true,'owner can permanently delete source');
+select is((select count(*)::integer from public.knowledge_narratives where id=(select id from library_job)),0,'deleted row is gone');
+select is((select result->>'overview' from public.knowledge_narratives where id=(select id from library_copy)),'人工编辑','source deletion preserves copies');
+select is((select id from public.copy_knowledge_narrative('00000000-0000-4000-8000-000000009501',(select id from library_job),'11111111-1111-4111-8111-111111119501')),(select id from library_copy),'copy response can be recovered after source deletion');
+select is((select consumed_count::integer from private.ai_daily_quotas where user_id='00000000-0000-4000-8000-000000009501'),5,'deletion does not refund used model quota');
+update private.ai_daily_quotas set consumed_count=0 where user_id='00000000-0000-4000-8000-000000009501';
+create temporary table library_pending as select * from public.create_knowledge_narrative('00000000-0000-4000-8000-000000009501',array['2026-08-31','2026-09-02']::date[],'等待删除',gen_random_uuid());
+select is(public.delete_knowledge_narrative('00000000-0000-4000-8000-000000009501',(select id from library_pending)),true,'queued record can be deleted');
+select is((select reserved_count::integer from private.ai_daily_quotas where user_id='00000000-0000-4000-8000-000000009501'),0,'deleting unstarted job refunds reservation');
+create temporary table library_running as select * from public.create_knowledge_narrative('00000000-0000-4000-8000-000000009501',array['2026-08-31','2026-09-02']::date[],'生成时删除',gen_random_uuid());
+update public.knowledge_narratives set status='generating',started_at=now(),claim_token='11111111-1111-4111-8111-111111119599',lease_expires_at=now()+interval '180 seconds' where id=(select id from library_running);
+update private.ai_daily_quotas set reserved_count=0,consumed_count=1 where user_id='00000000-0000-4000-8000-000000009501';
+select is(public.delete_knowledge_narrative('00000000-0000-4000-8000-000000009501',(select id from library_running)),true,'running record can be deleted');
+select is(public.finish_knowledge_narrative((select id from library_running),'11111111-1111-4111-8111-111111119599','{"title":"迟到的结果"}',null,false),false,'late worker cannot resurrect deleted record');
+select is((select consumed_count::integer from private.ai_daily_quotas where user_id='00000000-0000-4000-8000-000000009501'),1,'running job deletion keeps consumed quota');
+select * from finish();
+rollback;

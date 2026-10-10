@@ -1,3 +1,5 @@
+import { parseQuestionSummary, serializeQuestionSummary } from "../../../../lib/domain/knowledge-questions.ts";
+import { SUMMARY_MAX_LENGTH, SOURCE_TRUNCATION_NOTICE } from "../../../../lib/domain/summary-limits.ts";
 import type {
   AiGenerationResult,
   AiSummaryProviderResult,
@@ -10,6 +12,7 @@ const MAX_ATTEMPTS = 3;
 const fetchFailureMessages: Record<string, string> = {
   URL_NOT_ALLOWED: "该链接不支持访问",
   FETCH_TIMEOUT: "读取页面超时",
+  FETCH_SERVICE_UNAVAILABLE: "网页读取服务暂时不可用，请稍后重试",
   TOO_MANY_REDIRECTS: "页面跳转次数过多",
   RESPONSE_TOO_LARGE: "页面内容过大",
   UNSUPPORTED_CONTENT_TYPE: "该链接不是可读取的网页",
@@ -48,12 +51,15 @@ export type AiClaimedJob = {
   userId: string;
   sourceUrl: string;
   attemptCount: number;
+  userPrompt?: string;
+  promptVersion?: string;
 };
 
 export type AiExtractedSource = {
   title: string;
   text: string;
   contentDigestHex: string;
+  truncated?: boolean;
 };
 
 export type AiJobRunnerPorts = {
@@ -64,6 +70,9 @@ export type AiJobRunnerPorts = {
   generate(input: {
     sourceTitle: string;
     sourceText: string;
+    sourceTruncated?: boolean;
+    userPrompt?: string;
+    promptVersion?: string;
     anonymousUserId: string;
   }): Promise<AiSummaryProviderResult>;
   complete(input: {
@@ -113,10 +122,11 @@ export async function runAiJob(
     source = await ports.loadSource(job.sourceUrl);
   } catch (error) {
     const candidate = stableErrorCode(error);
-    const knownCode = candidate === "FETCH_TIMEOUT" || permanentFetchCodes.has(candidate ?? "")
+    const transient = candidate === "FETCH_TIMEOUT" || candidate === "FETCH_SERVICE_UNAVAILABLE";
+    const knownCode = transient || permanentFetchCodes.has(candidate ?? "")
       ? candidate!
       : "CONTENT_BLOCKED";
-    const retryable = knownCode === "FETCH_TIMEOUT" && job.attemptCount < MAX_ATTEMPTS;
+    const retryable = transient && job.attemptCount < MAX_ATTEMPTS;
     const code = knownCode === "FETCH_TIMEOUT" && !retryable
       ? "TASK_RETRY_EXHAUSTED"
       : knownCode;
@@ -136,13 +146,27 @@ export async function runAiJob(
     const generated = await ports.generate({
       sourceTitle: source.title,
       sourceText: source.text,
+      sourceTruncated: source.truncated ?? false,
+      userPrompt: job.userPrompt?.trim() ?? "",
+      promptVersion: job.promptVersion,
       anonymousUserId,
     });
+    const result = { ...generated.result };
+    if (source.truncated) {
+      const notice = SOURCE_TRUNCATION_NOTICE;
+      result.warnings = [...new Set([notice, ...result.warnings])].slice(0, 10);
+      const questions = parseQuestionSummary(result.summary);
+      if (questions) {
+        questions.warnings = result.warnings;
+        result.summary = serializeQuestionSummary(questions);
+      } else result.summary = `${notice}\n\n${result.summary}`;
+      if (result.summary.length > SUMMARY_MAX_LENGTH) throw new DeepSeekProviderError("MODEL_OUTPUT_INVALID", true, { usage: generated.usage, providerCallCount: generated.providerCallCount });
+    }
     await ports.complete({
       jobId,
       sourceTitle: source.title,
       contentDigestHex: source.contentDigestHex,
-      result: generated.result,
+      result,
       usage: generated.usage,
       providerCallCount: generated.providerCallCount,
       model: generated.model,
@@ -161,8 +185,8 @@ export async function runAiJob(
       code,
       message: providerFailureMessages[code] ?? providerFailureMessages.MODEL_SERVICE_ERROR!,
       retryable,
-      providerCallCount: 1,
-      usage: emptyUsage,
+      providerCallCount: providerError?.providerCallCount ?? 1,
+      usage: providerError?.usage ?? emptyUsage,
     });
     return retryable ? "retryable" : "completed";
   }

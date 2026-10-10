@@ -51,6 +51,7 @@ export async function POST(request: Request): Promise<Response> {
       status: created.job.status,
       pollAfterMs: 1500,
       quota: created.quota,
+      generationContext: { userPrompt: created.job.userPrompt ?? "", promptVersion: created.job.promptVersion },
     }, requestId, 202);
   } catch (error) {
     return aiFailure(error, requestId);

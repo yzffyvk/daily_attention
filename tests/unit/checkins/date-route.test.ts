@@ -36,7 +36,7 @@ vi.mock("@/server/storage/service", () => ({
   removeCheckInImage: mocks.remove,
 }));
 
-import { PUT } from "@/app/api/checkins/[date]/route";
+import { GET, PUT } from "@/app/api/checkins/[date]/route";
 
 const previousImagePath = "user-1/2026-07-23/previous.png";
 const nextImagePath = "user-1/2026-07-23/next.png";
@@ -66,6 +66,52 @@ function request() {
 describe("check-in image replacement cleanup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it.each([["", "manual"], ["?mode=ai", "ai"]])("reads only the selected mode (%s)", async (query, mode) => {
+    const record = { id: mode, entryMode: mode, imagePath: null, version: 1 };
+    const findByDate = vi.fn(async (_user: string, _date: string, selected = "manual") =>
+      selected === mode ? record : null);
+    mocks.context.mockResolvedValue({ userId: "user-1", supabase: {}, repository: { findByDate } });
+    const response = await GET(new Request(`https://example.test/api/checkins/2026-07-23${query}`), routeContext());
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toMatchObject({ data: record });
+    expect(findByDate).toHaveBeenCalledWith("user-1", "2026-07-23", mode);
+  });
+
+  it("rejects an invalid read mode before accessing records", async () => {
+    const findByDate = vi.fn();
+    mocks.context.mockResolvedValue({ userId: "user-1", supabase: {}, repository: { findByDate } });
+    const response = await GET(new Request("https://example.test/api/checkins/2026-07-23?mode=other"), routeContext());
+    expect(response?.status).toBe(422);
+    await expect(response?.json()).resolves.toMatchObject({ error: { code: "VALIDATION_ERROR", details: { field: "mode" } } });
+    expect(findByDate).not.toHaveBeenCalled();
+  });
+
+  it("cleans up only the AI image when an AI save replaces its image", async () => {
+    const supabase = {};
+    const manualPath = "user-1/2026-07-23/manual.png";
+    const aiPath = "user-1/2026-07-23/ai.png";
+    mocks.context.mockResolvedValue({
+      userId: "user-1", supabase,
+      repository: { findByDate: vi.fn(async (_user: string, _date: string, mode = "manual") =>
+        ({ imagePath: mode === "ai" ? aiPath : manualPath })) },
+    });
+    mocks.save.mockResolvedValue({ ok: true, record: { entryMode: "ai", imagePath: nextImagePath, version: 2 } });
+    const response = await PUT(new Request("https://example.test/api/checkins/2026-07-23", {
+      method: "PUT", body: JSON.stringify({ ...input, entryMode: "ai" }),
+    }), routeContext());
+    expect(response?.status).toBe(200);
+    expect(mocks.remove).toHaveBeenCalledWith("user-1", aiPath, supabase);
+    expect(mocks.remove).not.toHaveBeenCalledWith("user-1", manualPath, supabase);
+    expect(mocks.save).toHaveBeenCalledWith("user-1", "2026-07-23", expect.objectContaining({ entryMode: "ai" }), expect.anything());
+  });
+
+  it("sends missing write mode as manual for legacy clients", async () => {
+    mocks.context.mockResolvedValue({ userId: "user-1", supabase: {}, repository: { findByDate: vi.fn().mockResolvedValue(null) } });
+    mocks.save.mockResolvedValue({ ok: true, record: { entryMode: "manual", imagePath: null, version: 1 } });
+    expect((await PUT(request(), routeContext()))?.status).toBe(200);
+    expect(mocks.save).toHaveBeenCalledWith("user-1", "2026-07-23", expect.objectContaining({ entryMode: "manual" }), expect.anything());
   });
 
   it("deletes only the previous image after a successful replacement", async () => {

@@ -78,7 +78,7 @@ select function_returns(
   'public.profiles'
 );
 select has_column('public', 'check_ins', 'version', 'check-ins have a version');
-select has_index('public', 'check_ins', 'check_ins_user_date_key', 'one record per user and date');
+select has_index('public', 'check_ins', 'check_ins_user_date_mode_key', 'one record per user, date and mode');
 select ok(exists (
   select 1
   from pg_constraint c

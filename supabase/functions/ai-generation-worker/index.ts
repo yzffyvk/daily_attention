@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
+import { AI_LEGACY_PROMPT_VERSION } from "../_shared/ai/contracts.ts";
 import { createDeepSeekProvider } from "../_shared/ai/deepseek.ts";
 import { extractLearningSource } from "../_shared/ai/extract.ts";
 import {
@@ -8,6 +9,8 @@ import {
   type AiJobRunnerPorts,
 } from "../_shared/ai/runner.ts";
 import { createSafeFetchClient } from "../_shared/ai/safe-fetch-client.ts";
+import { dedicatedAiTiming } from "../_shared/ai/timeouts.ts";
+import { sourceDownloadUrl } from "../_shared/ai/source-url.ts";
 
 declare const Deno: {
   env: { get(name: string): string | undefined };
@@ -53,6 +56,8 @@ const claimedJobSchema = z.object({
   user_id: z.uuid(),
   source_url: z.string().url().max(2048),
   attempt_count: z.number().int().min(1).max(3),
+  user_prompt: z.string().trim().max(1000).default(""),
+  prompt_version: z.string().min(1).max(40).default(AI_LEGACY_PROMPT_VERSION),
 });
 
 function jsonResponse(body: unknown, status: number) {
@@ -185,40 +190,13 @@ function singleRow(schema: z.ZodType, data: unknown) {
 
 type ReadEnvironment = (name: string) => string | undefined;
 
-function namedDefaultSecretKey(readEnvironment: ReadEnvironment) {
-  const rawKeys = readEnvironment("SUPABASE_SECRET_KEYS");
-  if (!rawKeys) return undefined;
-  try {
-    const keys = JSON.parse(rawKeys) as Record<string, unknown>;
-    return typeof keys.default === "string" ? keys.default : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-export function assertAiProviderModeAllowed(input: {
-  mode: string;
-  nodeEnv?: string;
-  integrationTestBindings?: string;
-}) {
-  if (input.mode !== "deepseek" && input.mode !== "fake") {
-    throw new Error("FUNCTION_CONFIGURATION_ERROR");
-  }
-  if (
-    input.mode === "fake"
-    && input.nodeEnv !== "test"
-    && input.integrationTestBindings !== "true"
-  ) {
-    throw new Error("FUNCTION_CONFIGURATION_ERROR");
-  }
-}
+import { assertAiProviderModeAllowed, readSupabaseWorkerKey } from "../_shared/ai/environment.ts";
+export { assertAiProviderModeAllowed } from "../_shared/ai/environment.ts";
 
 function requiredEnvironment(readEnvironment: ReadEnvironment, requireTriggerToken: boolean) {
   const environment = {
     supabaseUrl: readEnvironment("SUPABASE_URL") ?? readEnvironment("NEXT_PUBLIC_SUPABASE_URL"),
-    secretKey: namedDefaultSecretKey(readEnvironment)
-      ?? readEnvironment("SUPABASE_SECRET_KEY")
-      ?? readEnvironment("SUPABASE_SERVICE_ROLE_KEY"),
+    secretKey: readSupabaseWorkerKey(readEnvironment),
     deepSeekApiKey: readEnvironment("DEEPSEEK_API_KEY"),
     userIdPepper: readEnvironment("AI_USER_ID_PEPPER"),
     triggerToken: readEnvironment("AI_WORKER_TRIGGER_TOKEN") ?? "",
@@ -270,7 +248,7 @@ async function hmacSha256Hex(secret: string, value: string) {
 
 export function createProductionDependencies(
   readEnvironment: ReadEnvironment = (name) => Deno.env.get(name),
-  options: { dedicatedWorker?: boolean } = {},
+  options: { dedicatedWorker?: boolean; scope?: { userId: string; createdAfter: string } | null } = {},
 ): AiWorkerDependencies {
   const environment = requiredEnvironment(readEnvironment, !options.dedicatedWorker);
   const client = createClient(environment.supabaseUrl, environment.secretKey, {
@@ -323,12 +301,14 @@ export function createProductionDependencies(
           userId: row.user_id,
           sourceUrl: row.source_url,
           attemptCount: row.attempt_count,
+          userPrompt: row.user_prompt,
+          promptVersion: row.prompt_version,
         }
         : null;
     },
     async loadSource(sourceUrl) {
-      const fetched = await safeFetch(sourceUrl, AbortSignal.timeout(25_000));
-      return extractLearningSource({ html: fetched.body, finalUrl: fetched.finalUrl });
+      const fetched = await safeFetch(sourceDownloadUrl(sourceUrl), AbortSignal.timeout(25_000));
+      return extractLearningSource({ html: fetched.body, finalUrl: fetched.finalUrl, contentType: fetched.contentType });
     },
     async begin(jobId) {
       singleRow(
@@ -340,7 +320,8 @@ export function createProductionDependencies(
       return hmacSha256Hex(environment.userIdPepper, userId);
     },
     generate(input) {
-      return provider.generate({ ...input, signal: AbortSignal.timeout(120_000) });
+      const timeoutMs = options.dedicatedWorker ? dedicatedAiTiming.modelTimeoutMs : 120_000;
+      return provider.generate({ ...input, signal: AbortSignal.timeout(timeoutMs) });
     },
     async complete(input) {
       await rpc(client, "complete_ai_generation_job", {
@@ -391,11 +372,21 @@ export function createProductionDependencies(
   return {
     triggerToken: environment.triggerToken,
     async readMessages() {
-      const data = await rpc(client, "read_ai_generation_queue", {
-        target_visibility_timeout: QUEUE_VISIBILITY_TIMEOUT_SECONDS,
-        // Do not reserve more deliveries than can start within the 180s lease.
+      const data = await rpc(client, options.scope ? "read_owned_ai_generation_queue" : "read_ai_generation_queue", {
+        ...(options.scope ? { target_user_id: options.scope.userId, target_created_after: options.scope.createdAfter } : {}),
+        target_visibility_timeout: options.dedicatedWorker
+          ? dedicatedAiTiming.queueVisibilitySeconds
+          : QUEUE_VISIBILITY_TIMEOUT_SECONDS,
+        // Dedicated workers claim only as many deliveries as can start immediately.
         target_batch_limit: options.dedicatedWorker ? WORKER_CONCURRENCY : QUEUE_BATCH_LIMIT,
       });
+      if (options.scope) {
+        const scoped = z.array(queueRowSchema.extend({ user_id: z.uuid(), created_at: z.iso.datetime({ offset: true }) })).max(WORKER_CONCURRENCY).safeParse(data);
+        if (!scoped.success || scoped.data.some(row => row.user_id !== options.scope!.userId
+          || Date.parse(row.created_at) < Date.parse(options.scope!.createdAfter))) {
+          throw new Error("AI_WORKER_SCOPE_MISMATCH");
+        }
+      }
       const parsed = z.array(queueRowSchema).max(QUEUE_BATCH_LIMIT).safeParse(data);
       if (!parsed.success) throw new Error("AI_WORKER_RPC_MALFORMED");
       return parsed.data.map((row) => ({

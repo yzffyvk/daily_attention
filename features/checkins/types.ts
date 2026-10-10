@@ -1,8 +1,14 @@
+import type { CheckInEntryMode } from "@/lib/domain/checkin";
+import type { AiGenerationContext } from "@/lib/domain/ai-prompt";
+
 export type CheckInRecord = {
   id: string;
   date: string;
+  entryMode?: CheckInEntryMode;
   attention: string;
   sourceUrl: string;
+  userPrompt?: string;
+  aiGenerationContext?: AiGenerationContext | null;
   summary: string;
   inspiration: string;
   imagePath: string | null;
@@ -15,7 +21,7 @@ export type CheckInRecord = {
 
 export type CheckInSummary = Pick<
   CheckInRecord,
-  "date" | "attention" | "version" | "updatedAt"
+  "date" | "entryMode" | "attention" | "version" | "updatedAt"
 > & { hasImage: boolean };
 
 export type CheckInStats = {

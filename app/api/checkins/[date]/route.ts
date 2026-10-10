@@ -1,4 +1,4 @@
-import { checkInInputSchema, dateKeySchema } from "@/lib/domain/checkin";
+import { checkInEntryModeSchema, checkInInputSchema, dateKeySchema } from "@/lib/domain/checkin";
 import {
   logServerError,
   operationalErrorFields,
@@ -39,7 +39,7 @@ async function parseDate(context: RouteContext, requestId: string) {
   return { date: parsed.data };
 }
 
-export async function GET(_request: Request, routeContext: RouteContext) {
+export async function GET(request: Request, routeContext: RouteContext) {
   const requestId = crypto.randomUUID();
   try {
     const context = await createCheckInRequestContext();
@@ -54,9 +54,14 @@ export async function GET(_request: Request, routeContext: RouteContext) {
 
     const parsedDate = await parseDate(routeContext, requestId);
     if ("response" in parsedDate) return parsedDate.response;
+    const parsedMode = checkInEntryModeSchema.safeParse(new URL(request.url).searchParams.get("mode") ?? "manual");
+    if (!parsedMode.success) {
+      return checkInFailure("VALIDATION_ERROR", "记录模式不正确", requestId, 422, { field: "mode" });
+    }
     const record = await context.repository.findByDate(
       context.userId,
       parsedDate.date,
+      parsedMode.data,
     );
     if (!record) {
       return checkInFailure(
@@ -138,6 +143,7 @@ export async function PUT(request: Request, routeContext: RouteContext) {
     const previous = await context.repository.findByDate(
       context.userId,
       parsedDate.date,
+      parsedInput.data.entryMode,
     );
     const result = await saveCheckIn(
       context.userId,

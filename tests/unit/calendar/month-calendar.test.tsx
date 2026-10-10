@@ -34,6 +34,26 @@ afterEach(() => {
 });
 
 describe("MonthCalendar", () => {
+  it("shows both same-day mode titles in one calendar day", () => {
+    render(<MonthCalendar month="2026-07" selectedDate="2026-07-23" today="2026-07-24"
+      summaries={[
+        { ...summaries[0], entryMode: "ai", attention: "AI 小结" },
+        { ...summaries[0], entryMode: "manual", attention: "手动小结" },
+      ]} onMonthChange={vi.fn()} onSelectDate={vi.fn()} />);
+    const day = screen.getByRole("button", { name: "7月25日，已保存：手动：手动小结 · AI：AI 小结" });
+    expect(screen.getAllByRole("button", { name: /7月25日/ })).toHaveLength(1);
+    fireEvent.focus(day);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("手动：手动小结 · AI：AI 小结");
+  });
+
+  it("limits multi-selection to fourteen saved days while permitting deselection", () => {
+    const selectedDates = Array.from({ length: 14 }, (_, index) => `2026-07-${String(index + 1).padStart(2, "0")}`);
+    const saved = [...selectedDates, "2026-07-15"].map(date => ({ ...summaries[0], date }));
+    render(<MonthCalendar month="2026-07" selectedDate="" selectedDates={selectedDates} summaries={saved} today="2026-07-24" onMonthChange={vi.fn()} onSelectDate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /7月15日，已保存/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /7月14日，已保存/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /7月14日，已保存/ })).toHaveAttribute("aria-pressed", "true");
+  });
   it("previews the full saved title on hover without changing the selected date", async () => {
     const { onSelectDate } = renderCalendar();
     const day = screen.getByRole("button", { name: "7月25日，已保存：梳理 RAG 的检索链路" });

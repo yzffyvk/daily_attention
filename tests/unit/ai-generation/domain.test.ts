@@ -19,6 +19,13 @@ const validResult = {
 };
 
 describe("AI generation domain contracts", () => {
+  it("normalizes optional learning requirements and enforces their own limit", () => {
+    expect(createAiGenerationSchema.parse(validInput).userPrompt).toBe("");
+    expect(createAiGenerationSchema.parse({ ...validInput, userPrompt: "  重点解释使用边界\n" }).userPrompt).toBe("重点解释使用边界");
+    expect(createAiGenerationSchema.safeParse({ ...validInput, userPrompt: "学".repeat(1000) }).success).toBe(true);
+    expect(createAiGenerationSchema.safeParse({ ...validInput, userPrompt: "学".repeat(1001) }).success).toBe(false);
+    expect(createAiGenerationSchema.safeParse({ ...validInput, userPrompt: { system: "override" } }).success).toBe(false);
+  });
   it("accepts the user's chapter 8 URL unchanged", () => {
     const sourceUrl = "https://datawhalechina.github.io/deepagents-in-action/chapters/ch08-long-term-memory/";
     expect(createAiGenerationSchema.parse({...validInput, sourceUrl}).sourceUrl).toBe(sourceUrl);
@@ -71,7 +78,7 @@ describe("AI generation domain contracts", () => {
 
   it.each([
     ["attention", "a".repeat(121)],
-    ["summary", "s".repeat(5001)],
+    ["summary", "s".repeat(12001)],
     ["inspiration", "i".repeat(2001)],
     ["sourceTitle", "t".repeat(301)],
   ] as const)("enforces the %s output limit", (field, value) => {
@@ -91,5 +98,9 @@ describe("AI generation domain contracts", () => {
       ...validResult,
       warnings: Array.from({ length: 11 }, (_, index) => `warning-${index}`),
     }).success).toBe(false);
+  });
+
+  it("accepts an empty AI inspiration so the user's own reflection can remain unwritten", () => {
+    expect(aiGenerationResultSchema.parse({ ...validResult, inspiration: "" }).inspiration).toBe("");
   });
 });

@@ -1,4 +1,6 @@
-# 今天你 Ai 了吗？
+# 知序 Aura
+
+让每一次学习，连成自己的知识地图。以点成线，以线成面。在记录中积累，在关联中理解。
 
 一个使用 Supabase 保存账户、打卡记录和图片的学习打卡应用。前端由
 [vinext](https://github.com/cloudflare/vinext) 运行，并部署到 OpenAI Sites。
@@ -86,6 +88,41 @@ import mechanism.
 
 ## Scope
 
+本期 AI 提炼支持网页文章、文字教程、知识笔记等文字资料链接，只根据可访问的页面正文梳理知识骨架；暂不支持视频或音频内容解析。视频页面的简介不能代表视频内容，界面不承诺对视频进行提炼。
+
+AI 提炼可选填写最多 1000 字符的「提炼要求」，指定学习重点、基础和讲解方式。留空采用默认方法；资料依据、概念关系和知识骨架结构始终保留。要求随账号、日期和 AI 记录保存，任务使用提交时的要求与提示词版本快照。修改要求后需重新提炼才会影响总结，界面可回看该结果实际使用的要求；重试同一请求不重复扣额度，新的提炼仍使用每日共享额度。旧记录无需补填要求。上线顺序见 [`services/ai-worker/README.md`](./services/ai-worker/README.md) 的提炼要求升级说明。
+
+新版 AI 提炼以「核心主线 → 独立问题 → 本题答案与局部结构图」组织阅读。一篇资料可以包含多个问题，每题仅展示回答它所需的概念和关系；共用概念保留统一解释，并支持跳转到所属问题后返回。问题编号表示建议阅读顺序，不代表因果或执行流程。简单资料可以只有一个问题，没有原文依据时不强行连线。结果保存在最多 12000 字符的可编辑小结中；旧格式继续展示，结构化文档编辑失效时保留完整原文。升级顺序与验收边界见 Worker 文档和 [`docs/ai-question-reader-qa-2026-09-27.md`](./docs/ai-question-reader-qa-2026-09-27.md)。
+
+手动记录与 AI 提炼按账号、日期和方式独立保存，各自拥有主题、来源、小结、收获、图片与版本。切换前立即保存浏览器草稿；AI 生成、润色与还原只影响 AI 记录。日历展示同一天的两类主题，统计按去重后的学习日期计算。知识串联从进入该功能时所选方式的已保存记录取材，重新生成沿用来源快照中的方式。旧云端记录与浏览器草稿原样归入手动记录，不推断历史来源。部署这次隔离功能前，先应用 `supabase/migrations/20260916123432_checkin_entry_mode_isolation.sql`，再发布应用；旧接口不带方式时仍读取或写入手动记录。
+
+AI 提炼下的「用自己的话解释」支持 AI 润色：根据当前知识总结和已写回答生成建议，经用户采纳后只更新这一栏，支持撤销；仍需手动保存记录。建议不会自动写入打卡记录。润色通过应用服务器直接调用模型，因此应用服务器也需要配置 `DEEPSEEK_API_KEY`、至少 32 字符的 `AI_USER_ID_PEPPER` 和 `AI_GENERATION_ENABLED=true`；密钥不能使用 `NEXT_PUBLIC_` 前缀。沿用现有限流配置，每个账号 10 分钟最多请求 10 次润色，独立于下述每日提炼/串联额度；润色接口本身不新增数据库结构。
+
+首页「串联知识」先展示已保存的脉络列表，支持编辑、复制独立副本和确认删除；右上角「新增串联知识」可选择 2–14 个跨月、不连续的已保存日期。同一主题生成以概念为节点的知识图谱：围绕核心问题组织知识主干，解释概念关系，并提供使用同一组概念的讲述提纲。必要时最多补充 3 个概念，标明「AI 补充」及补充原因，与原始记录和基于记录的推断区分。多领域混合或材料不足时直接展示原始来源快照，不强行连线或改写正文。
+
+结果会自动保存，可编辑概念解释和提纲、回看来源或重新生成；原始记录模式仅编辑脉络名称。原记录更新后保留旧快照并提示更新，旧版知识流和主题叙事仍可读取、编辑和复制。知识串联与单日 AI 提炼共用每日 5 次额度，编辑与复制不消耗额度。图谱结果沿用现有 JSON 字段，无需转换旧数据；上线前先应用仓库中的待执行迁移，包括 `20260917114824_index_knowledge_narrative_quota_reference.sql` 补齐额度关联索引，再更新前端/API 并重启常驻 Worker，详见 [`services/ai-worker/README.md`](./services/ai-worker/README.md)。
+
 This application has no invite flow, administrative console, or legacy-import
 feature. It uses Supabase as its only formal persistence and authentication
 backend.
+
+## 每日新知
+
+首页新增网球入门新知：按个人进度阅读、可选自测、主动收下、跳过已了解内容，以及按主题回看「我的新知」。每天最多收下一条，日期由数据库按 `Asia/Shanghai` 计算；跳过与自测不计入收下数量，也不影响原有学习打卡、知识串联或 AI 额度。累计 7、14、30 条可展开知识回顾。
+
+先应用 `supabase/migrations/20261009025954_daily_takeaways.sql`，再发布应用。新表启用 RLS，客户端不能直接写入；`GET/POST /api/daily-takeaways` 验证登录后调用仅服务端可执行的事务函数，处理并发、重复请求与每日限额。页面刷新会同步云端进度，但已展开的阅读内容保留至用户主动载入更新。
+
+`lib/domain/tennis-lessons.ts` 包含 30 条附 ITF、USTA、LTA 来源的初稿。`sourceVerifiedAt` 仅表示资料核对日期，不代表已完成真人编辑审核。目录默认导入为未发布草稿，生产读取不会展示草稿。
+
+```bash
+# 校验目录，不连接数据库
+node --experimental-strip-types scripts/sync-tennis-takeaways.mts
+# 导入本地 Supabase，仍为待审核草稿
+node --experimental-strip-types scripts/sync-tennis-takeaways.mts --apply
+# 仅在真人逐条审核内容及来源后执行；填入实际审核人
+node --experimental-strip-types scripts/sync-tennis-takeaways.mts --apply --publish --reviewer "实际审核人" --confirm-human-review
+```
+
+正式环境需显式加 `--configured-database`，并由环境提供 `NEXT_PUBLIC_SUPABASE_URL` 与 `SUPABASE_SECRET_KEY`；不要将服务端密钥写入前端配置。已发布或曾经发布的内容修改必须递增 `version`、填写 `correctionNote` 并重新审核。撤回只停止新用户获取该条，历史保留最后审核内容和收下时的版本，不允许草稿覆盖历史。
+
+本地体验运行 `npm run demo`，打开 `http://127.0.0.1:4300/?demo=1`。这是使用独立模拟数据的预览，不会发布目录或写入真实账号；可加 `&takeaway=history`、`milestone`、`corrected`、`save-error` 或 `complete` 检查不同状态。验证使用 `tests/unit/daily-takeaways/`、`supabase/tests/database/daily-takeaways.test.sql`、`tests/integration/daily-takeaways-api.test.ts` 和 `node tests/visual/verify-daily-takeaways.mjs`。

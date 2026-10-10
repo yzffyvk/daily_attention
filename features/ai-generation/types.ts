@@ -1,4 +1,5 @@
 import type { AiGenerationResult } from "@/lib/domain/ai-generation";
+import type { AiGenerationContext } from "@/lib/domain/ai-prompt";
 
 export type AiGenerationStatus =
   | "queued"
@@ -25,6 +26,7 @@ export type AiGenerationQuota = {
 };
 
 export type CreateAiGenerationData = {
+  generationContext?: AiGenerationContext;
   jobId: string;
   status: AiGenerationStatus;
   pollAfterMs: number;
@@ -32,6 +34,8 @@ export type CreateAiGenerationData = {
 };
 
 export type ActiveAiJob = {
+  userPrompt?: string;
+  generationContext?: AiGenerationContext;
   jobId: string;
   targetDate: string;
   sourceUrl: string;
@@ -40,6 +44,7 @@ export type ActiveAiJob = {
 
 export type AiGenerationTaskErrorCode =
   | "FETCH_TIMEOUT"
+  | "FETCH_SERVICE_UNAVAILABLE"
   | "TOO_MANY_REDIRECTS"
   | "RESPONSE_TOO_LARGE"
   | "UNSUPPORTED_CONTENT_TYPE"
@@ -52,6 +57,7 @@ export type AiGenerationTaskErrorCode =
   | "RESULT_EXPIRED";
 
 export type AiGenerationJobData = {
+  generationContext?: AiGenerationContext;
   jobId: string;
   status: AiGenerationStatus;
   stage: AiGenerationStage;

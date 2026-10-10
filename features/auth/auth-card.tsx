@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { AuraMark } from "@/features/brand/aura-mark";
+import { ThemeToggle } from "@/features/theme/theme-toggle";
 
 export function AuthCard({
   step,
@@ -14,15 +15,16 @@ export function AuthCard({
 }) {
   return (
     <main className="login-page">
+      <div className="auth-theme-controls"><ThemeToggle /></div>
       <section className="login-shell">
         <div className="login-brand">
           <AuraMark className="auth-brand-mark" />
           <div>
-            <p className="eyebrow">ATTENTION IS ALL YOU NEED.</p>
+            <p className="eyebrow">LEARNING, CONNECTED.</p>
             <h1>
               知序<span lang="en">Aura</span>
             </h1>
-            <p>专注，让知识有序。<br />为每天的学习，留下一次回响。</p>
+            <p>让每一次学习，连成自己的知识地图。<br />以点成线，以线成面。在记录中积累，在关联中理解。</p>
           </div>
           <div aria-hidden="true" className="auth-signal">
             <span />

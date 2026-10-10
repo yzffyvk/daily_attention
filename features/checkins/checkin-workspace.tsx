@@ -2,13 +2,17 @@
 
 import confetti from "canvas-confetti";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { CalendarDays, Check, ImageDown, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MonthCalendar } from "@/features/calendar/month-calendar";
 import { useAiGeneration } from "@/features/ai-generation/use-ai-generation";
+import type { CheckInEntryMode } from "@/lib/domain/checkin";
 import type { ActiveAiJob } from "@/features/ai-generation/types";
+import type { AiGenerationResult } from "@/lib/domain/ai-generation";
 import { useCheckInDraft } from "@/features/drafts/use-checkin-draft";
 import { AppHeader } from "@/features/profile/app-header";
+import { CurrentLearningPersona } from "@/features/profile/learning-persona";
+import { KnowledgeWorkspace } from "@/features/knowledge-narratives/knowledge-workspace";
 import type { AccountProfile } from "@/server/auth/ports";
 import {
   ApiError,
@@ -31,6 +35,8 @@ import {
   monthKeyForDate,
 } from "./dates";
 import { DirtySwitchDialog, useDialogFocus } from "./dirty-switch-dialog";
+import { DailyEchoDialog } from "./daily-echo-dialog";
+import { DailyTakeawayEntry } from "@/features/daily-takeaways/daily-takeaway-entry";
 import type { ImageSelection } from "./image-note-uploader";
 import { checkInKeys, setMonthRecord, useCheckIn, useMonthCheckIns, useSaveCheckIn } from "./queries";
 import type { CheckInRecord } from "./types";
@@ -40,15 +46,28 @@ import {
 } from "@/lib/indexed-db/drafts";
 
 const muteStorageKey = "attention-journal-muted";
+const calendarStorageKey = "aura-calendar-collapsed";
 
 type CheckInWorkspaceProps = {
   initialDate: string;
   initialToday?: string;
+  initialEntryMode?: CheckInEntryMode;
   initialProfile?: AccountProfile | null;
   userId?: string | null;
 };
 
+function entryIdentity(date: string, mode: CheckInEntryMode) {
+  return `${date}:${mode}`;
+}
+
+function draftWithAiResult(draft: CheckInDraft, job: ActiveAiJob, result: AiGenerationResult): CheckInDraft {
+  return { ...draft, attention: result.attention, summary: result.summary, sourceUrl: job.sourceUrl,
+    userPrompt: draft.userPrompt ?? job.userPrompt ?? job.generationContext?.userPrompt ?? "",
+    aiGenerationContext: job.generationContext ?? null };
+}
+
 type ConflictState = {
+  entryMode: CheckInEntryMode;
   current: CheckInRecord | null;
   date: string;
 };
@@ -163,18 +182,27 @@ function recordSnapshot(record: CheckInRecord | null) {
 export function CheckInWorkspace({
   initialDate,
   initialToday = initialDate,
+  initialEntryMode = "manual",
   initialProfile = null,
   userId = null,
 }: CheckInWorkspaceProps) {
   const queryClient = useQueryClient();
   const [today, setToday] = useState(initialToday);
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+  const [calendarCollapsed, setCalendarCollapsed] = useState(false);
+  const knowledgeLeaveGuard = useRef<((leave: () => void) => void) | null>(null);
+  const knowledgeListNavigation = useRef<(() => void) | null>(null);
   const [selectedDate, setSelectedDate] = useState(initialDate);
+  const [entryMode, setEntryMode] = useState<CheckInEntryMode>(initialEntryMode);
+  const entryModeRef = useRef<CheckInEntryMode>(initialEntryMode);
+  const modeSwitchInFlightRef = useRef(false);
+  const transientDraftsRef = useRef(new Map<string, { draft: CheckInDraft; record: CheckInRecord | null; version: number | null }>());
   const [month, setMonth] = useState(() => monthKeyForDate(initialDate));
   const [draft, setDraft] = useState<CheckInDraft>(() => draftFromRecord(null));
   const [draftBaseRecord, setDraftBaseRecord] = useState<CheckInRecord | null>(null);
   const [baseVersion, setBaseVersion] = useState<number | null>(null);
   const [baseRecordExists, setBaseRecordExists] = useState(false);
-  const [hydratedDate, setHydratedDate] = useState<string | null>(null);
+  const [hydratedIdentity, setHydratedIdentity] = useState<string | null>(null);
   const [pendingDate, setPendingDate] = useState<string | null>(null);
   const [logoutPending, setLogoutPending] = useState(false);
   const [conflict, setConflict] = useState<ConflictState | null>(null);
@@ -183,8 +211,13 @@ export function CheckInWorkspace({
   const [toast, setToast] = useState("");
   const [isMuted, setIsMuted] = useState(false);
   const [isCelebrating, setIsCelebrating] = useState(false);
+  const [echoDate, setEchoDate] = useState<string | null>(null);
+  const shownEchoesRef = useRef(new Set<string>());
+  const echoAccountId = userId ?? initialProfile?.id;
+  const echoStorageKey = echoAccountId ? `aura-daily-echo-shown:${encodeURIComponent(echoAccountId)}` : null;
   const [isSaving, setIsSaving] = useState(false);
   const [isCleaningUpImage, setIsCleaningUpImage] = useState(false);
+  const [isAbandoningDraft, setIsAbandoningDraft] = useState(false);
   const [isPreparingImage, setIsPreparingImage] = useState(false);
   const [activeAiJob, setActiveAiJob] = useState<ActiveAiJob | null>(null);
   const toastTimerRef = useRef<number | null>(null);
@@ -197,16 +230,24 @@ export function CheckInWorkspace({
   const logoutInFlightRef = useRef(false);
   const imageOperationRef = useRef(0);
   const imageCleanupInFlightRef = useRef(false);
+  const draftAbandonInFlightRef = useRef(false);
   const imagePreparationInFlightRef = useRef(false);
   const ambiguousCandidatePathsRef = useRef(new Set<string>());
   const activeAiJobRef = useRef<ActiveAiJob | null>(null);
+  const activeAiSavedRecordRef = useRef<{
+    jobId: string;
+    record: CheckInRecord | null;
+  } | null>(null);
   const aiPersistenceRef = useRef<Promise<unknown>>(Promise.resolve());
+  const readyDraftIdentityRef = useRef<string | null>(null);
+  const pendingAiResultsRef = useRef(new Map<string, { job: ActiveAiJob; result: AiGenerationResult }>());
+  const terminalAiJobIdsRef = useRef(new Set<string>());
 
   const monthQuery = useMonthCheckIns(month);
-  const checkInQuery = useCheckIn(selectedDate);
+  const checkInQuery = useCheckIn(selectedDate, entryMode);
   const saveMutation = useSaveCheckIn();
   const hasSelectedRecordError = checkInQuery.isError;
-  const isDialogActionBusy = isSaving || saveMutation.isPending || isCleaningUpImage || isPreparingImage;
+  const isDialogActionBusy = isSaving || saveMutation.isPending || isCleaningUpImage || isPreparingImage || isAbandoningDraft;
   const selectedRecord = checkInQuery.data ?? null;
   const isDirty = isDraftDirty(draft, draftBaseRecord);
   const canSave = Boolean(draft.attention.trim());
@@ -214,6 +255,15 @@ export function CheckInWorkspace({
     activeJob: activeAiJob,
     onActiveJobChange: (nextJob) => {
       const previousJob = activeAiJobRef.current;
+      if (nextJob && nextJob.jobId !== previousJob?.jobId) {
+        activeAiSavedRecordRef.current = {
+          jobId: nextJob.jobId,
+          record: recordSnapshot(
+            queryClient.getQueryData<CheckInRecord | null>(checkInKeys.date(nextJob.targetDate, "ai"))
+              ?? (selectedDateRef.current === nextJob.targetDate && entryModeRef.current === "ai" ? draftBaseRecordRef.current : null),
+          ),
+        };
+      }
       activeAiJobRef.current = nextJob;
       setActiveAiJob(nextJob);
       if (!nextJob && previousJob && userId) {
@@ -223,65 +273,110 @@ export function CheckInWorkspace({
         );
       }
     },
-    onSucceeded: (result, targetDate) => {
-      const job = activeAiJobRef.current;
-      if (!job || job.targetDate !== targetDate) return;
-      if (selectedDateRef.current === targetDate) {
-        setDraft((current) => ({
-          ...current,
-          attention: result.attention,
-          summary: result.summary,
-          inspiration: result.inspiration,
-          sourceUrl: job.sourceUrl,
-        }));
+    onSucceeded: (result, targetDate, generationContext) => {
+      const active = activeAiJobRef.current;
+      if (!active || active.targetDate !== targetDate || terminalAiJobIdsRef.current.has(active.jobId)) return;
+      const job = { ...active, generationContext: generationContext ?? active.generationContext };
+      terminalAiJobIdsRef.current.add(job.jobId);
+      const identity = entryIdentity(targetDate, "ai");
+      if (readyDraftIdentityRef.current === identity && selectedDateRef.current === targetDate && entryModeRef.current === "ai" && !modeSwitchInFlightRef.current) {
+        setDraft((current) => draftWithAiResult(current, job, result));
         setStatus("AI 小结已生成，请审阅后手动保存", "success");
-      } else if (userId) {
+      } else {
+        // Incoming local reads must finish before changing the editor draft.
+        pendingAiResultsRef.current.set(identity, { job, result });
+        if (!userId) return;
+        const cachedRecord = queryClient.getQueryData<CheckInRecord | null>(checkInKeys.date(targetDate, "ai"));
+        // Keep the saved reflection available for the whole job, even after query cache eviction.
+        const savedRecord = cachedRecord !== undefined
+          ? cachedRecord
+          : activeAiSavedRecordRef.current?.jobId === job.jobId
+            ? activeAiSavedRecordRef.current.record
+            : null;
+        transientDraftsRef.current.delete(entryIdentity(targetDate, "ai"));
+        const persistResult = () => applyAiResultToDraft(
+          userId,
+          job,
+          result,
+          savedRecord,
+        );
         aiPersistenceRef.current = aiPersistenceRef.current.then(
-          () => applyAiResultToDraft(userId, job, result),
-          () => applyAiResultToDraft(userId, job, result),
+          persistResult,
+          persistResult,
         );
         showToast(`${formatDate(targetDate)}的 AI 小结已生成`);
       }
     },
-    onTerminal: () => undefined,
+    onTerminal: (jobId) => { terminalAiJobIdsRef.current.add(jobId); },
   });
   const {
     deleteAfterCloudSave,
+    flushCurrentDraft,
     isOffline,
+    isReadyForCurrentIdentity,
+    retryDraftLoad,
     storageState: draftStorageState,
   } = useCheckInDraft({
     userId,
     date: selectedDate,
+    entryMode,
     cloudRecord: checkInQuery.isSuccess ? selectedRecord : hasSelectedRecordError ? null : undefined,
     draft,
     isDirty,
     baseVersion,
-    activeAiJob: activeAiJob?.targetDate === selectedDate ? activeAiJob : null,
+    activeAiJob: entryMode === "ai" && activeAiJob?.targetDate === selectedDate ? activeAiJob : null,
     onRestore: (restoredDraft, restoredBaseVersion, restoredAiJob) => {
-      if (selectedDateRef.current !== selectedDate) return;
+      if (selectedDateRef.current !== selectedDate || entryModeRef.current !== entryMode) return;
       const cloudSnapshot = recordSnapshot(checkInQuery.data ?? null);
-      draftRef.current = restoredDraft;
+      const pendingResult = pendingAiResultsRef.current.get(entryIdentity(selectedDate, entryMode));
+      const nextDraft = pendingResult ? draftWithAiResult(restoredDraft, pendingResult.job, pendingResult.result) : restoredDraft;
+      draftRef.current = nextDraft;
       draftBaseRecordRef.current = cloudSnapshot;
-      setDraft(restoredDraft);
+      setDraft(nextDraft);
       setDraftBaseRecord(cloudSnapshot);
       setBaseVersion(restoredBaseVersion);
       setBaseRecordExists(cloudSnapshot !== null);
-      setHydratedDate(selectedDate);
-      if (restoredAiJob) {
+      setHydratedIdentity(entryIdentity(selectedDate, entryMode));
+      if (restoredAiJob && !terminalAiJobIdsRef.current.has(restoredAiJob.jobId)) {
         activeAiJobRef.current = restoredAiJob;
+        activeAiSavedRecordRef.current = { jobId: restoredAiJob.jobId, record: cloudSnapshot };
         setActiveAiJob(restoredAiJob);
       }
       setStatus("已恢复本地草稿", "success");
     },
   });
   const isCloudReadFailure = hasSelectedRecordError && !isOffline;
-  const isAwaitingSelectedRecord = !isOffline && (hydratedDate !== selectedDate || checkInQuery.isFetching);
+  const isAwaitingSelectedRecord = (!isOffline && (hydratedIdentity !== entryIdentity(selectedDate, entryMode) || checkInQuery.isFetching)) || Boolean(userId && ((!isReadyForCurrentIdentity && draftStorageState !== "unavailable") || draftStorageState === "blocked"));
   const isEditorLocked = isDialogActionBusy || isAwaitingSelectedRecord || isCloudReadFailure;
   const isHeaderBusy = isDialogActionBusy || Boolean(conflict);
 
+  useLayoutEffect(() => {
+    readyDraftIdentityRef.current = (!userId || isReadyForCurrentIdentity)
+      && hydratedIdentity === entryIdentity(selectedDate, entryMode)
+      && !checkInQuery.isFetching
+      && (!hasSelectedRecordError || isOffline)
+      ? entryIdentity(selectedDate, entryMode)
+      : null;
+  }, [checkInQuery.isFetching, entryMode, hasSelectedRecordError, hydratedIdentity, isOffline, isReadyForCurrentIdentity, selectedDate, userId]);
+
+  useEffect(() => {
+    const identity = entryIdentity(selectedDate, entryMode);
+    if (entryMode !== "ai" || readyDraftIdentityRef.current !== identity || modeSwitchInFlightRef.current) return;
+    const pendingResult = pendingAiResultsRef.current.get(identity);
+    if (!pendingResult) return;
+    pendingAiResultsRef.current.delete(identity);
+    setDraft((current) => draftWithAiResult(current, pendingResult.job, pendingResult.result));
+    setStatus("AI 小结已生成，请审阅后手动保存", "success");
+  }, [checkInQuery.isFetching, entryMode, hydratedIdentity, isOffline, isReadyForCurrentIdentity, selectedDate]);
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setIsMuted(window.localStorage.getItem(muteStorageKey) === "true");
+      try {
+        setIsMuted(window.localStorage.getItem(muteStorageKey) === "true");
+        setCalendarCollapsed(window.localStorage.getItem(calendarStorageKey) === "true");
+      } catch {
+        // Reading and writing remain available when browser preferences are blocked.
+      }
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
@@ -311,28 +406,28 @@ export function CheckInWorkspace({
     setDraftBaseRecord(snapshot);
     setBaseVersion(snapshot?.version ?? null);
     setBaseRecordExists(snapshot !== null);
-    setHydratedDate(date);
+    setHydratedIdentity(date ? entryIdentity(date, entryModeRef.current) : null);
   }, []);
 
   useEffect(() => {
-    if (isOffline && hasSelectedRecordError && hydratedDate !== selectedDate) {
+    if (isOffline && hasSelectedRecordError && hydratedIdentity !== entryIdentity(selectedDate, entryMode)) {
       if (isDraftDirty(draftRef.current, draftBaseRecordRef.current)) {
-        setHydratedDate(selectedDate);
+        setHydratedIdentity(entryIdentity(selectedDate, entryMode));
       } else {
         hydrateDraft(null, selectedDate);
       }
     }
-  }, [hasSelectedRecordError, hydratedDate, hydrateDraft, isOffline, selectedDate]);
+  }, [entryMode, hasSelectedRecordError, hydratedIdentity, hydrateDraft, isOffline, selectedDate]);
 
   useEffect(() => {
     if (!checkInQuery.isSuccess) return;
-    const needsInitialHydration = hydratedDate !== selectedDate;
+    const needsInitialHydration = hydratedIdentity !== entryIdentity(selectedDate, entryMode);
     const isClean = !isDraftDirty(draftRef.current, draftBaseRecordRef.current);
     if (!needsInitialHydration && (checkInQuery.isFetching || !isClean)) return;
     const record = checkInQuery.data ?? null;
     const timer = window.setTimeout(() => {
-      if (selectedDateRef.current !== selectedDate) return;
-      if (hydratedDate !== selectedDate && checkInQuery.isFetching) {
+      if (selectedDateRef.current !== selectedDate || entryModeRef.current !== entryMode) return;
+      if (hydratedIdentity !== entryIdentity(selectedDate, entryMode) && checkInQuery.isFetching) {
         hydrateDraft(record, selectedDate);
         return;
       }
@@ -341,7 +436,7 @@ export function CheckInWorkspace({
       }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [checkInQuery.data, checkInQuery.isFetching, checkInQuery.isSuccess, hydrateDraft, hydratedDate, selectedDate]);
+  }, [entryMode, checkInQuery.data, checkInQuery.isFetching, checkInQuery.isSuccess, hydrateDraft, hydratedIdentity, selectedDate]);
 
   useEffect(() => {
     let midnightTimer: number | null = null;
@@ -361,13 +456,15 @@ export function CheckInWorkspace({
           selectedDateRef.current === previousToday &&
           draftIsClean &&
           !saveInFlightRef.current &&
+          !draftAbandonInFlightRef.current &&
           !imageCleanupInFlightRef.current &&
           !imagePreparationInFlightRef.current
         ) {
           const cached = queryClient.getQueryData<CheckInRecord | null>(
-            checkInKeys.date(browserToday),
+            checkInKeys.date(browserToday, entryModeRef.current),
           );
           imageOperationRef.current += 1;
+          readyDraftIdentityRef.current = null;
           selectedDateRef.current = browserToday;
           setMonth(monthKeyForDate(browserToday));
           setSelectedDate(browserToday);
@@ -407,6 +504,25 @@ export function CheckInWorkspace({
     toastTimerRef.current = window.setTimeout(() => setToast(""), 2600);
   }
 
+  function hasShownDailyEcho(date: string) {
+    if (shownEchoesRef.current.has(`${echoAccountId ?? "session"}:${date}`)) return true;
+    try {
+      return echoStorageKey !== null && window.localStorage.getItem(echoStorageKey) === date;
+    } catch {
+      return false;
+    }
+  }
+
+  function openDailyEcho(date: string) {
+    shownEchoesRef.current.add(`${echoAccountId ?? "session"}:${date}`);
+    // Remember today's presentation, not whether a record already existed.
+    // Reviewing an older card must not overwrite today's marker.
+    if (date === todayRef.current && echoStorageKey) {
+      try { window.localStorage.setItem(echoStorageKey, date); } catch { /* In-memory deduplication still works. */ }
+    }
+    setEchoDate(date);
+  }
+
   function scrollToEditor() {
     window.requestAnimationFrame(() => {
       document.getElementById("entry-editor")?.scrollIntoView({
@@ -418,10 +534,58 @@ export function CheckInWorkspace({
     });
   }
 
+  async function switchEntryMode(nextMode: CheckInEntryMode) {
+    if (nextMode === entryModeRef.current || editorLockedRef.current || modeSwitchInFlightRef.current || conflict) return;
+    const date = selectedDateRef.current;
+    const previousMode = entryModeRef.current;
+    modeSwitchInFlightRef.current = true;
+    readyDraftIdentityRef.current = null;
+    editorLockedRef.current = true;
+    setIsCleaningUpImage(true);
+    try {
+      if (userId && (isDraftDirty(draftRef.current, draftBaseRecordRef.current) || (previousMode === "ai" && activeAiJobRef.current?.targetDate === date))) {
+        // Serialize the outgoing snapshot before any AI result arriving during this switch.
+        const flush = () => flushCurrentDraft();
+        aiPersistenceRef.current = aiPersistenceRef.current.then(flush, flush);
+        await aiPersistenceRef.current;
+      } else if (!userId) {
+        transientDraftsRef.current.set(entryIdentity(date, previousMode), {
+          draft: draftRef.current, record: draftBaseRecordRef.current, version: baseVersion,
+        });
+      }
+      await aiPersistenceRef.current;
+      const cached = queryClient.getQueryData<CheckInRecord | null>(checkInKeys.date(date, nextMode));
+      imageOperationRef.current += 1;
+      entryModeRef.current = nextMode;
+      setEntryMode(nextMode);
+      const transient = !userId ? transientDraftsRef.current.get(entryIdentity(date, nextMode)) : undefined;
+      if (transient) {
+        draftRef.current = transient.draft;
+        draftBaseRecordRef.current = transient.record;
+        setDraft(transient.draft);
+        setDraftBaseRecord(transient.record);
+        setBaseVersion(transient.version);
+        setBaseRecordExists(transient.record !== null);
+        setHydratedIdentity(entryIdentity(date, nextMode));
+      } else {
+        hydrateDraft(cached ?? null, cached === undefined ? null : date);
+      }
+      setStatus(nextMode === "ai" ? "已切换到 AI 提炼，内容独立保存" : "已切换到手动记录，内容独立保存");
+    } catch {
+      aiPersistenceRef.current = aiPersistenceRef.current.catch(() => undefined);
+      setStatus("草稿暂时无法保存，请保留当前页面并重试切换", "error");
+    } finally {
+      modeSwitchInFlightRef.current = false;
+      editorLockedRef.current = false;
+      setIsCleaningUpImage(false);
+    }
+  }
+
   function openDate(date: string) {
     if (editorLockedRef.current || imageCleanupInFlightRef.current) return;
-    const cached = queryClient.getQueryData<CheckInRecord | null>(checkInKeys.date(date));
+    const cached = queryClient.getQueryData<CheckInRecord | null>(checkInKeys.date(date, entryModeRef.current));
     imageOperationRef.current += 1;
+    readyDraftIdentityRef.current = null;
     imagePreparationInFlightRef.current = false;
     setIsPreparingImage(false);
     selectedDateRef.current = date;
@@ -454,25 +618,35 @@ export function CheckInWorkspace({
       return false;
     } finally {
       imageCleanupInFlightRef.current = false;
-      editorLockedRef.current = saveInFlightRef.current || imagePreparationInFlightRef.current;
+      editorLockedRef.current = saveInFlightRef.current || imagePreparationInFlightRef.current || draftAbandonInFlightRef.current;
       setIsCleaningUpImage(false);
     }
   }
 
   async function abandonLocalDraft(record = selectedRecord, operation = imageOperationRef.current) {
-    const uploadedImagePath = draftRef.current.uploadedImagePath;
-    if (uploadedImagePath) {
-      await cleanupPendingImage(uploadedImagePath, false, operation);
+    if (draftAbandonInFlightRef.current) return false;
+    draftAbandonInFlightRef.current = true;
+    editorLockedRef.current = true;
+    setIsAbandoningDraft(true);
+    try {
+      const uploadedImagePath = draftRef.current.uploadedImagePath;
+      if (uploadedImagePath) {
+        await cleanupPendingImage(uploadedImagePath, false, operation);
+      }
+      if (!isCurrentImageOperation(operation)) return false;
+      await deleteAfterCloudSave();
+      if (!isCurrentImageOperation(operation)) return false;
+      const activeDate = selectedDateRef.current;
+      const latestRecord = queryClient.getQueryData<CheckInRecord | null>(
+        checkInKeys.date(activeDate, entryModeRef.current),
+      );
+      hydrateDraft(latestRecord === undefined ? record : latestRecord, activeDate);
+      return true;
+    } finally {
+      draftAbandonInFlightRef.current = false;
+      editorLockedRef.current = saveInFlightRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current;
+      setIsAbandoningDraft(false);
     }
-    if (!isCurrentImageOperation(operation)) return false;
-    await deleteAfterCloudSave();
-    if (!isCurrentImageOperation(operation)) return false;
-    const activeDate = selectedDateRef.current;
-    const latestRecord = queryClient.getQueryData<CheckInRecord | null>(
-      checkInKeys.date(activeDate),
-    );
-    hydrateDraft(latestRecord === undefined ? record : latestRecord, activeDate);
-    return true;
   }
 
   function requestDateChange(date: string) {
@@ -503,7 +677,7 @@ export function CheckInWorkspace({
     imageOperationRef.current = operation;
     const isCurrentOperation = () => (
       operation === imageOperationRef.current &&
-      identity === selectedDateRef.current &&
+      identity === entryIdentity(selectedDateRef.current, entryModeRef.current) &&
       !saveInFlightRef.current &&
       !imageCleanupInFlightRef.current
     );
@@ -533,7 +707,7 @@ export function CheckInWorkspace({
     );
   }
 
-  async function saveCurrentRecord() {
+  async function saveCurrentRecord({ showEcho = true }: { showEcho?: boolean } = {}) {
     if (isOffline) {
       setStatus(
         draftStorageState === "unavailable"
@@ -550,7 +724,7 @@ export function CheckInWorkspace({
     const activeDate = selectedDate;
     const attention = activeDraft.attention.trim();
     if (!attention) {
-      setStatus("请先填写今日 attention", "error");
+      setStatus("请先填写今日知识主题", "error");
       return false;
     }
 
@@ -573,8 +747,13 @@ export function CheckInWorkspace({
       const record = await saveMutation.mutateAsync({
         date: activeDate,
         input: {
+          entryMode: entryModeRef.current,
           attention,
           sourceUrl: activeDraft.sourceUrl.trim(),
+          ...(entryModeRef.current === "ai" ? {
+            userPrompt: (activeDraft.userPrompt ?? "").trim(),
+            aiGenerationContext: activeDraft.aiGenerationContext ?? null,
+          } : {}),
           summary: activeDraft.summary.trim(),
           inspiration: activeDraft.inspiration.trim(),
           imagePath: activeDraft.removeImage
@@ -590,6 +769,10 @@ export function CheckInWorkspace({
       if (pendingImagePath) {
         ambiguousCandidatePathsRef.current.delete(pendingImagePath);
       }
+      const pendingAiJob = activeAiJobRef.current;
+      if (entryModeRef.current === "ai" && pendingAiJob?.targetDate === activeDate) {
+        activeAiSavedRecordRef.current = { jobId: pendingAiJob.jobId, record: recordSnapshot(record) };
+      }
       hydrateDraft(record, activeDate);
       await deleteAfterCloudSave();
       setStatus(
@@ -598,7 +781,9 @@ export function CheckInWorkspace({
           : `${formatDate(activeDate)}打卡完成`,
         "success",
       );
-      void queryClient.invalidateQueries({ queryKey: checkInKeys.date(activeDate) });
+      void queryClient.invalidateQueries({ queryKey: checkInKeys.date(activeDate, entryModeRef.current) });
+
+      if (showEcho && activeDate === todayRef.current && !hasShownDailyEcho(activeDate)) openDailyEcho(activeDate);
 
       if (!activeRecordExists) {
         if (!isMuted) playCheckInChime();
@@ -621,9 +806,9 @@ export function CheckInWorkspace({
         }
         setPendingDate(null);
         setLogoutPending(false);
-        setConflict({ current: error.current ?? null, date: activeDate });
-        queryClient.setQueryData(checkInKeys.date(activeDate), error.current ?? null);
-        setMonthRecord(queryClient, error.current ?? null, activeDate);
+        setConflict({ current: error.current ?? null, date: activeDate, entryMode: entryModeRef.current });
+        queryClient.setQueryData(checkInKeys.date(activeDate, entryModeRef.current), error.current ?? null);
+        setMonthRecord(queryClient, error.current ?? null, activeDate, entryModeRef.current);
         setStatus(error.message, "error");
         return false;
       }
@@ -653,7 +838,7 @@ export function CheckInWorkspace({
 
   async function saveAndSwitch() {
     const targetDate = pendingDate;
-    if (await saveCurrentRecord()) {
+    if (await saveCurrentRecord({ showEcho: false })) {
       if (targetDate) openDate(targetDate);
     }
   }
@@ -669,7 +854,7 @@ export function CheckInWorkspace({
   }
 
   async function logout() {
-    if (imageCleanupInFlightRef.current || imagePreparationInFlightRef.current || saveInFlightRef.current || logoutInFlightRef.current) return;
+    if (draftAbandonInFlightRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current || saveInFlightRef.current || logoutInFlightRef.current) return;
     logoutInFlightRef.current = true;
     editorLockedRef.current = true;
     setIsSaving(true);
@@ -689,11 +874,11 @@ export function CheckInWorkspace({
   }
 
   async function saveAndLogout() {
-    if (await saveCurrentRecord()) await logout();
+    if (await saveCurrentRecord({ showEcho: false })) await logout();
   }
 
   async function discardAndLogout() {
-    if (saveInFlightRef.current || logoutInFlightRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current) return;
+    if (draftAbandonInFlightRef.current || saveInFlightRef.current || logoutInFlightRef.current || imageCleanupInFlightRef.current || imagePreparationInFlightRef.current) return;
     const operation = imageOperationRef.current + 1;
     imageOperationRef.current = operation;
     if (await abandonLocalDraft(selectedRecord, operation)) await logout();
@@ -709,12 +894,12 @@ export function CheckInWorkspace({
       await cleanupPendingImage(uploadedImagePath, false, operation);
     }
     if (!isCurrentImageOperation(operation, conflict.date)) return;
-    queryClient.setQueryData(checkInKeys.date(conflict.date), cloudRecord);
-    setMonthRecord(queryClient, cloudRecord, conflict.date);
+    queryClient.setQueryData(checkInKeys.date(conflict.date, conflict.entryMode), cloudRecord);
+    setMonthRecord(queryClient, cloudRecord, conflict.date, conflict.entryMode);
     hydrateDraft(cloudRecord, conflict.date);
     setConflict(null);
     setStatus(cloudRecord ? "已载入云端版本" : "云端记录已不存在", "neutral");
-    void queryClient.invalidateQueries({ queryKey: checkInKeys.date(conflict.date) });
+    void queryClient.invalidateQueries({ queryKey: checkInKeys.date(conflict.date, conflict.entryMode) });
   }
 
   return (
@@ -728,10 +913,20 @@ export function CheckInWorkspace({
           isMuted={isMuted}
           onRequestLogout={() => {
             if (isHeaderBusy) return;
-            if (isDirty) setLogoutPending(true);
-            else void logout();
+            const leave = () => { if (isDirty) setLogoutPending(true); else void logout(); };
+            if (knowledgeLeaveGuard.current) knowledgeLeaveGuard.current(leave);
+            else leave();
           }}
-          onSelectToday={selectToday}
+          onSelectToday={() => {
+            const leave = () => { setKnowledgeOpen(false); selectToday(); };
+            if (knowledgeLeaveGuard.current) knowledgeLeaveGuard.current(leave);
+            else leave();
+          }}
+          onOpenKnowledge={() => {
+            if (knowledgeOpen) knowledgeListNavigation.current?.();
+            else setKnowledgeOpen(true);
+          }}
+          knowledgeOpen={knowledgeOpen}
           onToggleMuted={() => {
             if (isHeaderBusy) return;
             const nextMuted = !isMuted;
@@ -741,7 +936,45 @@ export function CheckInWorkspace({
           }}
           today={today}
         />
-        <div className="workspace-grid">
+        {knowledgeOpen ? <KnowledgeWorkspace today={today} entryMode={entryMode} emptyIllustration={<CurrentLearningPersona initialProfile={initialProfile} />} leaveGuardRef={knowledgeLeaveGuard} listNavigationRef={knowledgeListNavigation} userId={userId ?? initialProfile?.id ?? "current-user"} onClose={() => {
+          setKnowledgeOpen(false);
+          requestAnimationFrame(() => document.getElementById("knowledge-entry")?.focus());
+        }} /> : null}
+        <div hidden={knowledgeOpen}>
+          <DailyTakeawayEntry userId={userId ?? initialProfile?.id ?? "current-user"} />
+        </div>
+        <div className="workspace-view-toolbar" hidden={knowledgeOpen}>
+          <span><CalendarDays aria-hidden="true" size={16} />{formatDate(selectedDate)}</span>
+          <div className="workspace-toolbar-actions">
+            {draftBaseRecord || monthQuery.data?.some(item => item.date === selectedDate) ? (
+              <button
+                aria-label="查看打卡纪念卡"
+                className="echo-reopen"
+                disabled={isEditorLocked}
+                onClick={() => openDailyEcho(selectedDate)}
+                type="button"
+              >
+                <ImageDown aria-hidden="true" size={17} />今日回响
+              </button>
+            ) : null}
+            <button
+              aria-controls="learning-calendar"
+              aria-expanded={!calendarCollapsed}
+              className="calendar-visibility-toggle"
+              onClick={() => {
+                const next = !calendarCollapsed;
+                setCalendarCollapsed(next);
+                try { window.localStorage.setItem(calendarStorageKey, String(next)); } catch { /* Preference is optional. */ }
+              }}
+              type="button"
+            >
+              {calendarCollapsed ? <PanelLeftOpen aria-hidden="true" size={17} /> : <PanelLeftClose aria-hidden="true" size={17} />}
+              {calendarCollapsed ? "展开日历" : "收起日历"}
+            </button>
+          </div>
+        </div>
+        <div className={`workspace-grid${calendarCollapsed ? " calendar-collapsed" : ""}`} hidden={knowledgeOpen}>
+          <div className="calendar-pane" id="learning-calendar" hidden={calendarCollapsed}>
           <MonthCalendar
             errorMessage={monthQuery.isError ? messageForError(monthQuery.error) : ""}
             isLoading={monthQuery.isPending}
@@ -758,8 +991,11 @@ export function CheckInWorkspace({
             summaries={monthQuery.data}
             today={today}
           />
+          </div>
           <CheckInEditor
-            aiActiveJob={aiGeneration.activeJob}
+            entryMode={entryMode}
+            onEntryModeChange={(nextMode) => void switchEntryMode(nextMode)}
+            aiActiveJob={entryMode === "ai" ? aiGeneration.activeJob : null}
             aiError={aiGeneration.error}
             aiIsLongRunning={aiGeneration.isLongRunning}
             aiQuotaRemaining={aiGeneration.quotaRemaining}
@@ -769,7 +1005,7 @@ export function CheckInWorkspace({
             isDirty={isDirty}
             isLoading={isAwaitingSelectedRecord || isCloudReadFailure}
             isSaving={isSaving || saveMutation.isPending}
-            isCleaningUpImage={isCleaningUpImage}
+            isCleaningUpImage={isCleaningUpImage || isAbandoningDraft}
             isPreparingImage={isPreparingImage}
             isRetryingRecord={checkInQuery.isFetching}
             isOffline={isOffline}
@@ -779,7 +1015,7 @@ export function CheckInWorkspace({
             messageTone={messageTone}
             onDraftChange={(change) => {
               if (!editorLockedRef.current) {
-                if (change.sourceUrl !== undefined && change.sourceUrl !== draft.sourceUrl) {
+                if (entryModeRef.current === "ai" && ((change.sourceUrl !== undefined && change.sourceUrl !== draft.sourceUrl) || (change.userPrompt !== undefined && change.userPrompt !== draft.userPrompt))) {
                   aiGeneration.clearError();
                 }
                 setDraft((current) => ({ ...current, ...change }));
@@ -787,15 +1023,17 @@ export function CheckInWorkspace({
             }}
             onAiCancel={() => void aiGeneration.cancel()}
             onAiGenerate={() => {
+              if (entryModeRef.current !== "ai" || editorLockedRef.current) return;
               void aiGeneration.generate({
                 sourceUrl: draft.sourceUrl.trim(),
+                userPrompt: draft.userPrompt ?? "",
                 targetDate: selectedDate,
               });
             }}
             onImageChange={handleImageChange}
             onImageError={(nextMessage) => setStatus(nextMessage, "error")}
             onImagePreparationChange={(isPreparing, identity) => {
-              if (identity !== selectedDateRef.current) return;
+              if (identity !== entryIdentity(selectedDateRef.current, entryModeRef.current)) return;
               imagePreparationInFlightRef.current = isPreparing;
               if (isPreparing) editorLockedRef.current = true;
               setIsPreparingImage(isPreparing);
@@ -809,21 +1047,23 @@ export function CheckInWorkspace({
               }
             }}
             onRetryRecord={() => {
-              if (!imageCleanupInFlightRef.current && !imagePreparationInFlightRef.current) {
+              if (!draftAbandonInFlightRef.current && !imageCleanupInFlightRef.current && !imagePreparationInFlightRef.current) {
                 void checkInQuery.refetch();
               }
             }}
-            onSubmit={saveCurrentRecord}
+            onRetryDraft={retryDraftLoad}
+            onSubmit={() => saveCurrentRecord()}
             record={draftBaseRecord}
           />
         </div>
       </section>
 
       {toast ? <div aria-live="polite" className="light-toast" role="status">{toast}</div> : null}
-      {isCelebrating ? (
+      {echoDate ? <DailyEchoDialog key={echoDate} date={echoDate} onClose={() => setEchoDate(null)} /> : null}
+      {isCelebrating && !echoDate ? (
         <div aria-live="polite" className="celebration-banner" role="status">
           <span><Check aria-hidden="true" size={18} strokeWidth={3} /></span>
-          这一天的 attention 已收下
+          这一天的学习收获已收下
         </div>
       ) : null}
 
@@ -832,7 +1072,7 @@ export function CheckInWorkspace({
           description={
             canSave
               ? `先处理当前内容，再打开${formatDate(pendingDate)}。`
-              : "补全今日 attention 后保存，或放弃当前修改后继续。"
+              : "补全今日知识主题后保存，或放弃当前修改后继续。"
           }
           discardLabel="放弃修改"
           onCancel={() => {
@@ -854,11 +1094,11 @@ export function CheckInWorkspace({
           description={
             canSave
               ? "保存当前内容后退出，或放弃这次修改。"
-              : "补全今日 attention 后保存，或直接放弃这次修改。"
+              : "补全今日知识主题后保存，或直接放弃这次修改。"
           }
           discardLabel="放弃修改并退出"
           onCancel={() => {
-            if (!saveInFlightRef.current && !logoutInFlightRef.current && !imageCleanupInFlightRef.current && !imagePreparationInFlightRef.current) {
+            if (!draftAbandonInFlightRef.current && !saveInFlightRef.current && !logoutInFlightRef.current && !imageCleanupInFlightRef.current && !imagePreparationInFlightRef.current) {
               setLogoutPending(false);
             }
           }}

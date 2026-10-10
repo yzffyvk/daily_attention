@@ -1,0 +1,16 @@
+.demo-guide { max-width: 1320px; margin: 24px auto 0; padding: 22px 28px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper); color: var(--foreground); }
+.demo-guide-top, .demo-guide-bottom { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.demo-eyebrow { margin: 0; font-size: 13px; font-weight: 600; }
+.demo-eyebrow span { margin-left: 12px; font-size: 11px; font-weight: 400; color: var(--ink-soft); }
+.demo-reset, .demo-failure { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--foreground); cursor: pointer; font-size: 12px; }
+.demo-scenarios { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 18px; }
+.demo-scenarios a { display: inline-flex; align-items: center; gap: 20px; min-height: 44px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; text-decoration: none; color: var(--ink-soft); }
+.demo-scenarios a[aria-current="page"] { color: var(--aura-gold); border-color: var(--aura-gold); background: var(--paper-soft); }
+.demo-guide h2 { margin: 0 0 8px; font-size: 21px; line-height: 1.5; }
+.demo-instruction { margin: 0; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+.demo-guide-bottom { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+.demo-guide-bottom p { margin: 0; color: var(--ink-soft); font-size: 12px; line-height: 1.7; }
+.demo-failure[aria-pressed="true"] { color: var(--aura-gold); border-color: var(--aura-gold); }
+.demo-guide :is(a,button):focus-visible { outline: 2px solid var(--aura-gold); outline-offset: 3px; }
+@media(max-width: 1380px) { .demo-guide { margin-inline: 24px; } }
+@media(max-width: 560px) { .demo-guide { margin: 12px 12px 0; padding: 16px; } .demo-guide-top { gap: 8px; } .demo-guide-bottom { align-items: flex-start; flex-direction: column; gap: 10px; } .demo-scenarios a { gap: 6px; padding: 8px 10px; font-size: 12px; } .demo-guide h2 { font-size: 18px; } .demo-reset { min-height: 44px; } }

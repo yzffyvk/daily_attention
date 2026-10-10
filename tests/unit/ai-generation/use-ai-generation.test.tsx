@@ -56,6 +56,28 @@ function options(overrides: Record<string, unknown> = {}) {
 }
 
 describe("useAiGeneration", () => {
+  it("keeps the submitted prompt on retry and gives an edited prompt a new request key", async () => {
+    vi.mocked(createAiGeneration).mockRejectedValue(new Error("network"));
+    const { result: hook } = renderHook(() => useAiGeneration(options()));
+    const request = { sourceUrl: "https://example.com/article", targetDate: "2026-09-23", userPrompt: "  解释使用边界  " };
+    await act(() => hook.current.generate(request));
+    await act(() => hook.current.retryCreate());
+    await act(() => hook.current.generate({ ...request, userPrompt: "重点讲解实现步骤" }));
+    const [first, retry, changed] = vi.mocked(createAiGeneration).mock.calls.map(([input]) => input);
+    expect(first.userPrompt).toBe("解释使用边界");
+    expect(retry).toEqual(first);
+    expect(changed.userPrompt).toBe("重点讲解实现步骤");
+    expect(changed.idempotencyKey).not.toBe(first.idempotencyKey);
+  });
+
+  it("uses server generation context when restoring a completed job", async () => {
+    const generationContext = { userPrompt: "解释使用边界", promptVersion: "knowledge-skeleton-user-prompt-v1" };
+    vi.mocked(getAiGeneration).mockResolvedValue({ jobId: created.jobId, status: "succeeded", stage: "complete", result, generationContext });
+    const input = options({ activeJob: { jobId: created.jobId, targetDate: "2026-09-23", sourceUrl: "https://example.com/article", createdAt: new Date().toISOString() } });
+    renderHook(() => useAiGeneration(input));
+    await act(() => vi.advanceTimersByTimeAsync(1500));
+    expect(input.onSucceeded).toHaveBeenCalledWith(result, "2026-09-23", generationContext);
+  });
   it("submits the edited URL after a failure instead of retrying the stale payload", async () => {
     vi.mocked(createAiGeneration).mockRejectedValueOnce(new Error("链接不能包含片段"))
       .mockResolvedValueOnce(created);
@@ -120,7 +142,7 @@ describe("useAiGeneration", () => {
     expect(getAiGeneration).toHaveBeenCalledTimes(2);
     await act(() => vi.advanceTimersByTimeAsync(5_000));
 
-    expect(input.onSucceeded).toHaveBeenCalledWith(result, "2026-08-02");
+    expect(input.onSucceeded).toHaveBeenCalledWith(result, "2026-08-02", undefined);
     expect(input.onTerminal).toHaveBeenCalledWith(created.jobId);
   });
 

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   assertAiProviderModeAllowed,
+  createProductionDependencies,
   createWorkerHandler,
   default as aiGenerationWorkerHandler,
   type AiWorkerDependencies,
@@ -30,6 +31,74 @@ function handlerWithCapturedTask(dependencies: AiWorkerDependencies) {
 }
 
 describe("AI generation queue worker", () => {
+  it.each([
+    { dedicatedWorker: false, userPrompt: "重点解释适用边界" },
+    { dedicatedWorker: true, userPrompt: "重点解释适用边界" },
+    { dedicatedWorker: false, userPrompt: "" },
+    { dedicatedWorker: true, userPrompt: "" },
+  ])("maps the immutable RPC prompt/version through the production worker (dedicated=$dedicatedWorker, prompt=$userPrompt)", async ({ dedicatedWorker, userPrompt }) => {
+    const modelRequests: { messages: { content: string }[] }[] = [];
+    const persisted: Record<string, unknown>[] = [];
+    const jobRow = {
+      id: "10000000-0000-4000-8000-000000000001",
+      user_id: "00000000-0000-4000-8000-000000000001",
+      source_url: "https://example.com/article",
+      attempt_count: 1,
+      user_prompt: userPrompt,
+      prompt_version: "knowledge-skeleton-user-prompt-v1",
+    };
+    const environment: Record<string, string> = {
+      SUPABASE_URL: `https://project-${dedicatedWorker ? "node" : "edge"}-${userPrompt ? "prompt" : "empty"}.supabase.co`,
+      SUPABASE_SERVICE_ROLE_KEY: "test-service-role-key",
+      DEEPSEEK_API_KEY: "deepseek-test-api-key",
+      AI_USER_ID_PEPPER: "pepper-with-at-least-thirty-two-characters",
+      AI_WORKER_TRIGGER_TOKEN: token,
+      SAFE_FETCH_GATEWAY_URL: "https://safe-fetch.example.com",
+      SAFE_FETCH_GATEWAY_TOKEN: "gateway-token-with-at-least-thirty-two-characters",
+    };
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/claim_ai_generation_job") || url.endsWith("/begin_ai_generation")) {
+        return Response.json([jobRow]);
+      }
+      if (url.endsWith("/v1/fetch")) {
+        return Response.json({
+          finalUrl: jobRow.source_url,
+          contentType: "text/html",
+          body: `<html><head><title>示例资料</title></head><body><article><p>${"注意力机制通过查询、键和值计算相关性。".repeat(20)}</p></article></body></html>`,
+        });
+      }
+      if (url.endsWith("/chat/completions")) {
+        modelRequests.push(JSON.parse(init!.body as string));
+        return Response.json({
+          model: "deepseek-v4-pro",
+          choices: [{ finish_reason: "stop", message: { content: JSON.stringify({
+            attention: "注意力机制", summary: "示例知识小结", inspiration: "", sourceTitle: "示例资料", warnings: [],
+          }) } }],
+          usage: { prompt_tokens: 100, completion_tokens: 50 },
+        });
+      }
+      if (url.endsWith("/complete_ai_generation_job")) {
+        persisted.push(JSON.parse(init!.body as string));
+        return Response.json([]);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    try {
+      const dependencies = createProductionDependencies((name) => environment[name], { dedicatedWorker });
+      await expect(dependencies.runJob(jobRow.id)).resolves.toBe("completed");
+      expect(modelRequests).toHaveLength(1);
+      expect(JSON.parse(modelRequests[0]!.messages[1]!.content)).toMatchObject({
+        userRequirements: userPrompt,
+        source: { dataType: "untrusted_web_source", title: "示例资料" },
+      });
+      expect(persisted).toHaveLength(1);
+      expect(persisted[0]).toMatchObject({ target_succeeded: true, target_provider_call_count: 1 });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("acknowledges before the scheduled queue batch completes", async () => {
     let releaseJob!: () => void;
     const jobGate = new Promise<void>((resolve) => {

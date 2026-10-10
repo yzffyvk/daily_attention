@@ -1,9 +1,9 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element */
 import { Check } from "lucide-react";
 import { useId } from "react";
 import { avatarOptions } from "./avatar-catalog";
+import { AvatarImage } from "./avatar-image";
 
 type AvatarSelectorProps = {
   value: number | null;
@@ -29,7 +29,7 @@ export function AvatarSelector({ value, name, onChange, disabled = false }: Avat
             value={option.key}
           />
           <span className="aura-avatar-art">
-            <img alt="" src={option.src} width={512} height={512} loading="lazy" decoding="async" />
+            <AvatarImage avatarKey={option.key} width={512} height={512} loading="lazy" decoding="async" />
           </span>
           <span className="aura-avatar-name">{option.name}</span>
           <span className="aura-avatar-description" id={`${descriptionId}-${option.key}`}>{option.description}</span>

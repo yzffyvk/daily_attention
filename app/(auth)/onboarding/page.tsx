@@ -21,7 +21,7 @@ export default async function OnboardingPage() {
 
   return (
     <AuthCard
-      description="设置一个名称和头像，开始记录你的 attention。"
+      description="设置一个名称和头像，开始积累自己的知识地图。"
       step="02"
       title="完善你的学习身份"
     >

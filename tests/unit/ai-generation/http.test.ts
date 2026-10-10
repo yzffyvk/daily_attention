@@ -27,6 +27,7 @@ describe("AI generation HTTP responses", () => {
     ["FEATURE_DISABLED", 403],
     ["FORBIDDEN_JOB", 403],
     ["JOB_ALREADY_STARTED", 409],
+    ["AI_IDEMPOTENCY_CONFLICT", 409],
     ["VALIDATION_ERROR", 422],
     ["URL_NOT_ALLOWED", 422],
     ["DAILY_AI_LIMIT_REACHED", 429],

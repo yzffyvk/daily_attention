@@ -1,0 +1,110 @@
+import { cleanup, render, screen, within, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it } from 'vitest';
+import { KnowledgeSummaryView } from '@/features/checkins/knowledge-summary-view';
+import { structuredSummarySchema, serializeStructuredSummary } from '@/lib/domain/knowledge-structure';
+import { relationSummaryFixture } from '../../helpers/knowledge-structure-fixture';
+const summary = () => serializeStructuredSummary(structuredSummarySchema.parse(relationSummaryFixture()));
+afterEach(cleanup);
+
+describe('guided structure reader', () => {
+  it('shows a real node map and distinguishes the reading route from semantic links', () => {
+    render(<KnowledgeSummaryView value={summary()} />);
+    const map = screen.getByRole('group', { name: '骨架节点' });
+    expect(within(map).getAllByRole('button')).toHaveLength(4);
+    expect(screen.getByRole('navigation', { name: '建议阅读顺序' })).toBeVisible();
+    expect(screen.getByText('帮助理解的顺序，不代表执行或因果关系')).toBeVisible();
+    expect(screen.getByRole('region', { name: '节点解释' })).toHaveTextContent('系统提示词与消息历史共同构成上下文。');
+    expect(screen.getByText('如何在有限窗口内提供有效上下文？')).toBeVisible();
+  });
+  it('keeps map positions and all nodes while exploring, then returns to the reading cursor', async () => {
+    const user = userEvent.setup();
+    render(<KnowledgeSummaryView value={summary()} />);
+    const map = screen.getByRole('group', { name: '骨架节点' });
+    const positions = within(map).getAllByRole('button').map(node => node.getAttribute('style'));
+    await user.click(screen.getByRole('button', { name: '阅读 原理与机制' }));
+    expect(screen.getByRole('region', { name: '节点解释' })).toHaveTextContent('复用稳定前缀的计算结果。');
+    await user.click(within(map).getByRole('button', { name: '上下文压缩' }));
+    expect(screen.getByRole('region', { name: '节点解释' })).toHaveTextContent('替换较早的消息历史，并保留必要信息。');
+    expect(within(map).getAllByRole('button').map(node => node.getAttribute('style'))).toEqual(positions);
+    expect(within(map).getAllByRole('button')).toHaveLength(4);
+    await user.click(screen.getByRole('button', { name: '返回阅读：KV Cache' }));
+    expect(screen.getByRole('region', { name: '节点解释' })).toHaveTextContent('复用稳定前缀的计算结果。');
+    await user.click(screen.getByRole('button', { name: '下一节点：上下文压缩' }));
+    expect(screen.getByRole('region', { name: '节点解释' })).toHaveTextContent('替换较早的消息历史，并保留必要信息。');
+  });
+  it('opens edge conditions and original evidence and can follow either endpoint', async () => {
+    const user = userEvent.setup();
+    render(<KnowledgeSummaryView value={summary()} />);
+    const map = screen.getByRole('region', { name: '知识关系骨架' });
+    await user.click(within(map).getByRole('button', { name: '查看关系：上下文压缩 ↔ KV Cache（权衡）' }));
+    const detail = screen.getByRole('region', { name: '关系解释' });
+    expect(detail).toHaveTextContent('权衡长度与缓存复用');
+    expect(detail).toHaveTextContent('改写位置之后的缓存失效');
+    await user.click(within(detail).getByText('查看原文依据'));
+    expect(within(detail).getByText('改写位置之后的缓存会失效', { selector: 'blockquote' })).toBeVisible();
+    await user.click(within(detail).getByRole('button', { name: '展开 KV Cache' }));
+    expect(screen.getByRole('region', { name: '节点解释' })).toHaveTextContent('复用稳定前缀的计算结果。');
+  });
+  it('can read omitted nodes and return to an overview without claiming mastery', async () => {
+    const user = userEvent.setup();
+    render(<KnowledgeSummaryView value={summary()} />);
+    await user.click(screen.getByRole('button', { name: '下一节点：消息历史' }));
+    expect(screen.getByRole('region', { name: '节点解释' })).toHaveTextContent('历史承载用户输入和工具结果。');
+    await user.click(screen.getByRole('button', { name: '回看整体' }));
+    expect(screen.getByRole('region', { name: '阅读概览' })).toHaveTextContent('4 个节点');
+    await user.click(screen.getByRole('button', { name: '继续阅读：消息历史' }));
+    expect(screen.getByRole('region', { name: '节点解释' })).toHaveTextContent('历史承载用户输入和工具结果。');
+  });
+  it('keeps a source-truncation notice and resets when another structured document arrives', async () => {
+    const user = userEvent.setup();
+    const notice = '资料范围：本次只读取了开头部分，后续内容未纳入。';
+    const view = render(<KnowledgeSummaryView value={notice + '\n\n' + summary()} />);
+    expect(screen.getByText(notice)).toBeVisible();
+    await user.click(within(screen.getByRole('group', { name: '骨架节点' })).getByRole('button', { name: '上下文压缩' }));
+    const next = relationSummaryFixture(); next.structure.nodes[0].explanation = '另一份资料的起点。';
+    view.rerender(<KnowledgeSummaryView value={serializeStructuredSummary(structuredSummarySchema.parse(next))} />);
+    expect(screen.getByRole('region', { name: '节点解释' })).toHaveTextContent('另一份资料的起点。');
+    expect(screen.queryByRole('button', { name: /^返回阅读/ })).not.toBeInTheDocument();
+    view.rerender(<KnowledgeSummaryView value="普通笔记" />);
+    expect(screen.queryByRole('region', { name: '知识关系骨架' })).not.toBeInTheDocument();
+    expect(screen.getByText('普通笔记')).toBeVisible();
+  });
+  it('keeps the reading position through fullscreen and restores trigger focus with Escape', async () => {
+    const user = userEvent.setup();
+    render(<KnowledgeSummaryView value={summary()} />);
+    await user.click(screen.getByRole('button', { name: '阅读 原理与机制' }));
+    await user.click(screen.getByRole('button', { name: '展开阅读' }));
+    expect(screen.getByRole('dialog', { name: '知识骨架阅读' })).toBeVisible();
+    expect(screen.getByRole('region', { name: '节点解释' })).toHaveTextContent('复用稳定前缀的计算结果。');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: '展开阅读' })).toHaveFocus());
+    expect(screen.getByRole('region', { name: '节点解释' })).toHaveTextContent('复用稳定前缀的计算结果。');
+  });
+  it('includes source disclosures in the fullscreen keyboard loop during exploration', async () => {
+    const user = userEvent.setup();
+    render(<KnowledgeSummaryView value={summary()} />);
+    await user.click(screen.getByRole('button', { name: '展开阅读' }));
+    await user.click(within(screen.getByRole('region', { name: '知识关系骨架' })).getByRole('button', { name: '查看关系：上下文压缩 ↔ KV Cache（权衡）' }));
+    const detail = screen.getByRole('region', { name: '关系解释' });
+    await waitFor(() => expect(detail).toHaveFocus());
+    within(detail).getByRole('button', { name: '展开 KV Cache' }).focus();
+    await user.tab();
+    const evidence = within(detail).getByText('查看原文依据');
+    expect(evidence).toHaveFocus();
+    // Native summary Enter activation is covered by the Chromium boundary test.
+    await user.click(evidence);
+    expect(within(detail).getByText('改写位置之后的缓存会失效', { selector: 'blockquote' })).toBeVisible();
+    await user.tab();
+    expect(screen.getByRole('button', { name: '关闭全屏阅读' })).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(evidence).toHaveFocus();
+    await user.click(within(detail).getByRole('button', { name: '展开 KV Cache' }));
+    const nodeDetail = screen.getByRole('region', { name: '节点解释' });
+    await waitFor(() => expect(nodeDetail).toHaveFocus());
+    within(nodeDetail).getByRole('button', { name: '了解关系：权衡长度与缓存复用' }).focus();
+    await user.tab();
+    expect(within(nodeDetail).getByText('查看原文依据')).toHaveFocus();
+  });
+});

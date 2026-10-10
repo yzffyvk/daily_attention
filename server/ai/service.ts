@@ -12,6 +12,7 @@ import type {
 
 const taskErrorMessages: Record<AiGenerationTaskErrorCode, string> = {
   FETCH_TIMEOUT: "读取网页超时，请稍后重试",
+  FETCH_SERVICE_UNAVAILABLE: "网页读取服务暂时不可用，请稍后重试",
   TOO_MANY_REDIRECTS: "网页跳转次数过多",
   RESPONSE_TOO_LARGE: "网页内容过大，暂时无法处理",
   UNSUPPORTED_CONTENT_TYPE: "该链接不是可处理的文本网页",
@@ -49,6 +50,7 @@ export async function createGeneration(
     idempotencyKey: input.idempotencyKey,
     sourceUrl: input.sourceUrl,
     sourceHost: new URL(input.sourceUrl).hostname,
+    userPrompt: input.userPrompt?.trim() ?? "",
   });
 
   return created;
@@ -92,6 +94,10 @@ export function toAiGenerationJobData(job: AiJob): AiGenerationJobData {
     jobId: job.id,
     status: job.status,
     stage: stageFor(job),
+    generationContext: {
+      userPrompt: job.userPrompt ?? "",
+      promptVersion: job.promptVersion,
+    },
   };
 
   if (job.status === "succeeded") {

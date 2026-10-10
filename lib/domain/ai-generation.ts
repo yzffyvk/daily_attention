@@ -1,5 +1,7 @@
+import { SUMMARY_MAX_LENGTH } from "./summary-limits.ts";
 import { z } from "zod";
 import { dateKeySchema } from "@/lib/domain/checkin";
+import { aiUserPromptSchema } from "@/lib/domain/ai-prompt";
 
 const hashRoutePattern = /^#(?:[!/?]|%(?:2f|21|3f))/iu;
 const hashRouteMessage = "该链接通过 # 切换页面，暂不支持，请使用对应内容的直接链接";
@@ -58,17 +60,18 @@ const sourceUrlSchema = z
 
 export const createAiGenerationSchema = z.object({
   sourceUrl: sourceUrlSchema,
+  userPrompt: aiUserPromptSchema.default(""),
   targetDate: dateKeySchema,
   idempotencyKey: z.uuid("请求标识格式不正确"),
 }).strict();
 
 export const aiGenerationResultSchema = z.object({
   attention: z.string().trim().min(1).max(120),
-  summary: z.string().trim().min(1).max(5000),
-  inspiration: z.string().trim().min(1).max(2000),
+  summary: z.string().trim().min(1).max(SUMMARY_MAX_LENGTH),
+  inspiration: z.string().trim().max(2000),
   sourceTitle: z.string().trim().min(1).max(300),
   warnings: z.array(z.string().trim().min(1).max(500)).max(10),
 }).strict();
 
-export type CreateAiGenerationInput = z.infer<typeof createAiGenerationSchema>;
+export type CreateAiGenerationInput = z.input<typeof createAiGenerationSchema>;
 export type AiGenerationResult = z.infer<typeof aiGenerationResultSchema>;

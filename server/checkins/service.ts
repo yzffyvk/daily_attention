@@ -24,7 +24,8 @@ export async function saveCheckIn(
   input: CheckInInput,
   repository: CheckInRepository,
 ): Promise<SaveCheckInResult> {
-  const existing = await repository.findByDate(userId, date);
+  const entryMode = input.entryMode ?? "manual";
+  const existing = await repository.findByDate(userId, date, entryMode);
 
   if (!existing) {
     if (input.version !== null) {
@@ -40,7 +41,7 @@ export async function saveCheckIn(
       return {
         ok: false,
         reason: "VERSION_CONFLICT",
-        current: await repository.findByDate(userId, date),
+        current: await repository.findByDate(userId, date, entryMode),
       };
     }
   }
@@ -64,6 +65,6 @@ export async function saveCheckIn(
   return {
     ok: false,
     reason: "VERSION_CONFLICT",
-    current: await repository.findByDate(userId, date),
+    current: await repository.findByDate(userId, date, entryMode),
   };
 }

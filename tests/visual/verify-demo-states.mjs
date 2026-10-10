@@ -1,0 +1,60 @@
+import { chromium, expect } from "@playwright/test";
+import { mkdir } from "node:fs/promises";
+
+const origin = "http://127.0.0.1:4300";
+const output = "/tmp/aura-demo-qa";
+await mkdir(output, { recursive: true });
+const browser = await chromium.launch({ headless: true });
+const errors = [];
+try {
+  const page = await browser.newPage({ viewport: { width: 390, height: 900 }, timezoneId: "Asia/Shanghai", reducedMotion: "reduce" });
+  page.on("pageerror", error => errors.push(error.message));
+  await page.route("**/*", route => {
+    const url = new URL(route.request().url());
+    if (url.origin !== origin || url.pathname.startsWith("/api/")) { errors.push(`Network escape: ${url.pathname}`); return route.abort(); }
+    return route.continue();
+  });
+  await page.goto(`${origin}/?demo=1&scenario=ai&theme=light`, { waitUntil: "networkidle" });
+  const generate = page.getByRole("button", { name: "生成知识小结", exact: true });
+  await expect(generate).toBeEnabled();
+  await generate.click();
+  await page.getByRole("button", { name: "取消任务", exact: true }).click();
+  await expect(generate).toBeEnabled();
+  await expect(page.getByRole("region", { name: "本题局部结构图" })).toHaveCount(0);
+  await page.getByRole("button", { name: "体验一次生成失败", exact: true }).click();
+  await generate.click();
+  await expect(page.getByRole("alert")).toContainText("再次点击生成", { timeout: 18000 });
+  await page.screenshot({ path: `${output}/ai-failure-390.png`, fullPage: true });
+  await generate.click();
+  await expect(page.getByRole("region", { name: "本题局部结构图" })).toBeVisible({ timeout: 18000 });
+  await page.getByRole("button", { name: "切换为深色", exact: true }).click();
+  await page.screenshot({ path: `${output}/ai-result-dark-390.png`, fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole("link", { name: "同主题串联", exact: true }).click();
+  await page.getByRole("button", { name: "串联知识", exact: true }).click();
+  await page.getByRole("button", { name: "复制 从理解用户，到验证需求", exact: true }).click();
+  await expect(page.getByRole("button", { name: "打开知识脉络 从理解用户，到验证需求 · 副本，已保存", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "删除 从理解用户，到验证需求 · 副本", exact: true }).click();
+  await page.getByRole("button", { name: "确认删除", exact: true }).click();
+  await expect(page.getByRole("button", { name: "打开知识脉络 从理解用户，到验证需求 · 副本，已保存", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "打开知识脉络 从理解用户，到验证需求，已保存", exact: true }).click();
+  await page.getByRole("group", { name: "全部来源日期" }).getByRole("button").first().click();
+  await expect(page.getByRole("region", { name: /^来源快照 / }).first()).toBeVisible();
+  await page.screenshot({ path: `${output}/map-source-dark-390.png`, fullPage: true });
+  await page.getByRole("button", { name: "切换为浅色", exact: true }).click();
+  await page.setViewportSize({ width: 320, height: 900 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: `${output}/map-result-light-320.png`, fullPage: true });
+  await page.getByRole("button", { name: "体验一次生成失败", exact: true }).click();
+  await page.getByRole("button", { name: "重新生成", exact: true }).click();
+  await page.getByRole("button", { name: "生成知识脉络", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "这次生成未完成", exact: true })).toBeVisible({ timeout: 18000 });
+  await page.getByRole("button", { name: "重新生成", exact: true }).click();
+  await page.getByRole("button", { name: "生成知识脉络", exact: true }).click();
+  await expect(page.getByRole("region", { name: "概念关系图" })).toBeVisible({ timeout: 18000 });
+  await page.getByRole("button", { name: "重置示例", exact: true }).click();
+  await page.getByRole("button", { name: "串联知识", exact: true }).click();
+  await expect(page.locator(".knowledge-library-row")).toHaveCount(2);
+  expect(errors).toEqual([]);
+  console.log(JSON.stringify({ result: "PASS", checked: "cancel, AI failure/retry, both themes, mobile overflow, citations, copy/delete, narrative failure/regeneration, reset", screenshots: output }));
+} finally { await browser.close(); }

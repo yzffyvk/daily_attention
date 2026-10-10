@@ -2,12 +2,10 @@ import { parseHTML } from "linkedom";
 
 const MIN_USEFUL_CHARACTERS = 200;
 const MAX_MODEL_CHARACTERS = 60_000;
-const firstParagraphCount = 6;
-const finalParagraphCount = 3;
 
 function normalizedText(value: string | null | undefined) {
   return (value ?? "")
-    .normalize("NFKC")
+    .normalize("NFC")
     .replaceAll("\u00a0", " ")
     .replace(/\s+/gu, " ")
     .replace(/\s+([,.;:!?，。；：！？、])/gu, "$1")
@@ -60,43 +58,61 @@ function documentTitle(document: Document, finalUrl: string) {
   }
 }
 
-function orderedSegments(root: Element, title: string) {
-  const paragraphs = [...root.querySelectorAll("p")]
-    .map((element) => normalizedText(element.textContent))
-    .filter(Boolean);
-  const headings = [...root.querySelectorAll("h1,h2,h3,h4,h5,h6")]
-    .map((element) => normalizedText(element.textContent))
-    .filter(Boolean);
-
-  const finalStart = Math.max(firstParagraphCount, paragraphs.length - finalParagraphCount);
-  const candidates = [
-    title,
-    ...paragraphs.slice(0, firstParagraphCount),
-    ...headings,
-    ...paragraphs.slice(firstParagraphCount, finalStart),
-    ...paragraphs.slice(finalStart),
-  ];
-  if (paragraphs.length === 0) {
-    candidates.push(normalizedText(root.textContent));
-  }
-
-  const seen = new Set<string>();
-  return candidates.filter((segment) => {
-    if (!segment || seen.has(segment)) return false;
-    seen.add(segment);
-    return true;
-  });
+function renderChildren(node: Node): string {
+  return [...node.childNodes].map(renderNode).join("");
 }
 
-function boundedText(segments: string[]) {
-  let text = "";
-  for (const segment of segments) {
-    const separator = text ? "\n\n" : "";
-    const available = MAX_MODEL_CHARACTERS - text.length - separator.length;
-    if (available <= 0) break;
-    text += `${separator}${segment.slice(0, available)}`;
+// Walk in document order: headings, lists, and tables carry the source's structure.
+function renderNode(node: Node): string {
+  if (node.nodeType === 3) return (node.textContent ?? "").normalize("NFC").replace(/\s+/gu, " ");
+  if (node.nodeType !== 1) return "";
+  const element = node as Element;
+  const tag = element.tagName.toLowerCase();
+  if (tag === "br") return "\n";
+  if (tag === "pre") {
+    const code = (element.textContent ?? "").replace(/\r\n?/gu, "\n").replace(/^\n+|\n+$/gu, "");
+    const longestFence = Math.max(2, ...[...code.matchAll(/`+/gu)].map(match => match[0].length));
+    const fence = "`".repeat(longestFence + 1);
+    return `\n\n${fence}\n${code}\n${fence}\n\n`;
   }
-  return text;
+  if (tag === "math" || element.classList.contains("katex")) {
+    const tex = element.querySelector('annotation[encoding="application/x-tex"]')?.textContent;
+    if (tex) return `$${tex.trim()}$`;
+    const math = tag === "math" ? element : element.querySelector("math");
+    // Plain text would erase fractions, superscripts, and other MathML relationships.
+    return math?.outerHTML ?? (element.textContent ?? "");
+  }
+  if (tag === "img") {
+    const alt = normalizedText(element.getAttribute("alt"));
+    return alt ? `[图片说明：${alt}]` : "";
+  }
+  if (tag === "ul" || tag === "ol") {
+    const start = Number.parseInt(element.getAttribute("start") ?? "1", 10);
+    const items = [...element.children].filter(child => child.tagName.toLowerCase() === "li");
+    const lines = items.map((item, index) => {
+      const prefix = tag === "ol" ? `${(Number.isFinite(start) ? start : 1) + index}. ` : "- ";
+      const content = renderChildren(item).trim().replace(/\n[ \t]*\n/gu, "\n");
+      return prefix + content.replace(/\n/gu, `\n${" ".repeat(prefix.length)}`);
+    });
+    return `\n\n${lines.join("\n")}\n\n`;
+  }
+  if (tag === "table") {
+    // Preserve span semantics rather than flattening cells into the wrong columns.
+    if (element.querySelector("[rowspan],[colspan]")) return `\n\n${element.outerHTML}\n\n`;
+    const caption = normalizedText(element.querySelector("caption")?.textContent);
+    const rows = [...element.querySelectorAll("tr")].map(row => {
+      const cells = [...row.children].filter(cell => /^(th|td)$/iu.test(cell.tagName));
+      return `| ${cells.map(cell => normalizedText(renderChildren(cell)).replaceAll("|", "\\|")).join(" | ")} |`;
+    });
+    return `\n\n${caption ? `${caption}\n` : ""}${rows.join("\n")}\n\n`;
+  }
+  const content = renderChildren(element);
+  if (/^h[1-6]$/u.test(tag)) return `\n\n${"#".repeat(Number(tag[1]))} ${normalizedText(content)}\n\n`;
+  if (tag === "p") return `\n\n${normalizedText(content)}\n\n`;
+  if (/^(article|main|section|div|blockquote|dl|dt|dd|figure|figcaption)$/u.test(tag)) {
+    return `\n\n${content.trim()}\n\n`;
+  }
+  return content;
 }
 
 async function sha256Hex(value: string) {
@@ -112,12 +128,22 @@ async function sha256Hex(value: string) {
 export async function extractLearningSource(input: {
   html: string;
   finalUrl: string;
+  contentType?: string;
 }): Promise<{
   title: string;
   text: string;
   contentDigestHex: string;
+  truncated: boolean;
 }> {
   try {
+    if (input.contentType?.split(";", 1)[0]?.trim().toLowerCase() === "text/plain") {
+      // Parsing Markdown as HTML loses headings and literal tags in code examples.
+      const completeText = input.html.normalize("NFC").replace(/\r\n?/gu, "\n").trim();
+      if (normalizedText(completeText).length < MIN_USEFUL_CHARACTERS) throw new Error("CONTENT_NOT_EXTRACTABLE");
+      const title = normalizedText(/^#\s+(.+)$/mu.exec(completeText)?.[1] ?? new URL(input.finalUrl).pathname.split("/").pop()).slice(0, 300) || "公开资料";
+      const text = completeText.slice(0, MAX_MODEL_CHARACTERS);
+      return { title, text, contentDigestHex: await sha256Hex(text), truncated: completeText.length > MAX_MODEL_CHARACTERS };
+    }
     const { document } = parseHTML(input.html);
     const title = documentTitle(document, input.finalUrl);
     removeNoise(document);
@@ -128,11 +154,14 @@ export async function extractLearningSource(input: {
     if (!root || usefulText.length < MIN_USEFUL_CHARACTERS) {
       throw new Error("CONTENT_NOT_EXTRACTABLE");
     }
-    const text = boundedText(orderedSegments(root, title));
+    const body = renderNode(root).replace(/\n[ \t]*\n(?:[ \t]*\n)+/gu, "\n\n").trim();
+    const completeText = `${title}\n\n${body}`;
+    const text = completeText.slice(0, MAX_MODEL_CHARACTERS);
     return {
       title,
       text,
       contentDigestHex: await sha256Hex(text),
+      truncated: completeText.length > MAX_MODEL_CHARACTERS,
     };
   } catch {
     throw new Error("CONTENT_NOT_EXTRACTABLE");

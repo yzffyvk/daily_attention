@@ -44,6 +44,34 @@ afterAll(async () => {
 });
 
 describe("AI generation API", () => {
+  it("snapshots a request prompt and rejects changed payloads under the same idempotency key", async () => {
+    const owner = await registeredSession();
+    const input = { ...generation(81), userPrompt: "  聚焦实现细节  " };
+    const first = await owner.session.post("/api/ai/generations", input);
+    expect(first.status).toBe(202);
+    const generationContext = { userPrompt: "聚焦实现细节", promptVersion: "knowledge-questions-v1" };
+    expect(first.body.data.generationContext).toEqual(generationContext);
+    const repeated = await owner.session.post("/api/ai/generations", { ...input, userPrompt: "聚焦实现细节" });
+    expect(repeated.status).toBe(202);
+    expect(repeated.body.data.jobId).toBe(first.body.data.jobId);
+    expect(repeated.body.data.quota).toEqual(first.body.data.quota);
+    for (const changed of [
+      { userPrompt: "改为面试要点" },
+      { targetDate: "2026-08-01" },
+      { sourceUrl: "https://example.com/changed" },
+    ]) {
+      const conflict = await owner.session.post("/api/ai/generations", { ...input, ...changed });
+      expect(conflict.status).toBe(409);
+      expect(conflict.body.error.code).toBe("AI_IDEMPOTENCY_CONFLICT");
+    }
+    const owned = await owner.session.get(`/api/ai/generations/${first.body.data.jobId}`);
+    expect(owned.body.data.generationContext).toEqual(generationContext);
+    const next = await owner.session.post("/api/ai/generations", generation(82));
+    expect(next.status).toBe(202);
+    expect(next.body.data.quota.used).toBe(2);
+    expect(next.body.data.generationContext.userPrompt).toBe("");
+  });
+
   it("enforces durable concurrent quota, idempotency, ownership, and cancellation", async () => {
     const anonymous = new ApiSession();
     expect((await anonymous.post("/api/ai/generations", generation(99))).status).toBe(401);

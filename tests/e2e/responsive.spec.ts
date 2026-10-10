@@ -4,11 +4,16 @@ import { appHeading, register } from "./helpers";
 test("keeps the journal usable without horizontal overflow or sticky overlap", async ({ page }) => {
   await register(page);
   expect(await page.locator("body").evaluate((body) => body.scrollWidth <= window.innerWidth)).toBe(true);
-  await expect(page.getByRole("heading", { name: appHeading })).toHaveCSS("white-space", "nowrap");
+  const heading = page.getByRole("heading", { name: appHeading });
+  await expect(heading).toBeVisible();
+  const headingBox = await heading.boundingBox();
+  expect(headingBox).not.toBeNull();
+  expect(headingBox!.x).toBeGreaterThanOrEqual(0);
+  expect(headingBox!.x + headingBox!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
   await expect(page.getByTestId("month-calendar")).toBeVisible();
   await expect(page.getByTestId("checkin-actions")).toBeVisible();
 
-  const field = page.getByLabel("灵感记录");
+  const field = page.getByRole("textbox", { name: /^用自己的话解释\s*（选填）$/ });
   await expect(field).toBeEnabled();
   const scrollState = await page.evaluate(async () => {
     const scroller = document.scrollingElement as HTMLElement | null;

@@ -127,7 +127,7 @@ export function createSafeFetchClient(config: {
         signal,
       });
     } catch {
-      return fail(signal.aborted ? "FETCH_TIMEOUT" : "CONTENT_BLOCKED");
+      return fail(signal.aborted ? "FETCH_TIMEOUT" : "FETCH_SERVICE_UNAVAILABLE");
     }
 
     let payload: unknown;

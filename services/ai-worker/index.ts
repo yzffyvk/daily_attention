@@ -1,13 +1,17 @@
 import { createServer } from "node:http";
 import { createProductionDependencies, processQueueBatch } from "../../supabase/functions/ai-generation-worker/index.ts";
 import { runPollLoop } from "./poll-loop.ts";
+import { createNarrativeWorker, runNarrativeJob } from "./knowledge-narratives.ts";
+import { dedicatedAiTiming } from "../../supabase/functions/_shared/ai/timeouts.ts";
+import { readWorkerScope } from "./scoped-worker.ts";
 
 const controller = new AbortController();
 const port = Number(process.env.AI_WORKER_HEALTH_PORT ?? 8790);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
   throw new Error("AI_WORKER_HEALTH_PORT_INVALID");
 }
-const dependencies = createProductionDependencies((name) => process.env[name], { dedicatedWorker: true });
+const scope = readWorkerScope((name) => process.env[name]);
+const dependencies = createProductionDependencies((name) => process.env[name], { dedicatedWorker: true, scope });
 const runJob = dependencies.runJob.bind(dependencies);
 dependencies.runJob = async (jobId) => {
   const start = Date.now();
@@ -17,9 +21,12 @@ dependencies.runJob = async (jobId) => {
   return outcome;
 };
 let ready = false;
+let narrativeReady = Boolean(scope);
+// The local account scope must never start the unrelated narrative queue.
+const narrativeWorker = scope ? null : createNarrativeWorker((name) => process.env[name]);
 const server = createServer((request, response) => {
   const known = request.url === "/healthz" || request.url === "/readyz";
-  const ok = request.url === "/healthz" || ready;
+  const ok = request.url === "/healthz" || (ready && narrativeReady);
   response.writeHead(!known ? 404 : ok ? 200 : 503, {
     "Content-Type": "application/json", "Cache-Control": "no-store",
   });
@@ -34,15 +41,15 @@ function stop() {
   if (controller.signal.aborted) return;
   ready = false;
   controller.abort();
-  // The normal fetch + provider deadlines are 25s + 120s; allow persistence.
-  forcedShutdown = setTimeout(() => process.exit(1), 170_000);
+  // Let source fetching, the long model request, and result persistence finish.
+  forcedShutdown = setTimeout(() => process.exit(1), dedicatedAiTiming.shutdownTimeoutMs);
   forcedShutdown.unref();
 }
 process.once("SIGINT", stop);
 process.once("SIGTERM", stop);
-console.info(JSON.stringify({ event: "ai_worker_started", healthPort: port }));
+console.info(JSON.stringify({ event: "ai_worker_started", healthPort: port, mode: scope ? "local_account" : "all_queues" }));
 try {
-  await runPollLoop({
+  await Promise.all([runPollLoop({
     signal: controller.signal,
     processBatch: () => processQueueBatch(dependencies),
     onSuccess: () => { ready = !controller.signal.aborted; },
@@ -50,7 +57,15 @@ try {
       ready = false;
       console.warn(JSON.stringify({ event: "ai_worker_queue_error" }));
     },
-  });
+  }), ...(narrativeWorker ? [runPollLoop({
+    signal: controller.signal,
+    processBatch: () => runNarrativeJob(narrativeWorker),
+    onSuccess: () => { narrativeReady = !controller.signal.aborted; },
+    onError: () => {
+      narrativeReady = false;
+      console.warn(JSON.stringify({ event: "knowledge_narrative_queue_error" }));
+    },
+  })] : [])]);
 } finally {
   if (forcedShutdown) clearTimeout(forcedShutdown);
   server.close();
