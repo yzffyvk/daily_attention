@@ -13,6 +13,7 @@ describe("narrative generation", () => {
     const result = await createNarrativeProvider({apiKey:"test-key",fetchImpl}).generate({sources:knowledgeMapSourcesFixture(),question:"如何理解？",anonymousUserId:"a".repeat(64)});
     expect(result).toMatchObject({mode:"concept_map",title:"从理解用户，到验证需求"});
     const sent = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(sent.model).toBe("deepseek-flash");
     expect(sent.messages[0].content).toContain("时间顺序不代表因果");
     expect(sent.messages[1].content).toContain("untrusted_learning_records");
     expect(sent.user_id).toBe("a".repeat(64));

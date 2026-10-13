@@ -240,7 +240,7 @@ export function createDeepSeekProvider(config: {
       const usesUserPrompt = usesStructure || promptVersion === AI_SUMMARY_PROMPT_VERSION;
 
       const requestBody = {
-        model: "deepseek-v4-pro",
+        model: "deepseek-flash",
         messages: [
           { role: "system", content: usesQuestions ? questionSystemPrompt : usesRelations ? relationSystemPrompt : usesUserPrompt ? userPromptSystemPrompt : legacySystemPrompt },
           {

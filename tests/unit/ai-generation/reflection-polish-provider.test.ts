@@ -18,7 +18,7 @@ describe("reflection polish provider", () => {
     const [url, init] = fetchImpl.mock.calls[0];
     expect(url).toBe("https://api.deepseek.com/chat/completions");
     const body = JSON.parse(init.body as string);
-    expect(body).toMatchObject({ model: "deepseek-v4-pro", thinking: { type: "disabled" }, response_format: { type: "json_object" }, max_tokens: 2500, stream: false, user_id: "ab".repeat(32) });
+    expect(body).toMatchObject({ model: "deepseek-flash", thinking: { type: "disabled" }, response_format: { type: "json_object" }, max_tokens: 2500, stream: false, user_id: "ab".repeat(32) });
     expect(body).not.toHaveProperty("reasoning_effort");
     expect(body.messages[0].content).toContain("JSON");
     expect(body.messages[0].content).toContain("不得编造");

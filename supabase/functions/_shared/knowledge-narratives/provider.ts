@@ -21,7 +21,7 @@ export function createNarrativeProvider(config: { apiKey: string; fetchImpl?: ty
         response = await fetchImpl("https://api.deepseek.com/chat/completions", {
           method:"POST", headers:{Authorization:`Bearer ${config.apiKey}`,"Content-Type":"application/json",Accept:"application/json"},
           signal: input.signal ?? AbortSignal.timeout(120_000),
-          body:JSON.stringify({model:"deepseek-v4-pro",thinking:{type:"enabled"},reasoning_effort:"high",response_format:{type:"json_object"},max_tokens:16384,stream:false,user_id:input.anonymousUserId,
+          body:JSON.stringify({model:"deepseek-flash",thinking:{type:"enabled"},reasoning_effort:"high",response_format:{type:"json_object"},max_tokens:16384,stream:false,user_id:input.anonymousUserId,
             messages:[{role:"system",content:knowledgeMapPrompt},{role:"user",content:JSON.stringify({dataType:"untrusted_learning_records",question:parsed.data.question,sources:parsed.data.sources})}]}),
         });
       } catch { throw new DeepSeekProviderError("MODEL_SERVICE_ERROR", true); }

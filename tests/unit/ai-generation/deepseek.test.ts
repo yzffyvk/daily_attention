@@ -44,7 +44,7 @@ function providerFor(response: Response) {
   };
 }
 
-describe("DeepSeek V4 Pro provider", () => {
+describe("DeepSeek Flash provider", () => {
   it("separates submitted requirements from untrusted source data in one model request", async () => {
     const { provider, fetchImpl } = providerFor(new Response(JSON.stringify(successResponse())));
     const requirements = "面向初学者，重点解释应用条件，节点内先举例再说明原理";
@@ -153,7 +153,7 @@ describe("DeepSeek V4 Pro provider", () => {
     expect(url).toBe("https://api.deepseek.com/chat/completions");
     const request = JSON.parse(init.body as string);
     expect(request).toMatchObject({
-      model: "deepseek-v4-pro",
+      model: "deepseek-flash",
       thinking: { type: "enabled" },
       reasoning_effort: "high",
       response_format: { type: "json_object" },

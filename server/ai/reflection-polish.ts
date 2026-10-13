@@ -98,7 +98,7 @@ export function createReflectionPolishProvider(options: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            model: "deepseek-v4-pro",
+            model: "deepseek-flash",
             thinking: { type: "disabled" },
             response_format: { type: "json_object" },
             max_tokens: 2500,
