@@ -320,6 +320,13 @@ export function createProductionDependencies(
     anonymousUserId(userId) {
       return hmacSha256Hex(environment.userIdPepper, userId);
     },
+    async reportProgress(jobId, attemptCount, progress) {
+      await rpc(client, "report_ai_generation_progress", {
+        target_job_id: jobId,
+        target_attempt_count: attemptCount,
+        target_progress: progress,
+      });
+    },
     generate(input) {
       const timeoutMs = options.dedicatedWorker ? dedicatedAiTiming.modelTimeoutMs : 120_000;
       return provider.generate({ ...input, signal: AbortSignal.timeout(timeoutMs) });

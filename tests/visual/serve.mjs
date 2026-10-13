@@ -13,6 +13,22 @@ const server = await createServer({
   publicDir: `${projectRoot}/public`,
   envDir: false,
   plugins: [react(), {
+    name: "local-question-result-acceptance",
+    configureServer(vite) {
+      vite.middlewares.use('/__question-result', async (_req, res) => {
+        // Explicitly opt in to one saved local result; never read app credentials.
+        const resultPath = process.env.QUESTION_READER_RESULT_PATH;
+        if (!resultPath) { res.statusCode = 404; res.end(); return; }
+        try {
+          const saved = JSON.parse(await readFile(resultPath, 'utf8'));
+          if (typeof saved.result?.summary !== 'string') throw new Error('Missing summary');
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Cache-Control', 'no-store');
+          res.end(JSON.stringify({ summary: saved.result.summary }));
+        } catch { res.statusCode = 500; res.end(); }
+      });
+    },
+  }, {
     name: "reuse-app-fonts-in-fixture",
     async transformIndexHtml() {
       // Reuse the app's existing local font cache; never fetch third-party fonts.

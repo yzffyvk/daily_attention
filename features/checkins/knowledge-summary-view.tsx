@@ -3,6 +3,7 @@
 import { ChevronDown, Layers3, Lightbulb } from "lucide-react";
 import { useMemo, useState, type CSSProperties } from "react";
 import { QuestionStructureView } from "./question-structure-view";
+import { QuestionSummaryDocument } from "./question-summary-document";
 import { KnowledgeStructureView } from "./knowledge-structure-view";
 import { parseKnowledgeSummary, type KnowledgeNode } from "@/lib/domain/knowledge-summary";
 
@@ -50,6 +51,7 @@ export function KnowledgeSummaryView({ value, title }: { value: string; title?: 
   const document = useMemo(() => parseKnowledgeSummary(value), [value]);
   const nodes = useMemo(() => flattenNodes(document.roots), [document.roots]);
   const [selection, setSelection] = useState<{ source: string; id: string } | null>(null);
+  const [completeSource, setCompleteSource] = useState<string | null>(null);
   const defaultNode = nodes.filter(node => node !== document.roots[0] && node.children.length).sort((a, b) => b.children.length - a.children.length)[0]
     ?? nodes.find(node => node.details.length)
     ?? nodes[0];
@@ -65,11 +67,8 @@ export function KnowledgeSummaryView({ value, title }: { value: string; title?: 
 
   return (
     <div className="knowledge-summary-view">
-      {document.thesis ? <p className="knowledge-thesis">{document.thesis}</p> : null}
-      {document.questions ? <>
-        {document.questions.warnings.map((warning, index) => <p key={index} className="knowledge-structure-notes">{warning}</p>)}
-        <QuestionStructureView structure={document.questions.structure} title={title} />
-      </> : document.structure ? <>
+      {!document.questions && document.thesis ? <p className="knowledge-thesis">{document.thesis}</p> : null}
+      {document.questions ? <QuestionStructureView structure={document.questions.structure} title={title} thesis={document.thesis} warnings={document.questions.warnings} /> : document.structure ? <>
         {document.unmapped ? <div className="knowledge-structure-notes"><KnowledgeText value={document.unmapped} /></div> : null}
         <KnowledgeStructureView structure={document.structure} title={title} />
       </> : selected ? (
@@ -102,13 +101,13 @@ export function KnowledgeSummaryView({ value, title }: { value: string; title?: 
           <KnowledgeText value={document.explanation} />
         </details>
       ) : null}
-      {(document.questions || document.structure || selected) && document.distinctions ? <section className="knowledge-distinctions" aria-label="关键辨析">
+      {document.questions && document.distinctions ? <details className="knowledge-distinctions question-warnings"><summary>关键边界与辨析</summary><KnowledgeText value={document.distinctions} /></details> : (document.structure || selected) && document.distinctions ? <section className="knowledge-distinctions" aria-label="关键辨析">
         <h4><Lightbulb aria-hidden="true" size={18} />关键辨析</h4>
         <KnowledgeText value={document.distinctions} />
       </section> : null}
-      {(document.questions || document.structure || selected) ? <details className="knowledge-complete">
+      {(document.questions || document.structure || selected) ? <details className="knowledge-complete" open={completeSource === value} onToggle={event => setCompleteSource(event.currentTarget.open ? value : null)}>
         <summary>查看完整小结</summary>
-        <div className="knowledge-original" data-testid="complete-summary">{document.original}</div>
+        {document.questions ? completeSource === value ? <QuestionSummaryDocument document={document.questions} /> : null : <div className="knowledge-original" data-testid="complete-summary">{document.original}</div>}
       </details> : null}
     </div>
   );

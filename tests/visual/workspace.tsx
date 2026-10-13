@@ -28,6 +28,9 @@ import { DemoToolbar, type DemoScenario } from "./demo-toolbar";
 
 const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 const previewParameters = new URLSearchParams(window.location.search);
+const savedQuestionPreview = previewParameters.get("sample") === "acceptance"
+  ? await fetch('/__question-result').then(response => { if (!response.ok) throw new Error('Local acceptance result unavailable'); return response.json() as Promise<{ summary: string }>; })
+  : null;
 // Human-facing previews are always usable. Only automated fixture runners opt out.
 const isDemo = previewParameters.get("fixture") !== "1";
 // Same boot behavior as the real app; a query override is only for this fixture.
@@ -64,7 +67,7 @@ createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={client}>
     {demo ? <DemoToolbar demo={demo} scenario={scenario} /> : null}
     {previewParameters.get("view") === "question-reader" ? (
-      <main style={{ maxWidth: 1380, padding: 16, margin: "0 auto" }}><KnowledgeSummaryView value={(window as Window & { __auraQuestionSummary?: string }).__auraQuestionSummary ?? serializeQuestionSummary(questionSummaryFixture())} title="问题结构阅读" /></main>
+      <main style={{ maxWidth: 1000, padding: 24, margin: "0 auto" }}>{savedQuestionPreview ? <p className="knowledge-muted">本地提炼结果预览 · 不写入学习记录</p> : null}<KnowledgeSummaryView value={savedQuestionPreview?.summary ?? (window as Window & { __auraQuestionSummary?: string }).__auraQuestionSummary ?? serializeQuestionSummary(questionSummaryFixture())} title="问题结构阅读" /></main>
     ) : previewParameters.get("view") === "structure-reader" ? (
       <main style={{ maxWidth: 1380, padding: 16, margin: "0 auto" }}><KnowledgeStructureView structure={readerPreview} title="结构阅读边界验收" /></main>
     ) : previewParameters.get("view") === "knowledge-map" ? (

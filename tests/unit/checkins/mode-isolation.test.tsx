@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CheckInWorkspace } from "@/features/checkins/checkin-workspace";
@@ -83,6 +83,9 @@ async function switchTo(mode: Mode) {
   fireEvent.click(screen.getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ }));
   await waitFor(() => expect(screen.getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ })).toHaveAttribute("aria-pressed", "true"));
   await waitFor(() => expect(screen.getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ })).toBeEnabled());
+  // Mode navigation becomes available before the incoming draft is restored.
+  // A real learner can only edit after the editor itself is ready.
+  await waitFor(() => expect(document.querySelector('.checkin-form')).toHaveAttribute('aria-busy', 'false'));
 }
 
 beforeEach(() => {
@@ -110,7 +113,7 @@ describe("manual and AI record isolation", () => {
       userPrompt: "下次重点讲实现", summary: "AI 独立的知识骨架",
       aiGenerationContext: { userPrompt: "解释使用边界", promptVersion: "knowledge-skeleton-user-prompt-v1" },
     }));
-    await waitFor(() => expect(screen.getByRole("button", { name: /手动记录/ })).toBeEnabled());
+    await waitFor(() => expect(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: /手动记录/ })).toBeEnabled());
     await switchTo("manual");
     expect(screen.queryByRole("textbox", { name: "提炼要求" })).not.toBeInTheDocument();
     cleanup(); mount(); await waitFor(() => expect(screen.getByLabelText("今日知识主题")).toBeEnabled());
@@ -141,7 +144,7 @@ describe("manual and AI record isolation", () => {
     edit("attention", "手动已保存主题"); edit("summary", "手动已保存小结");
     fireEvent.click(screen.getByRole("button", { name: /完成打卡/ }));
     await waitFor(() => expect(api.records.get("manual")?.summary).toBe("手动已保存小结"));
-    await waitFor(() => expect(screen.getByRole("button", { name: /AI 提炼/ })).toBeEnabled());
+    await waitFor(() => expect(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: /AI 提炼/ })).toBeEnabled());
     await switchTo("ai"); edit("attention", "AI 已保存主题"); edit("inspiration", "AI 已保存解释");
     fireEvent.click(screen.getByRole("button", { name: /完成打卡/ }));
     await waitFor(() => expect(api.records.get("ai")?.attention).toBe("AI 已保存主题"));

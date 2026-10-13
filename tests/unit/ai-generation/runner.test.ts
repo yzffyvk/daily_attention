@@ -56,6 +56,19 @@ function ports(overrides: Partial<AiJobRunnerPorts> = {}): AiJobRunnerPorts {
 }
 
 describe("AI job runner", () => {
+  it("fences progress by attempt and keeps successful generation when preview storage fails", async () => {
+    const progress = { phase: "writing" as const, preview: "正文", updatedAt: new Date().toISOString() };
+    const reportProgress = vi.fn().mockRejectedValue(new Error("storage unavailable"));
+    const runnerPorts = ports({ reportProgress, generate: async input => {
+      await input.onProgress?.(progress);
+      await input.onProgress?.({ ...progress, phase: "validating" });
+      return generated;
+    } });
+    await expect(runAiJob(job.id, runnerPorts)).resolves.toBe("completed");
+    expect(reportProgress).toHaveBeenCalledExactlyOnceWith(job.id, job.attemptCount, progress);
+    expect(runnerPorts.complete).toHaveBeenCalledOnce();
+    expect(runnerPorts.markProviderFailure).not.toHaveBeenCalled();
+  });
   it("records all model calls and usage when a structured repair still fails", async () => {
     const runnerPorts = ports({ generate: vi.fn().mockRejectedValue(new DeepSeekProviderError("MODEL_OUTPUT_INVALID", true, { providerCallCount: 2, usage: generated.usage })) });
     await expect(runAiJob(job.id, runnerPorts)).resolves.toBe("retryable");

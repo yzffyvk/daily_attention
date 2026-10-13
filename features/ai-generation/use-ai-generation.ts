@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AiGenerationResult } from "@/lib/domain/ai-generation";
+import type { AiGenerationProgress } from "@/lib/domain/ai-progress";
 import { aiUserPromptSchema, type AiGenerationContext } from "@/lib/domain/ai-prompt";
 import {
   cancelAiGeneration,
@@ -35,6 +36,9 @@ export type AiGenerationController = {
   activeJob: ActiveAiJob | null;
   stage: AiGenerationStage | "idle" | "creating";
   error: string;
+  progress: AiGenerationProgress | null;
+  attemptCount: number;
+  retryMessage: string;
   quotaRemaining: number | null;
   isLongRunning: boolean;
   isCreating: boolean;
@@ -59,6 +63,9 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     input.activeJob ? "queued" : "idle",
   );
   const [error, setError] = useState("");
+  const [progress, setProgress] = useState<AiGenerationProgress | null>(null);
+  const [attemptCount, setAttemptCount] = useState(0);
+  const [retryContext, setRetryContext] = useState<{ attemptCount: number; message: string } | null>(null);
   const [quotaRemaining, setQuotaRemaining] = useState<number | null>(null);
   const [isLongRunning, setIsLongRunning] = useState(false);
   const [canRetryCreate, setCanRetryCreate] = useState(false);
@@ -88,6 +95,9 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     activeJobRef.current = null;
     setActiveJob(null);
     setIsLongRunning(false);
+    setProgress(null);
+    setAttemptCount(0);
+    setRetryContext(null);
     callbacksRef.current.onActiveJobChange?.(null);
     callbacksRef.current.onTerminal(jobId);
   }, [clearPolling]);
@@ -99,7 +109,7 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     const elapsed = Math.max(0, Date.now() - Date.parse(job.createdAt));
     const longRunning = elapsed >= longRunningAfterMs;
     if (longRunning) setIsLongRunning(true);
-    const delay = isDocumentHidden() || longRunning
+    const delay = isDocumentHidden()
       ? slowPollDelay
       : suggestedDelay ?? visiblePollDelays[Math.min(
         pollIndexRef.current,
@@ -121,6 +131,13 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
       const next = await getAiGeneration(job.jobId, controller.signal);
       if (controller.signal.aborted || activeJobRef.current?.jobId !== job.jobId) return;
       setStage(next.stage);
+      setProgress(next.status === "generating" ? next.progress ?? null : null);
+      setAttemptCount(next.attemptCount ?? 0);
+      // A claim clears the stored failure. Keep its explanation for the next attempt only.
+      if (next.status === "retryable") setRetryContext({
+        attemptCount: next.attemptCount ?? 0,
+        message: next.retryMessage ?? "上一轮未完成，正在重新尝试。",
+      });
       setError("");
       if (next.status === "succeeded" && next.result) {
         callbacksRef.current.onSucceeded(next.result, job.targetDate, next.generationContext ?? job.generationContext);
@@ -133,7 +150,7 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
         return;
       }
       pollIndexRef.current += 1;
-      schedulePoll(job);
+      schedulePoll(job, next.status === "generating" ? 1_000 : undefined);
     } catch (nextError) {
       if (controller.signal.aborted) return;
       setError(errorMessage(nextError));
@@ -153,6 +170,10 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     creatingRef.current = true;
     clearPolling();
     setStage("creating");
+    setProgress(null);
+    setAttemptCount(0);
+    setRetryContext(null);
+    setIsLongRunning(false);
     setError("");
     try {
       const created = await createAiGeneration(request);
@@ -232,6 +253,10 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     activeJobRef.current = restored;
     setActiveJob(restored);
     setStage("queued");
+    setProgress(null);
+    setAttemptCount(0);
+    setRetryContext(null);
+    setIsLongRunning(false);
     setError("");
     pollIndexRef.current = 0;
     schedulePoll(restored);
@@ -246,10 +271,28 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
 
   useEffect(() => () => clearPolling(), [clearPolling]);
 
+  useEffect(() => {
+    const resume = () => {
+      if (!isDocumentHidden() && activeJobRef.current) {
+        clearPolling();
+        void pollRef.current();
+      }
+    };
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("online", resume);
+    return () => {
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("online", resume);
+    };
+  }, [clearPolling]);
+
   return {
     activeJob,
     stage,
     error,
+    progress,
+    attemptCount,
+    retryMessage: retryContext && attemptCount <= retryContext.attemptCount + 1 ? retryContext.message : "",
     quotaRemaining,
     isLongRunning,
     isCreating: stage === "creating",

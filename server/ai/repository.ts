@@ -5,6 +5,7 @@ import type { AiGenerationStatus } from "@/features/ai-generation/types";
 import { dateKeySchema } from "@/lib/domain/checkin";
 import { aiUserPromptSchema } from "@/lib/domain/ai-prompt";
 import { createAdminSupabase } from "@/lib/supabase/admin";
+import { aiGenerationProgressSchema, type AiGenerationProgress } from "@/lib/domain/ai-progress";
 
 const statusSchema = z.enum([
   "queued",
@@ -52,6 +53,7 @@ const jobSchema = z.object({
   result_expires_at: timestampSchema.nullable(),
   metadata_expires_at: timestampSchema,
   updated_at: timestampSchema,
+  progress: aiGenerationProgressSchema.nullable().optional().catch(null),
 });
 
 const jobWithQuotaSchema = z.object({
@@ -123,6 +125,7 @@ export type AiJob = {
   resultExpiresAt: string | null;
   metadataExpiresAt: string;
   updatedAt: string;
+  progress?: AiGenerationProgress | null;
 };
 
 export type AiJobWithQuota = {
@@ -187,6 +190,7 @@ function mapJob(row: z.infer<typeof jobSchema>): AiJob {
     resultExpiresAt: row.result_expires_at,
     metadataExpiresAt: row.metadata_expires_at,
     updatedAt: row.updated_at,
+    progress: row.progress ?? null,
   };
 }
 

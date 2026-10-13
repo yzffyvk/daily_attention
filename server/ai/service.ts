@@ -25,6 +25,14 @@ const taskErrorMessages: Record<AiGenerationTaskErrorCode, string> = {
   RESULT_EXPIRED: "生成结果已过期，请重新生成",
 };
 
+const automaticRetryMessages: Partial<Record<AiGenerationTaskErrorCode, string>> = {
+  MODEL_OUTPUT_INVALID: "上一轮内容未通过校验，正在重新生成。",
+  MODEL_RATE_LIMITED: "AI 服务繁忙，正在等待重试。",
+  MODEL_SERVICE_ERROR: "上一轮 AI 响应未完成，正在重新尝试。",
+  FETCH_TIMEOUT: "上一轮读取资料超时，正在重新读取。",
+  FETCH_SERVICE_UNAVAILABLE: "资料读取服务暂时不可用，正在等待重试。",
+};
+
 function isTaskErrorCode(value: string | null): value is AiGenerationTaskErrorCode {
   return value !== null && value in taskErrorMessages && value !== "RESULT_EXPIRED";
 }
@@ -94,6 +102,12 @@ export function toAiGenerationJobData(job: AiJob): AiGenerationJobData {
     jobId: job.id,
     status: job.status,
     stage: stageFor(job),
+    attemptCount: job.attemptCount,
+    ...(job.status === "retryable" ? {
+      retryMessage: (isTaskErrorCode(job.errorCode) && automaticRetryMessages[job.errorCode])
+        || "上一轮未完成，正在重新尝试。",
+    } : {}),
+    ...(job.status === "generating" && job.progress ? { progress: job.progress } : {}),
     generationContext: {
       userPrompt: job.userPrompt ?? "",
       promptVersion: job.promptVersion,

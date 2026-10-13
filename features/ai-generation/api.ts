@@ -14,9 +14,10 @@ export function createAiGeneration(input: CreateAiGenerationInput) {
 }
 
 export function getAiGeneration(jobId: string, signal?: AbortSignal) {
+  const deadline = AbortSignal.timeout(10_000);
   return requestApi<AiGenerationJobData>(
     `/api/ai/generations/${encodeURIComponent(jobId)}`,
-    { signal },
+    { signal: signal ? AbortSignal.any([signal, deadline]) : deadline },
   );
 }
 

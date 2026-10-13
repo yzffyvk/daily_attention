@@ -51,8 +51,12 @@ describe("AI generation browser API", () => {
     await cancelAiGeneration("job-1");
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/ai/generations/job-1", expect.objectContaining({
-      signal: controller.signal,
+      signal: expect.any(AbortSignal),
     }));
+    const pollingSignal = fetchMock.mock.calls[0][1].signal as AbortSignal;
+    expect(pollingSignal.aborted).toBe(false);
+    controller.abort();
+    expect(pollingSignal.aborted).toBe(true);
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/ai/generations/job-1", expect.objectContaining({
       method: "DELETE",
     }));
