@@ -4,12 +4,10 @@ import { runPollLoop } from "./poll-loop.ts";
 import { createNarrativeWorker, runNarrativeJob } from "./knowledge-narratives.ts";
 import { dedicatedAiTiming } from "../../supabase/functions/_shared/ai/timeouts.ts";
 import { readWorkerScope } from "./scoped-worker.ts";
+import { readWorkerRuntimeConfig } from "./runtime-config.ts";
 
 const controller = new AbortController();
-const port = Number(process.env.AI_WORKER_HEALTH_PORT ?? 8790);
-if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
-  throw new Error("AI_WORKER_HEALTH_PORT_INVALID");
-}
+const { port, host } = readWorkerRuntimeConfig();
 const scope = readWorkerScope((name) => process.env[name]);
 const dependencies = createProductionDependencies((name) => process.env[name], { dedicatedWorker: true, scope });
 const runJob = dependencies.runJob.bind(dependencies);
@@ -34,24 +32,26 @@ const server = createServer((request, response) => {
 });
 await new Promise<void>((resolve, reject) => {
   server.once("error", reject);
-  server.listen(port, "127.0.0.1", resolve);
+  server.listen(port, host, resolve);
 });
 let forcedShutdown: ReturnType<typeof setTimeout> | undefined;
 function stop() {
   if (controller.signal.aborted) return;
   ready = false;
   controller.abort();
+  console.info(JSON.stringify({ event: "ai_worker_draining" }));
   // Let source fetching, the long model request, and result persistence finish.
   forcedShutdown = setTimeout(() => process.exit(1), dedicatedAiTiming.shutdownTimeoutMs);
   forcedShutdown.unref();
 }
-process.once("SIGINT", stop);
-process.once("SIGTERM", stop);
+// Keep handling repeated signals while the current jobs drain.
+process.on("SIGINT", stop);
+process.on("SIGTERM", stop);
 console.info(JSON.stringify({ event: "ai_worker_started", healthPort: port, mode: scope ? "local_account" : "all_queues" }));
 try {
   await Promise.all([runPollLoop({
     signal: controller.signal,
-    processBatch: () => processQueueBatch(dependencies),
+    processBatch: () => processQueueBatch(dependencies, controller.signal),
     onSuccess: () => { ready = !controller.signal.aborted; },
     onError: () => {
       ready = false;
@@ -69,4 +69,6 @@ try {
 } finally {
   if (forcedShutdown) clearTimeout(forcedShutdown);
   server.close();
+  process.off("SIGINT", stop);
+  process.off("SIGTERM", stop);
 }

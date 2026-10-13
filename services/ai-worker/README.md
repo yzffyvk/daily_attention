@@ -2,6 +2,68 @@
 
 应用创建任务后立即返回 `202`。本服务独立轮询单日提炼队列与知识脉络任务，复用现有模型配置和每日 5 次共享额度。
 
+## Railway 生产部署
+
+网站继续运行在 Cloudflare，数据库继续使用 Supabase。在同一个 Railway 项目中按顺序创建 `safe-fetch-gateway`、`ai-worker` 两个服务，源码均连接本仓库中包含本次部署配置的分支。两者都使用 Dockerfile 的默认启动入口，无需填写网站的构建或启动命令。
+
+### 1. 安全抓取服务
+
+| 设置 | 值 |
+| --- | --- |
+| Root Directory | `/services/safe-fetch-gateway` |
+| 构建方式 | Dockerfile，自动识别该目录中的 `Dockerfile` |
+| Healthcheck Path | `/healthz` |
+| Healthcheck Timeout | `60` 秒 |
+| 实例数 | `1` |
+| Serverless / 休眠 | 关闭 |
+| Draining time | `30` 秒 |
+
+在 Variables 中配置 `SAFE_FETCH_GATEWAY_TOKEN`（32–512 字符的随机密钥）。容器默认监听 `0.0.0.0`，端口读取 Railway 注入的 `PORT`。不要把本地的 `HOST=127.0.0.1` 带到生产环境。
+
+部署成功后，在 Settings → Networking → Public Networking 点击 Generate Domain，取得 `https://…up.railway.app` 地址。访问该地址的 `/healthz` 应返回 `{"ok":true}`；未携带令牌请求 `/v1/fetch` 应被拒绝。生成的域名自带 HTTPS，无需另外购买域名。
+
+### 2. AI Worker
+
+| 设置 | 值 |
+| --- | --- |
+| Root Directory | `/`，必须包含共享源码 |
+| Dockerfile 路径 | `services/ai-worker/Dockerfile` |
+| Healthcheck Path | `/readyz` |
+| Healthcheck Timeout | `600` 秒，启动后首批任务可能包含长文生成 |
+| 实例数 | `1` |
+| Serverless / 休眠 | 关闭，后台需要持续读取任务 |
+| Draining time | `600` 秒，覆盖程序内部的 580 秒退出等待 |
+
+在 Variables 中设置：
+
+| 变量 | 内容 |
+| --- | --- |
+| `RAILWAY_DOCKERFILE_PATH` | `services/ai-worker/Dockerfile` |
+| `RAILWAY_DEPLOYMENT_DRAINING_SECONDS` | `600` |
+| `SUPABASE_URL` | 生产项目地址 |
+| `SUPABASE_SECRET_KEY` | 对应项目的服务端密钥 |
+| `DEEPSEEK_API_KEY` | 可用的模型密钥 |
+| `AI_USER_ID_PEPPER` | 与网站一致、至少 32 字符的密钥 |
+| `SAFE_FETCH_GATEWAY_URL` | 上一步的 HTTPS 根地址，不带路径或查询参数 |
+| `SAFE_FETCH_GATEWAY_TOKEN` | 与抓取服务完全一致的密钥 |
+| `AI_PROVIDER_MODE` | `deepseek` |
+
+容器已经设置 `NODE_ENV=production`、`AI_WORKER_HEALTH_HOST=0.0.0.0`，并优先读取平台 `PORT`。不要设置本地验收用的 `AI_WORKER_USER_ID`、`AI_WORKER_CREATED_AFTER`，也不需要 `AI_WORKER_TRIGGER_TOKEN`。AI Worker 不需要公网域名；健康接口不返回密钥或用户数据。
+
+Docker 镜像只安装本服务锁定的运行依赖，包含正文解析用的 `linkedom`；构建上下文使用白名单，排除本地环境文件。密钥只在平台 Variables 中配置，不能写入镜像或 Git。
+
+Node 直接作为容器主进程接收 SIGTERM。收到信号后立即取消就绪状态、停止后续领取，等待已领取任务完成；重复停止信号不会打断等待。平台必须实际允许 600 秒退出时间；容器的 `STOPSIGNAL` 本身不会延长平台的强制终止期限。崩溃或强制终止仍有下文所述的任务恢复边界。
+
+### 3. 上线验收
+
+确认抓取服务健康、Worker 的 `/readyz` 通过、日志没有持续的队列读取错误，再在 Cloudflare 为 AI 功能设置所需密钥与 `AI_GENERATION_ENABLED=true`。心得润色由网站服务直接调用模型，因此 Cloudflare 也需要 `DEEPSEEK_API_KEY` 和 `AI_USER_ID_PEPPER`。
+
+使用真实账号分别验证文章提炼、知识脉络和润色；`/readyz` 成功只代表两类队列能够读取，不代表模型密钥或余额有效。不要同时启用旧 Supabase Edge 消费者。定时清理任务需另行配置。
+
+Railway 当前新服务使用控制台设置或 Infrastructure as Code；本项目不新增已弃用的 `railway.json` / `railway.toml`。
+
+参考：[Dockerfile 部署](https://docs.railway.com/builds/dockerfiles)、[健康检查](https://docs.railway.com/deployments/healthchecks)、[退出等待](https://docs.railway.com/deployments/deployment-teardown)、[公网域名](https://docs.railway.com/networking/public-networking)、[配置方式](https://docs.railway.com/infrastructure-as-code)。
+
 ## 本地运行
 
 前提：Node.js 22.13 以上、项目依赖已安装，本项目 Supabase 数据库/API 已启动。在项目根目录的三个终端分别运行：
