@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ai-learning-checkin",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-05-15",
+  // vite.config.ts supplies nodejs_compat, including for isolated test bindings.
+  "assets": {
+    "directory": "dist/client",
+    "binding": "ASSETS"
+  },
+  "images": {
+    "binding": "IMAGES"
+  },
+  // Runtime variables are managed in the Cloudflare dashboard.
+  "keep_vars": true
+}
