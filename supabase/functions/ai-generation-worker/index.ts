@@ -108,11 +108,12 @@ async function mapWithConcurrency<T>(
   );
 }
 
-export async function processQueueBatch(dependencies: AiWorkerDependencies) {
+export async function processQueueBatch(dependencies: AiWorkerDependencies, signal?: AbortSignal) {
   let messages = await dependencies.readMessages();
-  if (messages.length === 0) {
+  if (messages.length === 0 && !signal?.aborted) {
     await new Promise((resolve) => setTimeout(resolve, QUEUE_VISIBILITY_GRACE_MS));
-    messages = await dependencies.readMessages();
+    // Finish deliveries already claimed, but do not claim again during shutdown.
+    if (!signal?.aborted) messages = await dependencies.readMessages();
   }
   messages = messages.slice(0, QUEUE_BATCH_LIMIT);
   await mapWithConcurrency(messages, WORKER_CONCURRENCY, async (delivery) => {

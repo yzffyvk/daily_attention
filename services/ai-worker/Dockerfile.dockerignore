@@ -1,0 +1,23 @@
+# Only runtime sources and the worker lockfile enter the build context.
+**
+!services/
+!services/ai-worker/
+!services/ai-worker/*.ts
+!services/ai-worker/package.json
+!services/ai-worker/package-lock.json
+!supabase/
+!supabase/functions/
+!supabase/functions/ai-generation-worker/
+!supabase/functions/ai-generation-worker/**
+!supabase/functions/_shared/
+!supabase/functions/_shared/**
+!lib/
+!lib/domain/
+!lib/domain/**
+!lib/supabase/
+!lib/supabase/database.types.ts
+**/node_modules
+**/.env*
+**/.dev.vars*
+**/*.pem
+**/*.test.*

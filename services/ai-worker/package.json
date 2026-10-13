@@ -1,0 +1,12 @@
+{
+  "name": "aura-ai-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13.0" },
+  "dependencies": {
+    "@supabase/supabase-js": "2.110.8",
+    "linkedom": "0.18.13",
+    "zod": "4.4.3"
+  }
+}
