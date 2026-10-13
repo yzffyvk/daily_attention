@@ -2,10 +2,35 @@
 
 让每一次学习，连成自己的知识地图。以点成线，以线成面。在记录中积累，在关联中理解。
 
-一个使用 Supabase 保存账户、打卡记录和图片的学习打卡应用。前端由
-[vinext](https://github.com/cloudflare/vinext) 运行，支持部署到 Cloudflare Workers。
+**在线访问：[https://aura-attention.com/](https://aura-attention.com/)**
 
-## Code Map
+一个帮助学习者记录、理解和串联知识的应用，支持手动记录、AI 文章提炼、跨日期知识串联和心得润色。
+前端使用 React、TypeScript 和 [vinext](https://github.com/cloudflare/vinext)，网站及 API 部署在 Cloudflare Workers，
+Supabase 提供账户认证、数据库和图片存储，Railway 运行常驻 AI Worker 与安全抓取服务。
+
+## 主要功能
+
+- **学习记录与日历**：按日期保存主题、来源、小结、个人收获和图片；手动记录与 AI 记录独立保存。
+- **AI 提炼**：读取公开文字资料链接，可填写提炼要求，按核心主线、独立问题、答案和局部结构图组织内容。
+- **知识串联**：选择 2–14 个已保存的学习日期，生成概念图谱和讲述提纲，支持查看来源、编辑、复制和重新生成。
+- **心得润色**：依据当前知识总结改进用户自己的解释，采纳后可撤销，仍需主动保存记录。
+- **账户与草稿**：邮箱密码登录、恢复码找回账户，草稿按账户和日期存储在浏览器中，支持离线保留。
+- **每日新知**：包含网球入门目录、个人学习进度和阶段回顾；正式内容需审核并发布后才会展示。
+
+## 运行架构
+
+| 服务 | 平台 | 职责 |
+| --- | --- | --- |
+| 网站与 API：`daily-attention` | Cloudflare Workers | 页面、登录、记录管理、创建和查询 AI 任务，以及心得润色 |
+| `ai-worker` | Railway | 持续消费文章提炼和知识串联任务，调用模型并保存结果 |
+| `safe-fetch-gateway` | Railway | 安全读取用户提交的公开文章链接，校验地址、重定向和响应大小 |
+| 数据库、账户与图片存储 | Supabase | 正式数据持久化、认证、权限控制和图片存储 |
+
+当前三项 AI 能力均使用 `deepseek-flash`。文章提炼采用异步队列，页面提交后轮询任务状态；
+生成成功后返回待确认的草稿，用户保存后才成为正式学习记录。知识串联结果会自动保存。
+具体模型参数、健康检查及后台部署方式见 [AI Worker 文档](./services/ai-worker/README.md)。
+
+## 项目结构
 
 日常开发直接使用当前仓库根目录。页面、接口、服务端和数据库文件的位置见
 [`PROJECT_STRUCTURE.md`](./PROJECT_STRUCTURE.md)。
@@ -18,13 +43,13 @@
 - `server/`：认证、打卡、存储和限流服务。
 - `supabase/migrations/`：正式数据库结构。
 
-## Prerequisites
+## 环境要求
 
 - Node.js `>=22.13.0`
 - Docker Desktop（本地 Supabase 依赖 Docker）
 - [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started)
 
-## Local Setup
+## 本地启动
 
 ```bash
 npm install
@@ -33,30 +58,34 @@ cp .dev.vars.example .dev.vars
 npm run dev
 ```
 
-Use `supabase status -o env` to copy the local API URL, publishable key, and
-secret key into `.dev.vars`. Set `AUTH_RATE_LIMIT_PEPPER` to a private random
-value of at least 32 bytes. `.dev.vars` is ignored and must not be committed.
+使用 `supabase status -o env` 获取本地 API 地址、公开密钥和服务端密钥，填写到 `.dev.vars`。
+`AUTH_RATE_LIMIT_PEPPER` 需要至少 32 字节的私密随机值。`.dev.vars` 已被 Git 忽略，不得提交。
 
-Production values belong in `.env.production.local`, which is also ignored.
-The active environment template is `.dev.vars.example`; it contains no WeChat
-configuration because the current application uses email-and-password accounts
-backed by Supabase.
+本地读取生产配置时使用同样被忽略的 `.env.production.local`。环境变量模板为 `.dev.vars.example`；
+当前账户体系使用 Supabase 邮箱密码认证，不需要微信配置。
 
-The formal schema and data APIs are Supabase-owned. Apply all local migrations
-and seed data with:
+正式数据库结构和数据 API 由 Supabase 管理。本地应用全部迁移和种子数据：
 
 ```bash
 npm run supabase:reset
 ```
 
-Regenerate the checked-in TypeScript database types after a deliberate schema
-change:
+数据库结构变更后，重新生成纳入版本管理的 TypeScript 数据库类型：
 
 ```bash
 npm run supabase:types
 ```
 
-## Verification
+如需本地使用真实 AI，另行配置模型、匿名用户标识和网关密钥，并在两个终端保持后台运行：
+
+```bash
+npm run dev:gateway
+npm run dev:ai-worker
+```
+
+所需变量及连接托管数据库时的账号限定验收方式见 [AI Worker 本地运行说明](./services/ai-worker/README.md#本地运行)。
+
+## 验证命令
 
 ```bash
 npm run test:unit
@@ -69,10 +98,9 @@ npm run typecheck
 npm run build
 ```
 
-`npm run test:integration` and `npm run test:e2e` use local Supabase bindings;
-the E2E runner creates only reserved `e2e.daily-attention.invalid` accounts and
-cleans them up only after exact Auth email ownership verification. Stop local
-services with `npm run supabase:stop` when you are finished.
+`npm run test:integration` 和 `npm run test:e2e` 使用本地 Supabase 绑定。
+E2E 仅创建保留的 `e2e.daily-attention.invalid` 测试账户，并在核对 Auth 邮箱归属后清理。
+本地服务使用完毕后，运行 `npm run supabase:stop` 停止。
 
 ## Cloudflare Workers 部署
 
@@ -87,11 +115,16 @@ services with `npm run supabase:stop` when you are finished.
 
 | 设置 | 值 |
 | --- | --- |
-| Worker 名称 | `ai-learning-checkin`（必须与配置一致） |
+| Worker 名称 | `daily-attention`（当前生产站点） |
 | 生产分支 | `main` |
 | 根目录 | 仓库根目录 |
 | Build command | `npm run build` |
 | Deploy command | `npx wrangler deploy` |
+
+仓库中的默认 Worker 名称为 `ai-learning-checkin`。Cloudflare Workers Builds 会使用
+`WRANGLER_CI_OVERRIDE_NAME` 匹配已连接的 Worker 名称，当前站点为 `daily-attention`。
+从本机发布到现有站点时，需要显式指定 `--name daily-attention`。
+参见 [Cloudflare 构建说明](https://developers.cloudflare.com/workers/ci-cd/builds/troubleshoot/)。
 
 在 **Build variables and secrets** 添加 `NODE_VERSION=22`、
 `NEXT_PUBLIC_SUPABASE_URL` 和 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`。
@@ -106,8 +139,10 @@ services with `npm run supabase:stop` when you are finished.
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Text | 与构建配置一致 |
 | `SUPABASE_SECRET_KEY` | Secret | 现有正式项目的服务端密钥 |
 | `AUTH_RATE_LIMIT_PEPPER` | Secret | 沿用现有生产配置，至少 32 字节的私密随机值 |
-| `APP_ORIGIN` | Text | 网站实际 HTTPS 地址，不带末尾 `/`；绑定新域名后同步更新 |
-| `AI_GENERATION_ENABLED` | Text | AI 后台部署并验证前使用 `false` |
+| `APP_ORIGIN` | Text | 当前生产值为 `https://aura-attention.com`，不带末尾 `/` |
+| `AI_GENERATION_ENABLED` | Text | 启用 AI 时设置为 `true`；后台未就绪时使用 `false` |
+| `DEEPSEEK_API_KEY` | Secret | 心得润色调用模型所需的 DeepSeek API 密钥 |
+| `AI_USER_ID_PEPPER` | Secret | 与 AI Worker 一致、至少 32 字符的匿名用户标识密钥 |
 
 `keep_vars: true` 保留控制台管理的运行时普通变量。密钥只放入 Secret，
 不要写进 `wrangler.jsonc`、`NEXT_PUBLIC_*` 或提交到 GitHub。
@@ -119,8 +154,16 @@ services with `npm run supabase:stop` when you are finished.
 npm run deploy:check
 ```
 
-如需从本机正式发布，先运行 `npx wrangler login` 授权，再运行 `npm run deploy`。
+如需从本机发布到当前生产站点：
+
+```bash
+npx wrangler login
+npm run build
+npx wrangler deploy --name daily-attention
+```
+
 使用 GitHub 自动部署时，在配置合入 `main` 后由 Cloudflare 执行上述构建和部署命令。
+每次发布都应在 Cloudflare 的 Deployments 中确认新版本已就绪并接管生产流量。
 
 此配置部署网站和 API。常驻 [AI Worker](./services/ai-worker/README.md)
 及 [安全抓取服务](./services/safe-fetch-gateway/) 需要单独部署；
@@ -128,25 +171,29 @@ npm run deploy:check
 注册、登录、打卡保存和刷新读取。`deploy:check` 不验证 Cloudflare 账号权限、
 线上 Secret、域名、生产数据库连接或大陆网络可用性。
 
-## Account And Draft Behavior
+AI 后台的两个 Railway 服务同样使用 `main` 分支。AI Worker 需要数据库密钥、
+`DEEPSEEK_API_KEY`、`AI_USER_ID_PEPPER`、`AI_PROVIDER_MODE=deepseek` 及抓取网关地址和令牌；
+网关需要同一份 `SAFE_FETCH_GATEWAY_TOKEN`。配置步骤、容器入口及健康检查见 [Railway 部署说明](./services/ai-worker/README.md#railway-生产部署)。
 
-Registration is open. Creating an account and successfully recovering access
-each issue a recovery code. A recovery code is one-time use: after recovery it
-is replaced, so record the newly shown code before closing the dialog.
+## 账户与草稿行为
 
-Unsaved check-in drafts live in the browser's local IndexedDB store and are
-scoped to the signed-in account and date. They remain available while offline;
-images and cloud saves resume only after the browser is online and the user
-explicitly saves. Browser-local drafts are not a server-side migration or
-import mechanism.
+当前开放注册。创建账户或成功找回账户时都会生成恢复码；恢复码仅能使用一次，
+找回账户后会生成新码，请在关闭弹窗前记录新恢复码。
 
-## Scope
+未保存的学习记录草稿存储在浏览器本地 IndexedDB 中，按登录账户和日期隔离，离线时仍可保留。
+恢复联网后，由用户主动保存才会上传图片和写入云端；浏览器草稿不承担服务端数据迁移或导入。
+
+## AI 功能与使用边界
 
 本期 AI 提炼支持网页文章、文字教程、知识笔记等文字资料链接，只根据可访问的页面正文梳理知识骨架；暂不支持视频或音频内容解析。视频页面的简介不能代表视频内容，界面不承诺对视频进行提炼。
 
 AI 提炼可选填写最多 1000 字符的「提炼要求」，指定学习重点、基础和讲解方式。留空采用默认方法；资料依据、概念关系和知识骨架结构始终保留。要求随账号、日期和 AI 记录保存，任务使用提交时的要求与提示词版本快照。修改要求后需重新提炼才会影响总结，界面可回看该结果实际使用的要求；重试同一请求不重复扣额度，新的提炼仍使用每日共享额度。旧记录无需补填要求。上线顺序见 [`services/ai-worker/README.md`](./services/ai-worker/README.md) 的提炼要求升级说明。
 
-新版 AI 提炼以「核心主线 → 独立问题 → 本题答案与局部结构图」组织阅读。一篇资料可以包含多个问题，每题仅展示回答它所需的概念和关系；共用概念保留统一解释，并支持跳转到所属问题后返回。问题编号表示建议阅读顺序，不代表因果或执行流程。简单资料可以只有一个问题，没有原文依据时不强行连线。结果保存在最多 12000 字符的可编辑小结中；旧格式继续展示，结构化文档编辑失效时保留完整原文。升级顺序与验收边界见 Worker 文档和 [`docs/ai-question-reader-qa-2026-09-27.md`](./docs/ai-question-reader-qa-2026-09-27.md)。
+新版 AI 提炼以「核心主线 → 独立问题 → 本题答案与局部结构图」组织阅读。一篇资料可以包含多个问题，每题仅展示回答它所需的概念和关系；共用概念保留统一解释，并支持跳转到所属问题后返回。问题编号表示建议阅读顺序，不代表因果或执行流程。简单资料可以只有一个问题，没有原文依据时不强行连线。结果保存为可编辑小结；总字符硬性上限已取消，系统提示词仅建议最终小结尽量控制在 12000 字符以内，超过建议篇幅仍完整接收、解析、编辑和保存。结构、字段、引用及原文依据校验继续保留，旧格式继续展示，结构化文档编辑失效时保留完整原文。新环境需应用 [`20261013145413_remove_summary_character_limit.sql`](./supabase/migrations/20261013145413_remove_summary_character_limit.sql)。升级顺序与验收边界见 Worker 文档和 [`docs/ai-question-reader-qa-2026-09-27.md`](./docs/ai-question-reader-qa-2026-09-27.md)。
+
+提炼与知识串联使用 `deepseek-flash` 的 `high` 思考模式；提炼格式修复和心得润色关闭思考。
+常驻 Worker 单日提炼的模型调用总时限为 480 秒，知识串联为 120 秒。长文生成可能需要数分钟，
+页面持续查询同一任务，具体超时、重试、原文截取与任务恢复边界见 Worker 文档。
 
 手动记录与 AI 提炼按账号、日期和方式独立保存，各自拥有主题、来源、小结、收获、图片与版本。切换前立即保存浏览器草稿；AI 生成、润色与还原只影响 AI 记录。日历展示同一天的两类主题，统计按去重后的学习日期计算。知识串联从进入该功能时所选方式的已保存记录取材，重新生成沿用来源快照中的方式。旧云端记录与浏览器草稿原样归入手动记录，不推断历史来源。部署这次隔离功能前，先应用 `supabase/migrations/20260916123432_checkin_entry_mode_isolation.sql`，再发布应用；旧接口不带方式时仍读取或写入手动记录。
 
@@ -156,9 +203,7 @@ AI 提炼下的「用自己的话解释」支持 AI 润色：根据当前知识�
 
 结果会自动保存，可编辑概念解释和提纲、回看来源或重新生成；原始记录模式仅编辑脉络名称。原记录更新后保留旧快照并提示更新，旧版知识流和主题叙事仍可读取、编辑和复制。知识串联与单日 AI 提炼共用每日 5 次额度，编辑与复制不消耗额度。图谱结果沿用现有 JSON 字段，无需转换旧数据；上线前先应用仓库中的待执行迁移，包括 `20260917114824_index_knowledge_narrative_quota_reference.sql` 补齐额度关联索引，再更新前端/API 并重启常驻 Worker，详见 [`services/ai-worker/README.md`](./services/ai-worker/README.md)。
 
-This application has no invite flow, administrative console, or legacy-import
-feature. It uses Supabase as its only formal persistence and authentication
-backend.
+当前应用不包含邀请流程、管理后台或旧数据导入功能。Supabase 是唯一的正式持久化与认证后端。
 
 ## 每日新知
 
