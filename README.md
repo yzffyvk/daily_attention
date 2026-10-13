@@ -3,7 +3,7 @@
 让每一次学习，连成自己的知识地图。以点成线，以线成面。在记录中积累，在关联中理解。
 
 一个使用 Supabase 保存账户、打卡记录和图片的学习打卡应用。前端由
-[vinext](https://github.com/cloudflare/vinext) 运行，并部署到 OpenAI Sites。
+[vinext](https://github.com/cloudflare/vinext) 运行，支持部署到 Cloudflare Workers。
 
 ## Code Map
 
@@ -73,6 +73,60 @@ npm run build
 the E2E runner creates only reserved `e2e.daily-attention.invalid` accounts and
 cleans them up only after exact Auth email ownership verification. Stop local
 services with `npm run supabase:stop` when you are finished.
+
+## Cloudflare Workers 部署
+
+仓库使用现有 vinext 和 Cloudflare Vite 插件构建，部署配置为
+[`wrangler.jsonc`](./wrangler.jsonc)。构建会生成 `dist/server/wrangler.json`
+及 `.wrangler/deploy/config.json`；Wrangler 会自动使用这份构建产物配置。
+`nodejs_compat` 由 `vite.config.ts` 提供，`ASSETS` 和 `IMAGES` 绑定供
+`worker/index.ts` 的静态资源与图片优化入口使用。
+
+在 Cloudflare 的 **Workers & Pages → Create application → Import a repository**
+连接 GitHub 仓库，设置如下：
+
+| 设置 | 值 |
+| --- | --- |
+| Worker 名称 | `ai-learning-checkin`（必须与配置一致） |
+| 生产分支 | `main` |
+| 根目录 | 仓库根目录 |
+| Build command | `npm run build` |
+| Deploy command | `npx wrangler deploy` |
+
+在 **Build variables and secrets** 添加 `NODE_VERSION=22`、
+`NEXT_PUBLIC_SUPABASE_URL` 和 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`。
+两个 Supabase 值必须来自同一个正式项目，构建时会将公开配置写入前端产物。
+
+在 Worker 的 **Settings → Variables and Secrets** 另行配置运行时变量；
+构建变量不会自动成为运行时变量：
+
+| 变量 | 类型 | 内容 |
+| --- | --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Text | 与构建配置一致 |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Text | 与构建配置一致 |
+| `SUPABASE_SECRET_KEY` | Secret | 现有正式项目的服务端密钥 |
+| `AUTH_RATE_LIMIT_PEPPER` | Secret | 沿用现有生产配置，至少 32 字节的私密随机值 |
+| `APP_ORIGIN` | Text | 网站实际 HTTPS 地址，不带末尾 `/`；绑定新域名后同步更新 |
+| `AI_GENERATION_ENABLED` | Text | AI 后台部署并验证前使用 `false` |
+
+`keep_vars: true` 保留控制台管理的运行时普通变量。密钥只放入 Secret，
+不要写进 `wrangler.jsonc`、`NEXT_PUBLIC_*` 或提交到 GitHub。
+本地 `.env.production.local` 和 `.dev.vars` 不会随 Git 自动上传到 Cloudflare。
+
+本地部署预检（生产构建及打包检查，不上传、不发布）：
+
+```bash
+npm run deploy:check
+```
+
+如需从本机正式发布，先运行 `npx wrangler login` 授权，再运行 `npm run deploy`。
+使用 GitHub 自动部署时，在配置合入 `main` 后由 Cloudflare 执行上述构建和部署命令。
+
+此配置部署网站和 API。常驻 [AI Worker](./services/ai-worker/README.md)
+及 [安全抓取服务](./services/safe-fetch-gateway/) 需要单独部署；
+仅上传网站不能完成 AI 生成任务。发布前确认正式数据库迁移已应用，发布后验证
+注册、登录、打卡保存和刷新读取。`deploy:check` 不验证 Cloudflare 账号权限、
+线上 Secret、域名、生产数据库连接或大陆网络可用性。
 
 ## Account And Draft Behavior
 
