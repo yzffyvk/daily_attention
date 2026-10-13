@@ -10,7 +10,8 @@ import { polishReflection } from "@/server/ai/reflection-polish";
 import { consumeRateLimit } from "@/server/rate-limit/service";
 
 export const dynamic = "force-dynamic";
-const bodyByteLimit = 64 * 1024;
+// Allow complete long summaries while keeping a finite transport budget.
+const bodyByteLimit = 2 * 1024 * 1024;
 
 async function readBody(request: Request) {
   const declaredLength = Number(request.headers.get("content-length"));

@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const reflectionPolishInputSchema = z.object({
   topic: z.string().max(120),
-  summary: z.string().min(1).max(5_000).refine((value) => value.trim().length > 0, "知识总结不能为空"),
+  summary: z.string().min(1).refine((value) => value.trim().length > 0, "知识总结不能为空"),
   answer: z.string().min(1).max(2_000).refine((value) => value.trim().length > 0, "解释不能为空"),
   maxLength: z.number().int().min(1).max(2_000),
 }).strict().superRefine((value, context) => {

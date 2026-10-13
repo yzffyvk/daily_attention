@@ -4,14 +4,14 @@ import { structuredSummarySchema, serializeStructuredSummary, parseKnowledgeStru
 import { parseKnowledgeSummary } from '@/lib/domain/knowledge-summary';
 
 describe('relation-aware knowledge summaries', () => {
-  it('keeps valid legacy graphs readable after a user expands the summary beyond 5000 characters', () => {
+  it('keeps complete legacy graphs readable when the document exceeds 12000 characters', () => {
     const input = relationSummaryFixture();
+    while (input.structure.nodes.length < 16) input.structure.nodes.push({ ...input.structure.nodes[0], name: `补充概念${input.structure.nodes.length}` });
     input.distinctions = '辨'.repeat(1200);
     input.structure.nodes.forEach(node => { node.explanation = '解'.repeat(700); node.summary = '定'.repeat(120); node.evidence = '据'.repeat(180); });
     input.structure.relations.forEach(edge => { edge.condition = '条'.repeat(180); edge.evidence = '据'.repeat(180); });
     const valid = structuredSummarySchema.parse(input), text = serializeStructuredSummary(valid);
-    expect(text.length).toBeGreaterThan(5000);
-    expect(text.length).toBeLessThanOrEqual(12000);
+    expect(text.length).toBeGreaterThan(12000);
     expect(parseKnowledgeStructure(text)).toEqual(valid.structure);
   });
   it('round-trips cross-relations, conditions, evidence and reading guidance through editable text', () => {

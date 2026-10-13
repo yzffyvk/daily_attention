@@ -23,6 +23,14 @@ describe("reflection polish route", () => {
     await expect(response.json()).resolves.toMatchObject({ ok: true, data: output });
   });
 
+  it("passes a long Chinese summary to polishing without truncating it", async () => {
+    const longInput = { ...input, summary: "知".repeat(30_000) };
+    expect(new TextEncoder().encode(JSON.stringify(longInput)).byteLength).toBeGreaterThan(64 * 1024);
+    const response = await POST(request(JSON.stringify(longInput)));
+    expect(response.status).toBe(200);
+    expect(mocks.polish).toHaveBeenCalledWith(longInput, userId, expect.any(AbortSignal));
+  });
+
   it("rejects unauthenticated and disabled requests before parsing or calling the provider", async () => {
     mocks.context.mockResolvedValueOnce(null);
     expect((await POST(request("broken"))).status).toBe(401);
@@ -34,7 +42,7 @@ describe("reflection polish route", () => {
   it.each([
     ["wrong content type", request(JSON.stringify(input), { "Content-Type": "text/plain" })],
     ["cross origin", request(JSON.stringify(input), { Origin: "https://evil.test" })],
-    ["oversized", request(JSON.stringify({ ...input, summary: "a".repeat(70_000) }))],
+    ["oversized", request(JSON.stringify({ ...input, summary: "a".repeat(2 * 1024 * 1024) }))],
     ["answer longer than maxLength", request(JSON.stringify({ ...input, maxLength: 5 }))],
   ])("rejects %s without consuming quota", async (_name, req) => {
     const response = await POST(req);

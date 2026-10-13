@@ -6,7 +6,6 @@ import { useRef, useState } from "react";
 type SummaryEditorProps = {
   disabled: boolean;
   id: string;
-  maxLength: number;
   onChange: (value: string) => void;
   placeholder: string;
   value: string;
@@ -20,7 +19,6 @@ const orderedPrefixPattern = /^\s*\d+[.)、]\s*/u;
 export function SummaryEditor({
   disabled,
   id,
-  maxLength,
   onChange,
   placeholder,
   value,
@@ -42,8 +40,6 @@ export function SummaryEditor({
       .map((line, index) => `${index + 1}. ${line.replace(orderedPrefixPattern, "")}`)
       .join("\n");
     const nextValue = `${value.slice(0, lineStart)}${numberedBlock}${value.slice(lineEnd)}`;
-
-    if (nextValue.length > maxLength) return;
 
     onChange(nextValue);
     window.requestAnimationFrame(() => {
@@ -102,7 +98,6 @@ export function SummaryEditor({
         className={`summary-textarea summary-font-${font} summary-size-${size}`}
         disabled={disabled}
         id={id}
-        maxLength={maxLength}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         ref={textareaRef}

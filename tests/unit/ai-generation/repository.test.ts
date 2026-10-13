@@ -44,6 +44,12 @@ function rpcJob(overrides: Record<string, unknown> = {}) {
 }
 
 describe("AI generation repository", () => {
+  it("reads a completed long summary without dropping the generated result", async () => {
+    const summary = '知'.repeat(30000);
+    const rpc = vi.fn().mockResolvedValue({ data: [rpcJob({ status: 'succeeded', summary })], error: null });
+    const repository = createAiGenerationRepository({ rpc });
+    await expect(repository.findOwned(userId, jobId)).resolves.toMatchObject({ summary });
+  });
   it("creates a durable job and maps quota counts", async () => {
     const rpc = vi.fn().mockResolvedValue({
       data: [{

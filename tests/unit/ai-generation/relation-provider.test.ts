@@ -121,15 +121,18 @@ describe('relation-aware generation', () => {
     output.structure.nodes[0].explanation = '解释内容。\n### 意外的节点\n这段解释不应静默丢失。';
     await expect(providerFor(output).generate(input)).rejects.toMatchObject({ code: 'MODEL_OUTPUT_INVALID', retryable: true });
   });
-  it('rejects oversized output instead of silently cutting relationships or explanations', async () => {
+  it('accepts long source-grounded output without cutting relationships or explanations', async () => {
     const output = relationSummaryFixture();
     output.structure.nodes.forEach(node => { node.explanation = '有效解释。'.repeat(140); });
     output.distinctions = '关系边界。'.repeat(240);
     output.structure.relations.forEach(edge => { edge.condition = '必要条件。'.repeat(36); });
     expect(serializeStructuredSummary(structuredSummarySchema.parse(output)).length).toBeGreaterThan(4800);
-    await expect(providerFor(output).generate(input)).rejects.toMatchObject({ code: 'MODEL_OUTPUT_INVALID' });
+    const result = await providerFor(output).generate(input);
+    expect(result.result.summary).toBe(serializeStructuredSummary(structuredSummarySchema.parse(output)));
+    expect(parseKnowledgeStructure(result.result.summary)).toEqual(output.structure);
+    expect(result.providerCallCount).toBe(1);
   });
-  it('reports evidence and length problems together so one repair can address both', async () => {
+  it('repairs invalid evidence in long output without imposing a length limit', async () => {
     const invalid = relationSummaryFixture();
     invalid.structure.nodes.forEach(node => { node.explanation = '解'.repeat(700); });
     invalid.distinctions = '辨'.repeat(1200);
@@ -142,6 +145,6 @@ describe('relation-aware generation', () => {
     } });
     await provider.generate(input);
     expect(requests[1].messages.at(-1)?.content).toContain('relations[0].evidence');
-    expect(requests[1].messages.at(-1)?.content).toContain('4800');
+    expect(requests[1].messages.at(-1)?.content).not.toContain('4800');
   });
 });

@@ -34,9 +34,14 @@ describe('question-led generation', () => {
     expect(parseQuestionSummary(result.result.summary)).not.toBeNull();
     expect(requests).toHaveLength(1);
   });
-  it('still rejects a structure that exceeds the final limit after adding the source warning', async () => {
-    await expect(provider([nearLimit(11999)], []).generate({ ...input, sourceTruncated: true }))
-      .rejects.toMatchObject({ code: 'MODEL_OUTPUT_INVALID', providerCallCount: 2 });
+  it('accepts a complete long structure without spending a model call on length repair', async () => {
+    const output = nearLimit(15000);
+    const requests: Record<string, unknown>[] = [];
+    const generated = await provider([output], requests).generate({ ...input, sourceTruncated: true });
+    expect(generated.result.summary.length).toBeGreaterThan(15000);
+    expect(parseQuestionSummary(generated.result.summary)?.structure).toEqual(output.structure);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].messages).toEqual(expect.arrayContaining([expect.objectContaining({ role: 'system', content: expect.stringContaining('12000') })]));
   });
   it('resolves source IDs to original excerpts and fills only existing view relations without another model call', async () => {
     const output = questionSummaryFixture();

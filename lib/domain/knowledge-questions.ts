@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { knowledgeContentTypes, knowledgeStructureSchema, type KnowledgeStructure } from './knowledge-structure.ts';
-import { SUMMARY_MAX_LENGTH } from './summary-limits.ts';
 
 const line = (max: number) => z.string().trim().min(1).max(max).regex(/^[^\r\n]+$/u);
 const id = z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/u);
@@ -126,7 +125,7 @@ export function serializeQuestionSummary(value: QuestionSummary): string {
 
 /** Strictly account for every line: never hide qualifications a person added. */
 export function parseQuestionSummary(text: string): QuestionSummary | null {
-  if (text.length > SUMMARY_MAX_LENGTH || !text.trimStart().startsWith('知识结构版本：2')) return null;
+  if (!text.trimStart().startsWith('知识结构版本：2')) return null;
   const lines = text.split(/\r?\n/u).map(l => l.trim()).filter(Boolean);
   let cursor = 0;
   const take = (prefix: string) => {

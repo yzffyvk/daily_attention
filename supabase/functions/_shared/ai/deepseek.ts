@@ -11,7 +11,7 @@ import {
 
 import { structuredSummarySchema, serializeStructuredSummary, hasSourceEvidence, parseKnowledgeStructure } from "../../../../lib/domain/knowledge-structure.ts";
 import { questionSummarySchema, serializeQuestionSummary, parseQuestionSummary } from "../../../../lib/domain/knowledge-questions.ts";
-import { SUMMARY_MAX_LENGTH, SOURCE_TRUNCATION_NOTICE } from "../../../../lib/domain/summary-limits.ts";
+import { SOURCE_TRUNCATION_NOTICE } from "../../../../lib/domain/summary-limits.ts";
 import { questionSystemPrompt } from "./question-prompt.ts";
 import { indexQuestionSource, normalizeQuestionViews } from "./question-source.ts";
 import { relationSystemPrompt } from "./relation-prompt.ts";
@@ -350,8 +350,7 @@ export function createDeepSeekProvider(config: {
         });
         if (parsedInput.data.sourceTruncated) structured.data.warnings = [...new Set([SOURCE_TRUNCATION_NOTICE, ...structured.data.warnings])].slice(0, 10);
         const summary = serializeQuestionSummary(structured.data);
-        if (summary.length > SUMMARY_MAX_LENGTH) feedback.push(`包含资料范围提醒后共 ${summary.length} 字符，超过 ${SUMMARY_MAX_LENGTH}。压缩重复说明与证据，保留所有必要问题、对象、关系及条件。`);
-        else if (JSON.stringify(parseQuestionSummary(summary)) !== JSON.stringify(structured.data)) feedback.push("问题结构无法完整往返解析，检查标识、视图归属和引用，不得丢掉问题或关系。");
+        if (JSON.stringify(parseQuestionSummary(summary)) !== JSON.stringify(structured.data)) feedback.push("问题结构无法完整往返解析，检查标识、视图归属和引用，不得丢掉问题或关系。");
         if (feedback.length) throw new StructuredOutputError(choice.message.content, feedback.join("\n"), used);
         generatedJson = { attention: structured.data.attention, summary, inspiration: "", sourceTitle: structured.data.sourceTitle, warnings: structured.data.warnings };
       }
@@ -375,9 +374,7 @@ export function createDeepSeekProvider(config: {
           feedback.push(...missing);
         }
         const summary = serializeStructuredSummary(structured.data);
-        // Reserve room for the runner's source-truncation notice; never slice a graph.
-        if (summary.length > 4800) feedback.push(`小结编译后为 ${summary.length} 字符，超过4800限制。缩短 explanation、evidence、distinctions 的文字，保留核心节点、关系及条件。`);
-        else if (JSON.stringify(parseKnowledgeStructure(summary)) !== JSON.stringify(structured.data.structure)) feedback.push("结构无法完整往返解析。explanation 不得包含额外的 ### 节点标题或主分节标题；节点名称和关系端点保持完全一致。");
+        if (JSON.stringify(parseKnowledgeStructure(summary)) !== JSON.stringify(structured.data.structure)) feedback.push("结构无法完整往返解析。explanation 不得包含额外的 ### 节点标题或主分节标题；节点名称和关系端点保持完全一致。");
         if (feedback.length) throw new StructuredOutputError(choice.message.content, feedback.join("\n"), used);
         generatedJson = {
           attention: structured.data.attention, summary, inspiration: "",

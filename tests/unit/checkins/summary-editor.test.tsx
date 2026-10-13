@@ -13,7 +13,6 @@ function SummaryEditorHarness() {
     <SummaryEditor
       disabled={false}
       id="summary"
-      maxLength={5000}
       onChange={setValue}
       placeholder="记录知识点"
       value={value}

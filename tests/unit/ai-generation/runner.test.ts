@@ -91,14 +91,13 @@ describe("AI job runner", () => {
     let saved: Parameters<AiJobRunnerPorts["complete"]>[0] | undefined;
     const runnerPorts = ports({
       loadSource: async () => ({ ...source, truncated: true }),
-      generate: async () => ({ ...generated, result: { ...generated.result, summary: "知".repeat(5000), warnings: Array.from({ length: 10 }, (_, i) => `提示${i}`) } }),
+      generate: async () => ({ ...generated, result: { ...generated.result, summary: "知".repeat(30000), warnings: Array.from({ length: 10 }, (_, i) => `提示${i}`) } }),
       complete: async (input) => { saved = input; },
     });
     await expect(runAiJob(job.id, runnerPorts)).resolves.toBe("completed");
     expect(saved?.result.summary).toMatch(/^资料范围：/u);
     expect(saved?.result.summary).toContain("后续内容未纳入");
-    expect(saved!.result.summary.length).toBeLessThanOrEqual(12000);
-    expect(saved!.result.summary).toContain('知'.repeat(5000));
+    expect(saved!.result.summary).toContain('知'.repeat(30000));
     expect(saved?.result.warnings[0]).toContain("后续内容未纳入");
     expect(saved!.result.warnings.length).toBeLessThanOrEqual(10);
   });
