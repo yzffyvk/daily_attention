@@ -19,11 +19,11 @@ export const demoQuestionSummary = questionSummarySchema.parse({
     contentTypes: ["方法与决策规则", "概念与边界"],
     questionOrder: ["context", "evidence", "validation"],
     questions: [
-      { id: "context", title: "怎样问出真实经历？", answer: "围绕最近一次发生的事情，先还原情境，再了解用户当时的做法。", scope: "访谈的提问方法", mainlineRole: "让讨论回到真实发生的事情", evidence: context,
+      { id: "context", title: "怎样问出真实经历？", answer: "围绕最近一次发生的事情，先还原情境，再了解用户当时的做法。", scope: "访谈的提问方法", mainlineRole: "还原真实经历", evidence: context,
         views: [{ id: "context-view", title: "从经历还原情境", diagramKind: "flow", nodeIds: ["experience", "situation", "workaround"], relationIds: ["e1", "e2"], referenceNodeIds: [], readingOrder: ["experience", "situation", "workaround"], contextNotes: [] }] },
-      { id: "evidence", title: "怎样区分愿望与需求证据？", answer: "结合具体经历，观察实际行动、频率和代价；一句赞同只提供线索，不能直接证明需求。", scope: "证据强弱与判断边界", mainlineRole: "把愿望和可靠线索分开", evidence,
+      { id: "evidence", title: "怎样区分愿望与需求证据？", answer: "结合具体经历，观察实际行动、频率和代价；一句赞同只提供线索，不能直接证明需求。", scope: "证据强弱与判断边界", mainlineRole: "辨别需求证据", evidence,
         views: [{ id: "evidence-view", title: "从经历到行为证据", diagramKind: "argument", nodeIds: ["experience", "behavior", "wish"], relationIds: ["e3", "e4"], referenceNodeIds: ["experience"], readingOrder: ["experience", "behavior", "wish"], contextNotes: [{ nodeId: "experience", text: "复用问题一中的具体经历，作为判断行为证据的情境基础。" }] }] },
-      { id: "validation", title: "发现如何进入下一轮验证？", answer: "比较多份记录中的共同模式与反例，形成可检验的需求假设，再用任务观察检验方案。", scope: "从访谈发现到验证任务", mainlineRole: "把线索变成后续可执行的验证", evidence: validation,
+      { id: "validation", title: "发现如何进入下一轮验证？", answer: "比较多份记录中的共同模式与反例，形成可检验的需求假设，再用任务观察检验方案。", scope: "从访谈发现到验证任务", mainlineRole: "验证需求假设", evidence: validation,
         views: [{ id: "validation-view", title: "从证据到需求假设", diagramKind: "flow", nodeIds: ["behavior", "cross-check", "hypothesis", "prototype"], relationIds: ["e5", "e6", "e7"], referenceNodeIds: ["behavior"], readingOrder: ["behavior", "cross-check", "hypothesis", "prototype"], contextNotes: [{ nodeId: "behavior", text: "沿用问题二的行为证据，比较不同记录时仍然保留情境与反例。" }] }] },
     ],
     nodes: [

@@ -1,5 +1,6 @@
 import type { AiGenerationResult } from "@/lib/domain/ai-generation";
 import type { AiGenerationContext } from "@/lib/domain/ai-prompt";
+import type { AiGenerationProgress } from "@/lib/domain/ai-progress";
 
 export type AiGenerationStatus =
   | "queued"
@@ -61,7 +62,10 @@ export type AiGenerationJobData = {
   jobId: string;
   status: AiGenerationStatus;
   stage: AiGenerationStage;
+  attemptCount?: number;
+  retryMessage?: string;
   result?: AiGenerationResult;
+  progress?: AiGenerationProgress;
   error?: {
     code: AiGenerationTaskErrorCode;
     message: string;

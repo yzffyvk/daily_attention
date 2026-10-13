@@ -13,6 +13,7 @@ import {
 import { useMemo, useState, type FormEvent } from "react";
 import type { ActiveAiJob } from "@/features/ai-generation/types";
 import type { AiGenerationController } from "@/features/ai-generation/use-ai-generation";
+import { GenerationProgress } from "@/features/ai-generation/generation-progress";
 import type { DraftStorageState } from "@/features/drafts/use-checkin-draft";
 import { aiSourceFragmentNotice } from "@/lib/domain/ai-generation";
 import { parseKnowledgeSummary } from "@/lib/domain/knowledge-summary";
@@ -75,6 +76,9 @@ type CheckInEditorProps = {
   aiIsLongRunning: boolean;
   aiQuotaRemaining: number | null;
   aiStage: AiGenerationController["stage"];
+  aiProgress?: AiGenerationController["progress"];
+  aiAttemptCount?: AiGenerationController["attemptCount"];
+  aiRetryMessage?: AiGenerationController["retryMessage"];
   date: string;
   record: CheckInRecord | null | undefined;
   draft: CheckInDraft;
@@ -109,6 +113,9 @@ export function CheckInEditor({
   aiIsLongRunning,
   aiQuotaRemaining,
   aiStage,
+  aiProgress = null,
+  aiAttemptCount = 0,
+  aiRetryMessage = "",
   date,
   record,
   draft,
@@ -154,19 +161,6 @@ export function CheckInEditor({
   const draftBlocked = draftStorageState === "blocked";
   const isAiActive = aiActiveJob !== null || aiStage === "creating";
   const fragmentNotice = aiSourceFragmentNotice(draft.sourceUrl);
-  const aiProgressMessage = aiIsLongRunning
-    ? "处理时间比预期更长，任务仍在继续"
-    : aiStage === "creating"
-      ? "正在创建生成任务…"
-      : aiStage === "queued"
-        ? "任务已排队，马上开始读取资料"
-        : aiStage === "fetching"
-          ? "正在安全读取并整理资料…"
-          : aiStage === "generating"
-            ? "DeepSeek 正在思考并生成小结…"
-            : aiStage === "retrying"
-              ? "服务暂时繁忙，正在自动重试…"
-              : aiError;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -392,14 +386,10 @@ export function CheckInEditor({
                 </span>
               </div>
               <p className="field-hint">按实际请求当天计数，北京时间 0 点重置；切换日历日期不会增加次数。</p>
-              {aiProgressMessage ? (
-                <p className="ai-notice" role={aiError ? "alert" : "status"}>
-                  {aiProgressMessage}
-                  {isAiActive && aiStage === "queued" ? (
-                    <button onClick={onAiCancel} type="button">取消任务</button>
-                  ) : null}
-                </p>
-              ) : null}
+              {isAiActive ? <>
+                <GenerationProgress key={aiActiveJob?.jobId ?? "creating"} stage={aiStage} progress={aiProgress} attemptCount={aiAttemptCount} retryMessage={aiRetryMessage} createdAt={aiActiveJob?.createdAt} isLongRunning={aiIsLongRunning} error={aiError} />
+                {aiStage === "queued" ? <p className="ai-notice"><button onClick={onAiCancel} type="button">取消任务</button></p> : null}
+              </> : aiError ? <p className="ai-notice" role="alert">{aiError}</p> : null}
             </section>
 
             <section aria-labelledby="ai-result-title" className="ai-result-step" id="learning-summary-content" hidden={summaryHidden}>

@@ -2,6 +2,8 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import { KnowledgeSummaryView } from "@/features/checkins/knowledge-summary-view";
+import { serializeQuestionSummary } from "@/lib/domain/knowledge-questions";
+import { questionSummaryFixture } from "../../helpers/knowledge-questions-fixture";
 
 const summary = `一句话主旨：
 Agent 由模型与运行系统共同构成。
@@ -32,6 +34,46 @@ Agent
 afterEach(cleanup);
 
 describe("KnowledgeSummaryView", () => {
+  it("renders the complete question summary as readable sections without storage tables or identifiers", async () => {
+    const document = questionSummaryFixture();
+    document.structure.questionOrder.reverse();
+    render(<KnowledgeSummaryView value={serializeQuestionSummary(document)} />);
+    await userEvent.setup().click(screen.getByText("查看完整小结", { exact: true }));
+    const complete = within(screen.getByTestId("complete-summary"));
+    expect(complete.getByRole("heading", { name: document.attention })).toBeVisible();
+    expect(complete.getAllByRole("heading", { level: 6 }).slice(0, 2).map(el => el.textContent)).toEqual(["如何检查？", "如何安排？"]);
+    for (const q of document.structure.questions) expect(complete.getAllByText(q.answer, { exact: true })).toHaveLength(1);
+    for (const n of document.structure.nodes) expect(complete.getAllByText(n.explanation, { exact: true })).toHaveLength(1);
+    expect(complete.getByRole("heading", { name: "试着讲一遍" })).toBeVisible();
+    expect(complete.getByText(document.prompts[0], { exact: true })).toBeVisible();
+    expect(screen.getByTestId("complete-summary").textContent).not.toMatch(/知识结构版本|文档结束|\|---|homeQuestionId|外部引用|q1|n1|e1/u);
+    expect(complete.queryByText("它属于什么")).not.toBeInTheDocument();
+    expect(complete.queryByText("与其他问题的联系")).not.toBeInTheDocument();
+    const part = complete.getByRole("heading", { name: "如何检查？" }).closest("li")!;
+    await userEvent.setup().click(within(part).getByText("范围与依据", { exact: true }));
+    expect(within(part).getByText("本题检查计划的结果。", { exact: true })).toBeVisible();
+    expect(within(part).getByText("检查结果用于改进计划", { exact: true })).toBeVisible();
+  });
+
+  it("keeps named relationships, conditions and evidence accessible in the complete summary", async () => {
+    const document = questionSummaryFixture();
+    document.structure.nodes[0].explanation = '选择 **行动**，保留 `A|B` 与 <script>unsafe()</script>。';
+    render(<KnowledgeSummaryView value={serializeQuestionSummary(document)} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByText("查看完整小结", { exact: true }));
+    const complete = within(screen.getByTestId("complete-summary"));
+    await user.click(complete.getByText("关系与适用条件", { exact: true }));
+    expect(complete.getByText("检查 → 计划", { exact: true })).toBeVisible();
+    expect(complete.getByText("验证并改进", { exact: true })).toBeVisible();
+    expect(complete.getByText("获得结果后", { exact: true })).toBeVisible();
+    const relation = complete.getByText("验证并改进", { exact: true }).closest("li")!;
+    await user.click(within(relation).getByText("原文依据", { exact: true }));
+    expect(within(relation).getByText(document.structure.relations[0].evidence, { exact: true })).toBeVisible();
+    expect(complete.getByText("A|B", { exact: true }).tagName).toBe("CODE");
+    expect(complete.getByText("行动", { exact: true }).tagName).toBe("STRONG");
+    expect(screen.getByTestId("complete-summary")).toHaveTextContent("<script>unsafe()</script>");
+    expect(screen.getByTestId("complete-summary").querySelector("script")).toBeNull();
+  });
   it("shows the actual hierarchy and lets a learner select a node explanation", async () => {
     render(<KnowledgeSummaryView value={summary} />);
     const user = userEvent.setup();

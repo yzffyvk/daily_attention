@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDeepSeekProvider } from '@/supabase/functions/_shared/ai/deepseek';
-import { parseQuestionSummary, serializeQuestionSummary } from '@/lib/domain/knowledge-questions';
+import { parseQuestionSummary, serializeQuestionSummary, type QuestionSummary } from '@/lib/domain/knowledge-questions';
 import { questionSummaryFixture } from '../../helpers/knowledge-questions-fixture';
 import { indexQuestionSource } from '@/supabase/functions/_shared/ai/question-source';
 const sourceText = '计划列出行动步骤，检查用于验证结果。'.repeat(30);
@@ -12,6 +12,16 @@ function provider(outputs: unknown[], requests: Record<string, unknown>[]) {
   } });
 }
 describe('question-led generation', () => {
+  it('accepts five questions without repair: three to four is a prompt preference', async () => {
+    const output: QuestionSummary = questionSummaryFixture();
+    for (let i = 3; i <= 5; i++) {
+      output.structure.questions.push({ ...output.structure.questions[0], id: `q${i}`, title: `补充问题${i}？`, views: [{ ...output.structure.questions[0].views[0], id: `v${i}`, referenceNodeIds: ['n1'] }] });
+      output.structure.questionOrder.push(`q${i}`);
+    }
+    const generated = await provider([output], []).generate(input);
+    expect(parseQuestionSummary(generated.result.summary)?.structure.questions).toHaveLength(5);
+    expect(generated.providerCallCount).toBe(1);
+  });
   function nearLimit(size: number) {
     const output = questionSummaryFixture();
     for (let i = 3; i <= 22; i++) {

@@ -56,6 +56,43 @@ function options(overrides: Record<string, unknown> = {}) {
 }
 
 describe("useAiGeneration", () => {
+  it("keeps partial output separate from the draft and polls long generations every second", async () => {
+    const activeJob = { jobId: created.jobId, targetDate: "2026-10-13", sourceUrl: "https://example.com", createdAt: new Date(Date.now() - 130_000).toISOString() };
+    const progress = { phase: "writing" as const, preview: "正在生成的正文", updatedAt: new Date().toISOString() };
+    vi.mocked(getAiGeneration).mockResolvedValueOnce({ jobId: created.jobId, status: "generating", stage: "generating", progress })
+      .mockResolvedValueOnce({ jobId: created.jobId, status: "succeeded", stage: "complete", result });
+    const input = options({ activeJob });
+    const { result: hook } = renderHook(() => useAiGeneration(input));
+    await act(() => vi.advanceTimersByTimeAsync(1500));
+    expect(hook.current.progress).toEqual(progress);
+    expect(input.onSucceeded).not.toHaveBeenCalled();
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(input.onSucceeded).toHaveBeenCalledOnce();
+    expect(hook.current.progress).toBeNull();
+  });
+
+  it("keeps retry context while clearing invalid output and continues polling the next attempt", async () => {
+    const activeJob = { jobId: created.jobId, targetDate: "2026-10-13", sourceUrl: "https://example.com", createdAt: new Date().toISOString() };
+    vi.mocked(getAiGeneration).mockResolvedValueOnce({ jobId: created.jobId, status: "generating", stage: "generating", progress: { phase: "writing", preview: "未完成", updatedAt: new Date().toISOString() } })
+      .mockResolvedValueOnce({ jobId: created.jobId, status: "retryable", stage: "retrying", attemptCount: 1, retryMessage: "上一轮内容未通过校验，正在重新生成。" })
+      .mockResolvedValueOnce({ jobId: created.jobId, status: "generating", stage: "generating", attemptCount: 2 })
+      .mockResolvedValueOnce({ jobId: created.jobId, status: "succeeded", stage: "complete", result });
+    const { result: hook } = renderHook(() => useAiGeneration(options({ activeJob })));
+    await act(() => vi.advanceTimersByTimeAsync(1500));
+    expect(hook.current.progress?.preview).toBe("未完成");
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(hook.current.progress).toBeNull();
+    expect(hook.current.stage).toBe("retrying");
+    expect(hook.current.retryMessage).toContain("校验");
+    expect(hook.current.error).toBe("");
+    await act(() => vi.advanceTimersByTimeAsync(5000));
+    expect(hook.current.attemptCount).toBe(2);
+    expect(hook.current.retryMessage).toContain("校验");
+    expect(hook.current.activeJob?.jobId).toBe(created.jobId);
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(hook.current.activeJob).toBeNull();
+    expect(hook.current.retryMessage).toBe("");
+  });
   it("keeps the submitted prompt on retry and gives an edited prompt a new request key", async () => {
     vi.mocked(createAiGeneration).mockRejectedValue(new Error("network"));
     const { result: hook } = renderHook(() => useAiGeneration(options()));

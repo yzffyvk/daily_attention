@@ -32,6 +32,28 @@ function repository(overrides: Partial<AiGenerationRepository> = {}): AiGenerati
 }
 
 describe("AI generation service", () => {
+  it("exposes retry context without turning an automatic retry into a terminal error", () => {
+    const retry = toAiGenerationJobData({
+      ...created.job, status: "retryable", attemptCount: 1, errorCode: "MODEL_OUTPUT_INVALID",
+    });
+    expect(retry.attemptCount).toBe(1);
+    expect(retry.retryMessage).toContain("校验");
+    expect(retry.error).toBeUndefined();
+    const resumed = toAiGenerationJobData({
+      ...created.job, status: "generating", attemptCount: 2, errorCode: null,
+    });
+    expect(resumed.attemptCount).toBe(2);
+    expect(resumed.retryMessage).toBeUndefined();
+  });
+  it("exposes a preview only for an owned job that is still generating", async () => {
+    const progress = { phase: "writing" as const, preview: "正文", updatedAt: new Date().toISOString() };
+    const job = { ...created.job, status: "generating" as const, progress };
+    expect(toAiGenerationJobData(job).progress).toEqual(progress);
+    for (const status of ["queued", "fetching", "retryable", "failed", "cancelled"] as const) {
+      expect(toAiGenerationJobData({ ...job, status }).progress).toBeUndefined();
+    }
+    await expect(getGeneration("foreign-user", job.id, repository({ findOwned: vi.fn().mockResolvedValue(null) }))).rejects.toThrow("FORBIDDEN_JOB");
+  });
   it("keeps immutable generation metadata separate from editable generated content", () => {
     expect(toAiGenerationJobData({ ...created.job, userPrompt: "聚焦术语", promptVersion: "knowledge-skeleton-user-prompt-v1" }))
       .toMatchObject({ generationContext: { userPrompt: "聚焦术语", promptVersion: "knowledge-skeleton-user-prompt-v1" } });

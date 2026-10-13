@@ -678,6 +678,14 @@ export type Database = {
         }
         Returns: boolean
       }
+      report_ai_generation_progress: {
+        Args: {
+          target_attempt_count: number
+          target_job_id: string
+          target_progress: Json
+        }
+        Returns: boolean
+      }
       reserve_checkin_image_upload: {
         Args: {
           target_path: string
@@ -803,6 +811,7 @@ export type Database = {
         metadata_expires_at: string | null
         updated_at: string | null
         user_prompt: string | null
+        progress: Json | null
       }
       ai_generation_job_with_quota: {
         job:

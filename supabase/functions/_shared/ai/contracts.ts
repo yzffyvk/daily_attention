@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { AiGenerationProgress } from "../../../../lib/domain/ai-progress.ts";
 
 export const AI_QUESTION_PROMPT_VERSION = "knowledge-questions-v1";
 export const AI_RELATION_PROMPT_VERSION = "knowledge-relations-v2";
@@ -40,5 +41,6 @@ export interface AiSummaryProvider {
     promptVersion?: string;
     anonymousUserId: string;
     signal?: AbortSignal;
+    onProgress?: (progress: AiGenerationProgress) => Promise<void> | void;
   }): Promise<AiSummaryProviderResult>;
 }

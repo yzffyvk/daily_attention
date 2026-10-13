@@ -6,6 +6,7 @@ import type {
   AiUsage,
 } from "./contracts.ts";
 import { DeepSeekProviderError } from "./deepseek.ts";
+import type { AiGenerationProgress } from "../../../../lib/domain/ai-progress.ts";
 
 const MAX_ATTEMPTS = 3;
 
@@ -67,6 +68,7 @@ export type AiJobRunnerPorts = {
   loadSource(sourceUrl: string): Promise<AiExtractedSource>;
   begin(jobId: string): Promise<void>;
   anonymousUserId(userId: string): Promise<string>;
+  reportProgress?(jobId: string, attemptCount: number, progress: AiGenerationProgress): Promise<void>;
   generate(input: {
     sourceTitle: string;
     sourceText: string;
@@ -74,6 +76,7 @@ export type AiJobRunnerPorts = {
     userPrompt?: string;
     promptVersion?: string;
     anonymousUserId: string;
+    onProgress?: (progress: AiGenerationProgress) => Promise<void>;
   }): Promise<AiSummaryProviderResult>;
   complete(input: {
     jobId: string;
@@ -143,6 +146,7 @@ export async function runAiJob(
 
   try {
     const anonymousUserId = await ports.anonymousUserId(job.userId);
+    let progressAvailable = true;
     const generated = await ports.generate({
       sourceTitle: source.title,
       sourceText: source.text,
@@ -150,6 +154,11 @@ export async function runAiJob(
       userPrompt: job.userPrompt?.trim() ?? "",
       promptVersion: job.promptVersion,
       anonymousUserId,
+      ...(ports.reportProgress ? { onProgress: async (progress: AiGenerationProgress) => {
+        if (!progressAvailable) return;
+        try { await ports.reportProgress!(jobId, job.attemptCount, progress); }
+        catch { progressAvailable = false; } // Preview failure must not fail a paid generation.
+      } } : {}),
     });
     const result = { ...generated.result };
     if (source.truncated) {

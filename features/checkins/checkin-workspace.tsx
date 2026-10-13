@@ -1000,6 +1000,9 @@ export function CheckInWorkspace({
             aiIsLongRunning={aiGeneration.isLongRunning}
             aiQuotaRemaining={aiGeneration.quotaRemaining}
             aiStage={aiGeneration.stage}
+            aiProgress={aiGeneration.progress}
+            aiAttemptCount={aiGeneration.attemptCount}
+            aiRetryMessage={aiGeneration.retryMessage}
             date={selectedDate}
             draft={draft}
             isDirty={isDirty}

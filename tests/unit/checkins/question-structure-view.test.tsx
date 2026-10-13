@@ -2,38 +2,88 @@ import { cleanup, render, screen, within, waitFor } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { KnowledgeSummaryView } from '@/features/checkins/knowledge-summary-view';
-import { serializeQuestionSummary } from '@/lib/domain/knowledge-questions';
+import { serializeQuestionSummary, type QuestionSummary } from '@/lib/domain/knowledge-questions';
 import { questionSummaryFixture } from '../../helpers/knowledge-questions-fixture';
 afterEach(cleanup);
 const summary = () => serializeQuestionSummary(questionSummaryFixture());
 describe('question reader', () => {
-  it('opens with the direct answer and only the first local graph', () => {
-    render(<KnowledgeSummaryView value={summary()} />);
-    expect(screen.getByRole('region', { name: '本题答案' })).toHaveTextContent('计划列出行动步骤。');
-    const map = screen.getByRole('group', { name: '骨架节点' });
-    expect(within(map).getAllByRole('button')).toHaveLength(1);
-    expect(within(map).queryByRole('button', { name: '检查' })).not.toBeInTheDocument();
-  });
-  it('switches questions, scopes relations, follows a reference and returns to the original node', async () => {
+  it('starts with the whole framework and reveals questions and diagrams only on demand', async () => {
     const user = userEvent.setup(); render(<KnowledgeSummaryView value={summary()} />);
-    await user.click(screen.getByRole('button', { name: '阅读问题：如何检查？' }));
-    expect(screen.getByRole('region', { name: '本题答案' })).toHaveTextContent('检查验证结果并改进计划');
-    await user.click(within(screen.getByRole('group', { name: '骨架节点' })).getByRole('button', { name: '计划' }));
-    expect(screen.getByRole('region', { name: '节点解释' })).toHaveTextContent('本题检查计划的结果');
-    await user.click(screen.getByRole('button', { name: '查看完整解释：如何安排？' }));
+    expect(screen.getByRole('heading', { name: '先明确行动，再检查结果。' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '展开核心部分：明确行动' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '展开核心部分：验证行动' })).toBeVisible();
+    expect(screen.queryByText('计划列出行动步骤。', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: '骨架节点' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '展开核心部分：明确行动' }));
+    expect(screen.getAllByText('如何安排？', { exact: true })).toHaveLength(1);
+    expect(screen.getAllByText('计划列出行动步骤。', { exact: true })).toHaveLength(1);
+    expect(screen.queryByRole('group', { name: '骨架节点' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '查看简图' }));
     expect(within(screen.getByRole('group', { name: '骨架节点' })).getAllByRole('button')).toHaveLength(1);
-    expect(screen.getByRole('region', { name: '节点解释' }).querySelector('.structure-detail-content')).not.toHaveTextContent('验证并改进');
-    await user.click(screen.getByRole('button', { name: '返回来源问题：如何检查？' }));
-    expect(screen.getByRole('region', { name: '节点解释' })).toHaveTextContent('本题检查计划的结果');
+  });
+  it('switches questions and opens a shared concept in place without repeated relationship panels', async () => {
+    const user = userEvent.setup(); render(<KnowledgeSummaryView value={summary()} />);
+    await user.click(screen.getByRole('button', { name: '展开核心部分：验证行动' }));
+    expect(screen.getAllByText('检查验证结果并改进计划。', { exact: true })).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: '查看简图' }));
+    expect(screen.queryByRole('group', { name: '本图关系' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '跨问题联系' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: '本题概念' })).not.toBeInTheDocument();
+    await user.click(within(screen.getByRole('group', { name: '骨架节点' })).getByRole('button', { name: '计划' }));
+    expect(screen.getByRole('region', { name: '节点解释' })).toHaveTextContent('列出下一步行动。');
+    expect(screen.queryByText('它属于什么')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /查看完整解释/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '收起详情' }));
+    expect(screen.queryByRole('region', { name: '节点解释' })).not.toBeInTheDocument();
+    await waitFor(() => expect(within(screen.getByRole('group', { name: '骨架节点' })).getByRole('button', { name: '计划' })).toHaveFocus());
+    await user.click(screen.getByRole('button', { name: /查看关系：检查.*计划/ }));
+    expect(screen.getByRole('region', { name: '关系解释' })).toHaveTextContent('获得结果后');
   });
   it('preserves question position across fullscreen and restores focus', async () => {
     const user = userEvent.setup(); render(<KnowledgeSummaryView value={summary()} />);
-    await user.click(screen.getByRole('button', { name: '阅读问题：如何检查？' }));
+    await user.click(screen.getByRole('button', { name: '展开核心部分：验证行动' }));
     await user.click(screen.getByRole('button', { name: '展开阅读' }));
     expect(screen.getByRole('dialog')).toBeVisible();
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.getByRole('button', { name: '展开阅读' })).toHaveFocus());
-    expect(screen.getByRole('region', { name: '本题答案' })).toHaveTextContent('检查验证结果并改进计划');
+    expect(screen.getByRole('button', { name: '展开核心部分：验证行动' })).toHaveAttribute('aria-expanded', 'true');
+  });
+  it('restores node focus after moving an open detail into fullscreen', async () => {
+    const user = userEvent.setup(); render(<KnowledgeSummaryView value={summary()} />);
+    await user.click(screen.getByRole('button', { name: '展开核心部分：明确行动' }));
+    await user.click(screen.getByRole('button', { name: '查看简图' }));
+    await user.click(screen.getByRole('button', { name: '计划' }));
+    await user.click(screen.getByRole('button', { name: '展开阅读' }));
+    expect(screen.getByRole('region', { name: '节点解释' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '收起详情' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '计划' })).toHaveFocus());
+  });
+  it('preserves a later relationship and its detail focus across fullscreen', async () => {
+    const v: QuestionSummary = questionSummaryFixture();
+    v.structure.relations.push({ ...v.structure.relations[0], id: 'e2', from: 'n1', to: 'n2', kind: '依赖', label: '提供检查标准' });
+    v.structure.questions[1].views[0].relationIds.push('e2');
+    const user = userEvent.setup(); render(<KnowledgeSummaryView value={serializeQuestionSummary(v)} />);
+    await user.click(screen.getByRole('button', { name: '展开核心部分：验证行动' }));
+    await user.click(screen.getByRole('button', { name: '查看简图' }));
+    await user.click(screen.getByRole('button', { name: '下一条关系' }));
+    await user.click(screen.getByRole('button', { name: /查看关系：计划.*检查/ }));
+    await user.click(screen.getByRole('button', { name: '展开阅读' }));
+    expect(screen.getByRole('region', { name: '逐条理解关系' })).toHaveTextContent('关系 2 / 2');
+    await user.click(screen.getByRole('button', { name: '收起详情' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /查看关系：计划.*检查/ })).toHaveFocus());
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('region', { name: '逐条理解关系' })).toHaveTextContent('关系 2 / 2');
+  });
+  it('keeps all six existing questions accessible instead of truncating to the prompt target', async () => {
+    const v: QuestionSummary = questionSummaryFixture();
+    for (let i = 3; i <= 6; i++) {
+      v.structure.questions.push({ ...v.structure.questions[0], id: `q${i}`, mainlineRole: `核心部分${i}`, title: `问题${i}？`, answer: `答案${i}。`, views: [{ ...v.structure.questions[0].views[0], id: `v${i}`, referenceNodeIds: ['n1'] }] });
+      v.structure.questionOrder.push(`q${i}`);
+    }
+    render(<KnowledgeSummaryView value={serializeQuestionSummary(v)} />);
+    expect(screen.getAllByRole('button', { name: /^展开核心部分：/ })).toHaveLength(6);
+    await userEvent.setup().click(screen.getByRole('button', { name: '展开核心部分：核心部分6' }));
+    expect(screen.getByText('答案6。', { exact: true })).toBeVisible();
   });
   it('shows all original text when a structured document was edited incompatibly', () => {
     render(<KnowledgeSummaryView value={summary() + '\n新增限定：仅用于这个实验。'} />);
@@ -44,9 +94,8 @@ describe('question reader', () => {
     const v = questionSummaryFixture(); v.structure.questions.pop(); v.structure.nodes.pop(); v.structure.questionOrder = ['q1']; v.structure.relations = []; v.structure.questionLinks = [];
     const user = userEvent.setup(); render(<KnowledgeSummaryView value={serializeQuestionSummary(v)} />);
     await user.click(screen.getByRole('button', { name: '展开阅读' }));
-    const button = within(screen.getByRole('group', { name: '本题概念' })).getByRole('button');
-    button.focus(); await user.tab();
-    expect(screen.getByText('查看本题原文依据')).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: '展开核心部分：明确行动' }));
+    screen.getByText('查看本题原文依据').focus();
     await user.tab(); expect(screen.getByRole('button', { name: '关闭全屏阅读' })).toHaveFocus();
   });
 });
