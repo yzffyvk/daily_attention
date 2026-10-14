@@ -1,0 +1,21 @@
+body { background: #080a0d; }
+:root[data-theme="light"] body { background: #fbf8f1; }
+.motion-review { width: min(1440px, 100%); margin: 0 auto; padding: 72px 44px 48px; color: var(--foreground); }
+.motion-review-header { display: flex; justify-content: space-between; align-items: center; gap: 32px; margin-bottom: 56px; }
+.motion-review-header > div:first-child { min-width: 0; max-width: 100%; }
+.motion-review-brand { margin: 0 0 22px; color: var(--aura-gold); font-size: 13px; letter-spacing: .24em; }
+.motion-review h1 { margin: 0 0 18px; font-family: 'Songti SC', serif; font-size: clamp(28px, 3.2vw, 42px); font-weight: 500; letter-spacing: .04em; white-space: normal; text-wrap: balance; }
+.motion-review-header p:last-child { margin: 0; color: var(--ink-soft); font-size: 14px; line-height: 1.8; }
+.motion-review-controls { display: flex; gap: 12px; align-items: center; flex-shrink: 0; }
+.motion-review-controls > button:first-child { min-height: 44px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 16px; background: transparent; color: inherit; cursor: pointer; }
+.motion-review-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; }
+.motion-review-card { position: relative; display: grid; justify-items: center; align-content: start; padding: 34px 12px 30px; border: 1px solid var(--line); border-radius: 16px; background: #0d1015; }
+:root[data-theme="light"] .motion-review-card { background: #f5f1e9; }
+.motion-review-number { justify-self: start; margin-left: 8px; color: var(--ink-soft); font-size: 11px; letter-spacing: .12em; }
+.motion-review-card .learning-persona-art { width: min(210px, 100%); height: auto; aspect-ratio: 210 / 182; margin: 20px 0 18px; }
+.motion-review h2 { margin: 0 0 9px; color: var(--aura-gold); font-size: 18px; font-weight: 500; }
+.motion-review-card p { margin: 0; color: var(--ink-soft); font-size: 12px; }
+.motion-review-card small { margin-top: 28px; color: var(--ink-soft); font-size: 10px; text-align: center; line-height: 1.8; }
+.motion-review footer { margin-top: 32px; color: var(--ink-soft); font-size: 12px; line-height: 1.8; }
+@media (max-width: 1050px) { .motion-review-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 680px) { .motion-review { padding: 36px 18px; } .motion-review-header { align-items: start; flex-direction: column; gap: 22px; margin-bottom: 28px; } .motion-review-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } .motion-review-card { padding: 22px 8px; } .motion-review h2 { font-size: 16px; } }
