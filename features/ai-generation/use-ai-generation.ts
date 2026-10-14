@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AiGenerationResult } from "@/lib/domain/ai-generation";
 import type { AiGenerationProgress } from "@/lib/domain/ai-progress";
 import { aiUserPromptSchema, type AiGenerationContext } from "@/lib/domain/ai-prompt";
+import { ApiError } from "@/features/checkins/api";
 import {
   cancelAiGeneration,
   createAiGeneration,
@@ -11,6 +12,8 @@ import {
 } from "./api";
 import type {
   ActiveAiJob,
+  AiCancellationInfo,
+  AiGenerationJobData,
   AiGenerationStage,
 } from "./types";
 
@@ -43,10 +46,15 @@ export type AiGenerationController = {
   isLongRunning: boolean;
   isCreating: boolean;
   canRetryCreate: boolean;
+  isCancelling: boolean;
+  cancellation: AiCancellationInfo | null;
+  cancellationMessage: string;
+  cancellationConfirmationRequired: boolean;
+  dismissCancellationConfirmation(): void;
   clearError(): void;
   generate(input: { sourceUrl: string; targetDate: string; userPrompt?: string }): Promise<void>;
   retryCreate(): Promise<void>;
-  cancel(): Promise<void>;
+  cancel(confirmQuotaConsumption?: boolean): Promise<void>;
 };
 
 function errorMessage(error: unknown) {
@@ -69,6 +77,12 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
   const [quotaRemaining, setQuotaRemaining] = useState<number | null>(null);
   const [isLongRunning, setIsLongRunning] = useState(false);
   const [canRetryCreate, setCanRetryCreate] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancellation, setCancellation] = useState<AiCancellationInfo | null>(null);
+  const [cancellationMessage, setCancellationMessage] = useState("");
+  const [cancellationConfirmationRequired, setCancellationConfirmationRequired] = useState(false);
+  const cancellationRef = useRef<AiCancellationInfo | null>(null);
+  const cancellingJobRef = useRef<string | null>(null);
   const activeJobRef = useRef(activeJob);
   const timerRef = useRef<number | null>(null);
   const requestRef = useRef<AbortController | null>(null);
@@ -98,9 +112,48 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     setProgress(null);
     setAttemptCount(0);
     setRetryContext(null);
+    setCancellationConfirmationRequired(false);
+    setIsCancelling(false);
+    if (cancellingJobRef.current === jobId) cancellingJobRef.current = null;
     callbacksRef.current.onActiveJobChange?.(null);
     callbacksRef.current.onTerminal(jobId);
   }, [clearPolling]);
+
+  const receiveJob = useCallback((next: AiGenerationJobData, job: ActiveAiJob) => {
+    if (activeJobRef.current?.jobId !== job.jobId) return true;
+    setStage(next.stage);
+    setProgress(next.status === "generating" ? next.progress ?? null : null);
+    setAttemptCount(next.attemptCount ?? 0);
+    if (next.quota) setQuotaRemaining(next.quota.remaining);
+    if (next.cancellation) {
+      cancellationRef.current = next.cancellation;
+      setCancellation(next.cancellation);
+    }
+    if (next.status === "retryable") setRetryContext({
+      attemptCount: next.attemptCount ?? 0,
+      message: next.retryMessage ?? "上一轮未完成，正在重新尝试。",
+    });
+    setError("");
+    if (next.status === "succeeded" && next.result) {
+      setCancellationMessage("");
+      callbacksRef.current.onSucceeded(next.result, job.targetDate, next.generationContext ?? job.generationContext);
+      finish(job.jobId);
+      return true;
+    }
+    if (next.status === "failed" || next.status === "cancelled") {
+      if (next.error) setError(next.error.message);
+      if (next.status === "cancelled") {
+        const outcome = next.cancellation;
+        const charge = outcome?.charged === true
+          ? "本次保留扣除 1 次额度。"
+          : outcome?.charged === false ? "本次额度已退回。" : "已有小结与修改已保留。";
+        setCancellationMessage(`任务已取消，${charge}${outcome ? `今日免费取消剩余 ${outcome.freeRemaining} 次。` : ""}`);
+      }
+      finish(job.jobId);
+      return true;
+    }
+    return false;
+  }, [finish]);
 
   const pollRef = useRef<() => Promise<void>>(async () => undefined);
 
@@ -130,25 +183,7 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     try {
       const next = await getAiGeneration(job.jobId, controller.signal);
       if (controller.signal.aborted || activeJobRef.current?.jobId !== job.jobId) return;
-      setStage(next.stage);
-      setProgress(next.status === "generating" ? next.progress ?? null : null);
-      setAttemptCount(next.attemptCount ?? 0);
-      // A claim clears the stored failure. Keep its explanation for the next attempt only.
-      if (next.status === "retryable") setRetryContext({
-        attemptCount: next.attemptCount ?? 0,
-        message: next.retryMessage ?? "上一轮未完成，正在重新尝试。",
-      });
-      setError("");
-      if (next.status === "succeeded" && next.result) {
-        callbacksRef.current.onSucceeded(next.result, job.targetDate, next.generationContext ?? job.generationContext);
-        finish(job.jobId);
-        return;
-      }
-      if (next.status === "failed" || next.status === "cancelled" || next.error) {
-        if (next.error) setError(next.error.message);
-        finish(job.jobId);
-        return;
-      }
+      if (receiveJob(next, job)) return;
       pollIndexRef.current += 1;
       schedulePoll(job, next.status === "generating" ? 1_000 : undefined);
     } catch (nextError) {
@@ -159,7 +194,7 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     } finally {
       if (requestRef.current === controller) requestRef.current = null;
     }
-  }, [finish, schedulePoll]);
+  }, [receiveJob, schedulePoll]);
 
   useEffect(() => {
     pollRef.current = poll;
@@ -175,6 +210,10 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     setRetryContext(null);
     setIsLongRunning(false);
     setError("");
+    setCancellationMessage("");
+    setCancellationConfirmationRequired(false);
+    cancellationRef.current = null;
+    setCancellation(null);
     try {
       const created = await createAiGeneration(request);
       const job: ActiveAiJob = {
@@ -233,24 +272,46 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     setError("");
   }, []);
 
-  const cancel = useCallback(async () => {
+  const cancel = useCallback(async (confirmQuotaConsumption = false) => {
     const job = activeJobRef.current;
-    if (!job || stage !== "queued") return;
+    if (!job || cancellingJobRef.current === job.jobId) return;
+    if (!confirmQuotaConsumption && cancellationRef.current?.requiresConfirmation) {
+      setCancellationConfirmationRequired(true);
+      return;
+    }
+    cancellingJobRef.current = job.jobId;
+    setIsCancelling(true);
     setError("");
     try {
-      await cancelAiGeneration(job.jobId);
-      finish(job.jobId);
-      setStage("idle");
+      const next = await cancelAiGeneration(job.jobId, confirmQuotaConsumption);
+      receiveJob(next, job);
     } catch (nextError) {
-      setError(errorMessage(nextError));
+      if (activeJobRef.current?.jobId !== job.jobId) return;
+      if (nextError instanceof ApiError && nextError.code === "CANCELLATION_CONFIRMATION_REQUIRED") {
+        const policy = { freeRemaining: 0, requiresConfirmation: true, charged: null };
+        cancellationRef.current = policy;
+        setCancellation(policy);
+        setCancellationConfirmationRequired(true);
+      } else setError(errorMessage(nextError));
+    } finally {
+      if (cancellingJobRef.current === job.jobId) {
+        cancellingJobRef.current = null;
+        setIsCancelling(false);
+      }
     }
-  }, [finish, stage]);
+  }, [receiveJob]);
+
+  const dismissCancellationConfirmation = useCallback(() => {
+    if (!cancellingJobRef.current) setCancellationConfirmationRequired(false);
+  }, []);
 
   useEffect(() => {
     const restored = input.activeJob;
     if (!restored || activeJobRef.current?.jobId === restored.jobId) return;
     clearPolling();
     activeJobRef.current = restored;
+    cancellingJobRef.current = null;
+    setIsCancelling(false);
     setActiveJob(restored);
     setStage("queued");
     setProgress(null);
@@ -258,6 +319,10 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     setRetryContext(null);
     setIsLongRunning(false);
     setError("");
+    cancellationRef.current = null;
+    setCancellation(null);
+    setCancellationMessage("");
+    setCancellationConfirmationRequired(false);
     pollIndexRef.current = 0;
     schedulePoll(restored);
   }, [clearPolling, input.activeJob, schedulePoll]);
@@ -297,6 +362,11 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     isLongRunning,
     isCreating: stage === "creating",
     canRetryCreate,
+    isCancelling,
+    cancellation,
+    cancellationMessage,
+    cancellationConfirmationRequired,
+    dismissCancellationConfirmation,
     clearError,
     generate,
     retryCreate,

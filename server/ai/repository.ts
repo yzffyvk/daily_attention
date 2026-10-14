@@ -1,7 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
-import type { AiGenerationStatus } from "@/features/ai-generation/types";
+import type { AiCancellationInfo, AiGenerationQuota, AiGenerationStatus } from "@/features/ai-generation/types";
 import { dateKeySchema } from "@/lib/domain/checkin";
 import { aiUserPromptSchema } from "@/lib/domain/ai-prompt";
 import { createAdminSupabase } from "@/lib/supabase/admin";
@@ -71,6 +71,17 @@ const jobWithQuotaSchema = z.object({
   }
 });
 
+const jobStateSchema = z.object({
+  job: jobSchema,
+  quota: z.object({
+    used: z.number().int().min(0).max(5), reserved: z.number().int().min(0).max(5),
+    consumed: z.number().int().min(0).max(5), limit: z.literal(5), remaining: z.number().int().min(0).max(5),
+  }).refine(q => q.used === q.reserved + q.consumed && q.remaining === 5 - q.used),
+  cancellation: z.object({
+    freeRemaining: z.number().int().min(0).max(2), requiresConfirmation: z.boolean(), charged: z.boolean().nullable(),
+  }),
+});
+
 type RpcClient = {
   rpc: unknown;
 };
@@ -126,6 +137,8 @@ export type AiJob = {
   metadataExpiresAt: string;
   updatedAt: string;
   progress?: AiGenerationProgress | null;
+  quota?: AiGenerationQuota;
+  cancellation?: AiCancellationInfo;
 };
 
 export type AiJobWithQuota = {
@@ -151,7 +164,7 @@ export type CreateAiJob = {
 export interface AiGenerationRepository {
   create(input: CreateAiJob): Promise<AiJobWithQuota>;
   findOwned(userId: string, jobId: string): Promise<AiJob | null>;
-  cancelOwned(userId: string, jobId: string): Promise<AiJob>;
+  cancelOwned(userId: string, jobId: string, confirmQuotaConsumption?: boolean): Promise<AiJob>;
 }
 
 function mapJob(row: z.infer<typeof jobSchema>): AiJob {
@@ -213,6 +226,12 @@ function oneWithQuota(data: unknown) {
   return parsed.data[0];
 }
 
+function mapState(data: unknown): AiJob {
+  const parsed = jobStateSchema.safeParse(data);
+  if (!parsed.success) throw new Error("Malformed AI generation RPC response");
+  return { ...mapJob(parsed.data.job), quota: parsed.data.quota, cancellation: parsed.data.cancellation };
+}
+
 export function createAiGenerationRepository(
   client: RpcClient = createAdminSupabase(),
 ): AiGenerationRepository {
@@ -231,23 +250,22 @@ export function createAiGenerationRepository(
     },
 
     async findOwned(userId, jobId) {
-      const { data, error } = await rpc(client, "read_ai_generation_job", {
+      const { data, error } = await rpc(client, "read_ai_generation_job_state", {
         target_user_id: userId,
         target_job_id: jobId,
       });
       if (error) throw error;
-      const parsed = z.array(jobSchema).max(1).safeParse(data);
-      if (!parsed.success) throw new Error("Malformed AI generation RPC response");
-      return parsed.data[0] ? mapJob(parsed.data[0]) : null;
+      return data === null ? null : mapState(data);
     },
 
-    async cancelOwned(userId, jobId) {
-      const { data, error } = await rpc(client, "cancel_ai_generation_job", {
+    async cancelOwned(userId, jobId, confirmQuotaConsumption = false) {
+      const { data, error } = await rpc(client, "cancel_ai_generation_job_v2", {
         target_user_id: userId,
         target_job_id: jobId,
+        target_confirm_quota_consumption: confirmQuotaConsumption,
       });
       if (error) throw error;
-      return mapJob(oneWithQuota(data).job);
+      return mapState(data);
     },
   };
 }

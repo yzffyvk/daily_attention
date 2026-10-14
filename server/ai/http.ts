@@ -29,6 +29,10 @@ const mappedErrors = {
     status: 409,
     message: "任务已经开始，无法取消",
   },
+  CANCELLATION_CONFIRMATION_REQUIRED: {
+    status: 409,
+    message: "今日免费取消次数已用完，取消本次提炼仍会消耗 1 次 AI 额度。",
+  },
   AI_IDEMPOTENCY_CONFLICT: {
     status: 409,
     message: "本次请求的日期、链接或提炼要求已变化，请重新发起生成",

@@ -32,6 +32,13 @@ function repository(overrides: Partial<AiGenerationRepository> = {}): AiGenerati
 }
 
 describe("AI generation service", () => {
+  it("keeps server quota settlement and cancellation metadata in the public response", async () => {
+    const job = { ...created.job, status: "cancelled" as const, quota: { used: 0, reserved: 0, consumed: 0, limit: 5 as const, remaining: 5 },
+      cancellation: { freeRemaining: 1, requiresConfirmation: false, charged: false } };
+    const repo = repository({ cancelOwned: vi.fn().mockResolvedValue(job) });
+    expect(toAiGenerationJobData(await cancelGeneration(job.userId, job.id, repo, true))).toMatchObject({ quota: job.quota, cancellation: job.cancellation });
+    expect(repo.cancelOwned).toHaveBeenCalledWith(job.userId, job.id, true);
+  });
   it("exposes retry context without turning an automatic retry into a terminal error", () => {
     const retry = toAiGenerationJobData({
       ...created.job, status: "retryable", attemptCount: 1, errorCode: "MODEL_OUTPUT_INVALID",

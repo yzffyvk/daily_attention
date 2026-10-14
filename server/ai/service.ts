@@ -78,9 +78,10 @@ export async function cancelGeneration(
   userId: string,
   jobId: string,
   repository: AiGenerationRepository,
+  confirmQuotaConsumption = false,
 ) {
   try {
-    return await repository.cancelOwned(userId, jobId);
+    return await repository.cancelOwned(userId, jobId, confirmQuotaConsumption);
   } catch (error) {
     if (errorMessage(error) === "AI_JOB_INVALID_TRANSITION") {
       throw publicError("JOB_ALREADY_STARTED");
@@ -103,6 +104,8 @@ export function toAiGenerationJobData(job: AiJob): AiGenerationJobData {
     status: job.status,
     stage: stageFor(job),
     attemptCount: job.attemptCount,
+    ...(job.quota ? { quota: job.quota } : {}),
+    ...(job.cancellation ? { cancellation: job.cancellation } : {}),
     ...(job.status === "retryable" ? {
       retryMessage: (isTaskErrorCode(job.errorCode) && automaticRetryMessages[job.errorCode])
         || "上一轮未完成，正在重新尝试。",

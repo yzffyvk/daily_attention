@@ -24,6 +24,29 @@ afterEach(async () => {
 });
 
 describe("safe-fetch gateway server", () => {
+  it("aborts upstream fetching when the caller disconnects after posting its full body", async () => {
+    let upstreamSignal: AbortSignal | null = null;
+    let release!: () => void;
+    const fetcher = vi.fn(({ signal }: { signal: AbortSignal }) => {
+      upstreamSignal = signal;
+      return new Promise<{ finalUrl: string; contentType: string; body: string }>((resolve, reject) => {
+        release = () => resolve({ finalUrl: "https://example.com/article", contentType: "text/html", body: "done" });
+        signal.addEventListener("abort", () => reject(new Error("upstream aborted")), { once: true });
+      });
+    });
+    const baseUrl = await runningServer({ fetcher, logger: vi.fn() });
+    const controller = new AbortController();
+    const request = fetch(`${baseUrl}/v1/fetch`, {
+      method: "POST", headers: { Authorization: "Bearer local-test-token-with-at-least-32-characters", "Content-Type": "application/json" },
+      body: JSON.stringify({ sourceUrl: "https://example.com/article" }), signal: controller.signal,
+    }).catch(() => null);
+    try {
+      await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+      controller.abort();
+      await request;
+      await vi.waitFor(() => expect(upstreamSignal?.aborted).toBe(true));
+    } finally { controller.abort(); release?.(); }
+  });
   it("serves a configuration-free health check", async () => {
     const baseUrl = await runningServer({ fetcher: vi.fn() });
     const response = await fetch(`${baseUrl}/healthz`);

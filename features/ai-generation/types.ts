@@ -26,6 +26,12 @@ export type AiGenerationQuota = {
   remaining: number;
 };
 
+export type AiCancellationInfo = {
+  freeRemaining: number;
+  requiresConfirmation: boolean;
+  charged: boolean | null;
+};
+
 export type CreateAiGenerationData = {
   generationContext?: AiGenerationContext;
   jobId: string;
@@ -71,4 +77,6 @@ export type AiGenerationJobData = {
     message: string;
     retryable: boolean;
   };
+  quota?: AiGenerationQuota;
+  cancellation?: AiCancellationInfo;
 };

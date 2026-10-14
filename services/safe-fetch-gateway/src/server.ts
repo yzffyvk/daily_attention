@@ -48,6 +48,7 @@ function requestId(request: IncomingMessage) {
 }
 
 function writeJson(response: ServerResponse, status: number, body: unknown) {
+  if (response.destroyed) return;
   const encoded = JSON.stringify(body);
   response.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
@@ -135,6 +136,11 @@ export function createGatewayServer(
     let sourceUrl: string | null = null;
     let status = 500;
     let byteCount = 0;
+    const abortController = new AbortController();
+    const abortRequest = () => abortController.abort();
+    const closeResponse = () => { if (!response.writableEnded) abortController.abort(); };
+    request.once("aborted", abortRequest);
+    response.once("close", closeResponse);
     try {
       if (!bearerMatches(request.headers.authorization, config.token)) {
         status = 401;
@@ -145,8 +151,6 @@ export function createGatewayServer(
         return;
       }
       sourceUrl = sourceUrlFrom(await requestBody(request));
-      const abortController = new AbortController();
-      request.once("aborted", () => abortController.abort());
       const result = await fetcher({
         sourceUrl,
         signal: abortController.signal,
@@ -163,6 +167,8 @@ export function createGatewayServer(
         requestId: id,
       });
     } finally {
+      request.off("aborted", abortRequest);
+      response.off("close", closeResponse);
       logger("gateway_request", {
         requestId: id,
         hostHash: hashHost(sourceUrl, config.token),

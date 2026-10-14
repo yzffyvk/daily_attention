@@ -79,6 +79,10 @@ type CheckInEditorProps = {
   aiProgress?: AiGenerationController["progress"];
   aiAttemptCount?: AiGenerationController["attemptCount"];
   aiRetryMessage?: AiGenerationController["retryMessage"];
+  aiIsCancelling?: boolean;
+  aiCancellation?: AiGenerationController["cancellation"];
+  aiCancellationMessage?: string;
+  aiSucceeded?: boolean;
   date: string;
   record: CheckInRecord | null | undefined;
   draft: CheckInDraft;
@@ -116,6 +120,10 @@ export function CheckInEditor({
   aiProgress = null,
   aiAttemptCount = 0,
   aiRetryMessage = "",
+  aiIsCancelling = false,
+  aiCancellation = null,
+  aiCancellationMessage = "",
+  aiSucceeded = false,
   date,
   record,
   draft,
@@ -382,17 +390,32 @@ export function CheckInEditor({
                 <span>
                   {aiQuotaRemaining === null
                     ? "本账号每天共 5 次，提炼与串联共享"
-                    : `本次提炼提交后，共享额度剩余 ${aiQuotaRemaining} 次`}
+                    : `今日共享额度剩余 ${aiQuotaRemaining} 次`}
                 </span>
               </div>
               <p className="field-hint">按实际请求当天计数，北京时间 0 点重置；切换日历日期不会增加次数。</p>
               {isAiActive ? <>
                 <GenerationProgress key={aiActiveJob?.jobId ?? "creating"} stage={aiStage} progress={aiProgress} attemptCount={aiAttemptCount} retryMessage={aiRetryMessage} createdAt={aiActiveJob?.createdAt} isLongRunning={aiIsLongRunning} error={aiError} />
-                {aiStage === "queued" ? <p className="ai-notice"><button onClick={onAiCancel} type="button">取消任务</button></p> : null}
+                {aiActiveJob && ["queued", "fetching", "generating", "retrying"].includes(aiStage) ? <div className="ai-cancel-row">
+                  <button className="secondary-button" disabled={aiIsCancelling} onClick={onAiCancel} type="button">{aiIsCancelling ? "正在取消任务…" : "取消任务"}</button>
+                  <p>{aiCancellation?.requiresConfirmation
+                    ? "今日免费取消已用完，取消前会确认 1 次额度。"
+                    : aiStage === "queued" || aiStage === "fetching"
+                      ? "生成开始前取消不计次数；开始后每天可免费取消 2 次。"
+                      : aiCancellation ? `今日生成开始后免费取消剩余 ${aiCancellation.freeRemaining} 次。` : "生成开始后每天可免费取消 2 次；超过后需确认额度。"}</p>
+                </div> : null}
               </> : aiError ? <p className="ai-notice" role="alert">{aiError}</p> : null}
+              {!isAiActive && aiCancellationMessage ? <p className="ai-notice" role="status">{aiCancellationMessage}</p> : null}
             </section>
 
             <section aria-labelledby="ai-result-title" className="ai-result-step" id="learning-summary-content" hidden={summaryHidden}>
+              {aiSucceeded && draft.summary.trim() ? <div className="ai-success-banner" role="status" aria-label="AI 提炼成功">
+                <Check aria-hidden="true" size={22} />
+                <div>
+                  <p>{record && !isDirty ? "AI 提炼成功，内容已保存。" : "AI 提炼成功，请审阅后保存。"}</p>
+                  <small>{record && !isDirty ? "这份知识小结已同步到云端。" : "生成内容已填入 AI 草稿，保存后才会完成打卡。"}</small>
+                </div>
+              </div> : null}
               <div className="ai-step-heading">
                 <span aria-hidden="true"><FileText size={18} /></span>
                 <div>

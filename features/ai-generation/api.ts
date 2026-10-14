@@ -21,10 +21,10 @@ export function getAiGeneration(jobId: string, signal?: AbortSignal) {
   );
 }
 
-export function cancelAiGeneration(jobId: string) {
+export function cancelAiGeneration(jobId: string, confirmQuotaConsumption = false) {
   return requestApi<AiGenerationJobData>(
     `/api/ai/generations/${encodeURIComponent(jobId)}`,
-    { method: "DELETE" },
+    { method: "DELETE", body: JSON.stringify({ confirmQuotaConsumption }) },
   );
 }
 
