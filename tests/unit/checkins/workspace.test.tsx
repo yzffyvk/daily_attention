@@ -232,6 +232,17 @@ afterEach(async () => {
 });
 
 describe("CheckInWorkspace", () => {
+  it("opens today instead of restoring a future date", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.includes("/api/checkins?month=")) return Promise.resolve(response({ ok: true, data: [], requestId: "list" }));
+      if (path.startsWith("/api/checkins/stats")) return Promise.resolve(response({ ok: true, data: { totalCount: 0, currentStreak: 0, hasTodayRecord: false }, requestId: "stats" }));
+      return Promise.resolve(missingCheckIn());
+    }));
+    renderWorkspace("2099-12-31");
+    await waitForEditorReady();
+    expect(screen.getByText(formatDate(getTodayKey()), { selector: ".editor-date" })).toBeVisible();
+  });
   it("can toggle the calendar when browser preference storage is unavailable", async () => {
     vi.stubGlobal("localStorage", {
       getItem() { throw new Error("Storage unavailable"); },
@@ -367,7 +378,7 @@ describe("CheckInWorkspace", () => {
     );
     await waitForEditorReady();
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /AI 提炼/ }));
+    await user.click(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: /AI 提炼/ }));
     await waitForEditorReady();
     await user.type(
       screen.getByLabelText(/学习资料来源/),
@@ -411,7 +422,7 @@ describe("CheckInWorkspace", () => {
     render(<QueryClientProvider client={queryClient}><CheckInWorkspace initialDate={date} initialToday={date} userId="ai-user" /></QueryClientProvider>);
     await waitForEditorReady();
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /AI 提炼/ }));
+    await user.click(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: /AI 提炼/ }));
     await waitForEditorReady();
     await user.type(screen.getByLabelText("今日知识主题"), "Agent 的组成");
     await user.type(field("inspiration"), "已经保存的个人理解");
@@ -2159,7 +2170,7 @@ describe("CheckInWorkspace", () => {
     expect(screen.getByLabelText("图片草稿状态")).toHaveTextContent("replacement.png:false");
   });
 
-  it("reconciles a server day to browser-local today after mount", async () => {
+  it("reconciles a stale server day to the current Beijing day after mount", async () => {
     vi.useFakeTimers();
     const browserNow = new Date(2026, 6, 24, 9, 30, 0);
     vi.setSystemTime(browserNow);
@@ -2204,16 +2215,12 @@ describe("CheckInWorkspace", () => {
     expect(screen.getByRole("button", { name: new RegExp(`${formatCalendarDate(browserToday)}.*今天`) })).toHaveClass("today");
   });
 
-  it("advances local today at midnight without replacing an unsaved draft", async () => {
+  it("advances the Beijing day at midnight without replacing an unsaved draft", async () => {
     vi.useFakeTimers();
-    const beforeMidnight = new Date(2026, 6, 24, 23, 59, 50);
+    const beforeMidnight = new Date("2026-07-24T15:59:50Z");
     vi.setSystemTime(beforeMidnight);
     const oldToday = getTodayKey();
-    const nextMidnight = new Date(
-      beforeMidnight.getFullYear(),
-      beforeMidnight.getMonth(),
-      beforeMidnight.getDate() + 1,
-    );
+    const nextMidnight = new Date("2026-07-24T16:00:00Z");
     const nextToday = getTodayKey(nextMidnight);
     vi.stubGlobal(
       "fetch",

@@ -1,20 +1,12 @@
 import type { CheckInSummary } from "./types";
+import { getLearningDate, nextLearningMidnight } from "@/lib/domain/learning-date";
 
 export function getTodayKey(now = new Date()) {
-  return [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, "0"),
-    String(now.getDate()).padStart(2, "0"),
-  ].join("-");
+  return getLearningDate(now);
 }
 
 export function millisecondsUntilNextLocalMidnight(now = new Date()) {
-  const nextMidnight = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate() + 1,
-  );
-  return Math.max(1, nextMidnight.getTime() - now.getTime());
+  return Math.max(1, Date.parse(nextLearningMidnight(now)) - now.getTime());
 }
 
 export function dateKey(year: number, monthIndex: number, day: number) {

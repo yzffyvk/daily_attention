@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { CheckInWorkspace } from "@/features/checkins/checkin-workspace";
@@ -79,9 +79,9 @@ function edit(id: string, value: string) {
 }
 
 async function switchTo(mode: Mode) {
-  fireEvent.click(screen.getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ }));
-  await waitFor(() => expect(screen.getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ })).toHaveAttribute("aria-pressed", "true"));
-  await waitFor(() => expect(screen.getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ })).toBeEnabled());
+  fireEvent.click(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ }));
+  await waitFor(() => expect(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ })).toHaveAttribute("aria-pressed", "true"));
+  await waitFor(() => expect(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ })).toBeEnabled());
 }
 
 beforeEach(() => {
@@ -123,13 +123,13 @@ it("preserves all AI reflections and its image when completion arrives during dr
    if (mode === "ai" && !began) { began = true; await gate; }
    return value;
  });
- fireEvent.click(screen.getByRole("button", { name: /AI 提炼/ }));
+ fireEvent.click(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: /AI 提炼/ }));
  await waitFor(() => expect(began).toBe(true));
- await waitFor(() => expect(screen.getByRole("button", { name: /AI 提炼/ })).toHaveAttribute("aria-pressed", "true"));
+ await waitFor(() => expect(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: /AI 提炼/ })).toHaveAttribute("aria-pressed", "true"));
  await act(async () => { api.succeed(); });
  await waitFor(() => expect(screen.getByRole("button", { name: "生成知识小结" })).toBeInTheDocument());
  await act(async () => { release(); });
- await waitFor(() => expect(screen.getByRole("button", { name: /AI 提炼/ })).toBeEnabled());
+ await waitFor(() => expect(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: /AI 提炼/ })).toBeEnabled());
  await waitFor(() => expect(screen.getByRole("heading", { name: "AI 生成的主题" })).toBeVisible());
  expect(document.getElementById("inspiration")).toHaveValue("AI 侧尚未保存的解释");
  fireEvent.click(screen.getByRole("tab", { name: "新的理解" }));
@@ -179,12 +179,12 @@ it("applies a queued result after an incoming read finds no local AI draft", asy
    }
    return value;
  });
- fireEvent.click(screen.getByRole("button", { name: /AI 提炼/ }));
+ fireEvent.click(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: /AI 提炼/ }));
  await waitFor(() => expect(began).toBe(true));
  await act(async () => { api.succeed(); });
  await waitFor(() => expect(screen.getByRole("button", { name: "生成知识小结" })).toBeInTheDocument());
  await act(async () => { release(); });
- await waitFor(() => expect(screen.getByRole("button", { name: /AI 提炼/ })).toBeEnabled());
+ await waitFor(() => expect(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: /AI 提炼/ })).toBeEnabled());
  await waitFor(() => expect(screen.getByRole("heading", { name: "AI 生成的主题" })).toBeVisible());
  expect(document.getElementById("inspiration")).toHaveValue("已保存的 AI 解释");
  expect(screen.getByRole("button", { name: "生成知识小结" })).toBeEnabled();
@@ -209,13 +209,13 @@ it("serializes a completion behind the outgoing AI draft flush", async () => {
    await originalSave(stored, options);
    if (stored.entryMode === "ai" && !began) { began = true; await gate; }
  });
- fireEvent.click(screen.getByRole("button", { name: /手动记录/ }));
+ fireEvent.click(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: /手动记录/ }));
  await waitFor(() => expect(began).toBe(true));
  await act(async () => { api.succeed(); });
  await waitFor(() => expect(screen.getByRole("button", { name: "生成知识小结" })).toBeInTheDocument());
  await act(async () => { release(); });
- await waitFor(() => expect(screen.getByRole("button", { name: /手动记录/ })).toHaveAttribute("aria-pressed", "true"));
- await waitFor(() => expect(screen.getByRole("button", { name: /AI 提炼/ })).toBeEnabled());
+ await waitFor(() => expect(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: /手动记录/ })).toHaveAttribute("aria-pressed", "true"));
+ await waitFor(() => expect(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: /AI 提炼/ })).toBeEnabled());
  expect(screen.getByLabelText("今日知识主题")).toHaveValue("保留的手动主题");
  await waitFor(async () => expect(await loadDraft("mode-user", date, "ai")).toMatchObject({
    attention: "AI 生成的主题", inspiration: "切换时保留的 AI 解释",

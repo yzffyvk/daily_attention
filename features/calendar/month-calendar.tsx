@@ -1,14 +1,18 @@
 "use client";
 
-import { Check, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowUpRight, Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { useId, useState } from "react";
+import type { CheckInEntryMode } from "@/lib/domain/checkin";
 import { dateKey, formatCalendarDate, formatMonth, monthDate, monthKeyForDate, shiftMonth } from "@/features/checkins/dates";
 import type { CheckInSummary } from "@/features/checkins/types";
+import "./month-calendar.css";
 
 type MonthCalendarProps = {
   month: string;
   selectedDate: string;
   selectedDates?: string[];
+  activeEntryMode?: CheckInEntryMode;
+  onSelectEntryMode?: (mode: CheckInEntryMode) => void;
   maxSelectedDates?: number;
   summaries: CheckInSummary[] | undefined;
   today: string;
@@ -29,9 +33,10 @@ function calendarLabel(
   summary: CheckInSummary | undefined,
   selected: boolean,
   today: boolean,
+  future: boolean,
 ) {
   const state = summary ? `已保存：${summary.attention}` : "暂无记录";
-  const suffix = [selected ? "当前选中" : "", today ? "今天" : ""]
+  const suffix = [selected ? "当前选中" : "", today ? "今天" : "", future ? "未到日期，未来日期不能记录" : ""]
     .filter(Boolean)
     .join("，");
   return `${formatCalendarDate(date)}，${state}${suffix ? `，${suffix}` : ""}`;
@@ -41,6 +46,8 @@ export function MonthCalendar({
   month,
   selectedDate,
   selectedDates,
+  activeEntryMode,
+  onSelectEntryMode,
   maxSelectedDates = 14,
   summaries,
   today,
@@ -64,18 +71,25 @@ export function MonthCalendar({
   const hasMonthData = summaries !== undefined;
   const groupedSummaries = new Map<string, CheckInSummary[]>();
   for (const summary of summaries ?? []) {
+    if (!summary.date.startsWith(`${month}-`)) continue;
     groupedSummaries.set(summary.date, [...(groupedSummaries.get(summary.date) ?? []), summary]);
+  }
+  for (const records of groupedSummaries.values()) {
+    records.sort((left, right) => Number(left.entryMode === "ai") - Number(right.entryMode === "ai"));
   }
   const summaryByDate = new Map([...groupedSummaries].map(([date, records]) => {
     if (records.length === 1) return [date, records[0]] as const;
-    const ordered = [...records].sort((left, right) => Number(left.entryMode === "ai") - Number(right.entryMode === "ai"));
     return [date, {
-      ...ordered[0],
-      attention: ordered.map(record => `${record.entryMode === "ai" ? "AI" : "手动"}：${record.attention}`).join(" · "),
-      hasImage: ordered.some(record => record.hasImage),
+      ...records[0],
+      attention: records.map(record => `${record.entryMode === "ai" ? "AI" : "手动"}：${record.attention}`).join(" · "),
+      hasImage: records.some(record => record.hasImage),
     }] as const;
   }));
   const isCurrentMonth = month === monthKeyForDate(today);
+  const isFutureMonth = month > monthKeyForDate(today);
+  const recordedDays = [...groupedSummaries.keys()].filter(date => date <= today).length;
+  const selectedRecords = !selectedDates && selectedDate <= today ? groupedSummaries.get(selectedDate) ?? [] : [];
+  const modeMissing = activeEntryMode && selectedRecords.length > 0 && !selectedRecords.some(record => (record.entryMode ?? "manual") === activeEntryMode);
 
   return (
     <section className="calendar-section" aria-labelledby={titleId} data-testid="month-calendar">
@@ -83,7 +97,6 @@ export function MonthCalendar({
         <div>
           <p className="eyebrow">LEARNING MAP</p>
           <h2 id={titleId}>{formatMonth(month)}</h2>
-          <p className="section-description">{selectedDates ? "选择 2–14 个已保存日期，可跨月、不连续选择" : "选一天，记录或回看当日的学习收获"}</p>
         </div>
         <div className="calendar-actions">
           <button
@@ -122,6 +135,13 @@ export function MonthCalendar({
             </button>
           ) : null}
         </div>
+      </div>
+
+      <div className="calendar-context">
+        {hasMonthData && !errorMessage ? <p className="calendar-month-progress" role="status" aria-label="本月学习积累">
+          {isFutureMonth ? "这个月还未到来" : recordedDays > 0 ? <>本月已留下 <strong>{recordedDays} 天</strong>收获</> : "这个月的第一份收获，等你记下"}
+        </p> : null}
+        <p className="calendar-guidance">{selectedDates ? "选择 2–14 个已保存日期，可跨月、不连续选择" : "可记录今天及以前的收获"}</p>
       </div>
 
       {errorMessage ? (
@@ -164,17 +184,21 @@ export function MonthCalendar({
               const day = index + 1;
               const date = dateKey(year, monthIndex, day);
               const summary = summaryByDate.get(date);
+              const records = groupedSummaries.get(date) ?? [];
+              const primaryRecord = records.find(record => (record.entryMode ?? "manual") === activeEntryMode) ?? records[0];
               const selected = selectedDates ? selectedDates.includes(date) : date === selectedDate;
-              const dateDisabled = disabled || Boolean(selectedDates && (!summary || (!selected && selectedDates.length >= maxSelectedDates)));
+              const isFuture = date > today;
+              const dateDisabled = disabled || isFuture || Boolean(selectedDates && (!summary || (!selected && selectedDates.length >= maxSelectedDates)));
               const isToday = date === today;
               const showPreview = !disabled && Boolean(summary) && previewDate === date;
               return (
                 <button
-                  aria-label={calendarLabel(date, summary, selected, isToday)}
+                  aria-label={calendarLabel(date, summary, selected, isToday, isFuture)}
                   aria-pressed={selected}
                   aria-describedby={showPreview ? `${previewId}-${date}` : undefined}
-                  className={`calendar-cell${summary ? " recorded" : ""}${isToday ? " today" : ""}${selected ? " selected" : ""}`}
+                  className={`calendar-cell${summary ? " recorded" : ""}${isToday ? " today" : ""}${selected ? " selected" : ""}${isFuture ? " future" : ""}`}
                   disabled={dateDisabled}
+                  title={isFuture ? "未来日期不能记录" : undefined}
                   key={date}
                   onClick={() => onSelectDate(date)}
                   onPointerEnter={() => { if (!disabled && summary) setPreviewDate(date); }}
@@ -186,12 +210,15 @@ export function MonthCalendar({
                 >
                   <span className="calendar-cell-top">
                     <b>{day}</b>
-                    {summary ? (
-                      <i aria-hidden="true"><Check size={13} strokeWidth={3} /></i>
-                    ) : null}
+                    <span className="calendar-day-flags" aria-hidden="true">
+                      {isToday ? <em className="calendar-today-mark">今</em> : null}
+                      {summary ? <i><Check size={11} strokeWidth={2.5} /></i> : null}
+                    </span>
                   </span>
-                  <small>{summary?.attention ?? (isToday ? "记录今天" : "")}</small>
-                  {isToday ? <em>今天</em> : null}
+                  <small>{primaryRecord?.attention ?? (isToday ? "记录今天" : "")}</small>
+                  {records.length > 0 ? <span className="calendar-day-modes" aria-hidden="true">
+                    {records.map(record => <span className="calendar-mode-mark" key={record.entryMode ?? "manual"} title={record.entryMode === "ai" ? "AI 提炼" : "手动记录"}>{record.entryMode === "ai" ? "AI" : "手"}</span>)}
+                  </span> : null}
                   {showPreview ? (
                     <span className="calendar-preview" id={`${previewId}-${date}`} role="tooltip">
                       <span>{formatCalendarDate(date)} · 学习记录</span>
@@ -206,10 +233,23 @@ export function MonthCalendar({
             ))}
           </div>
           <div className="calendar-legend">
-            <span><i className="legend-dot recorded-dot" />已记录</span>
+            <span><Check className="calendar-recorded-mark" size={12} strokeWidth={2.5} aria-hidden="true" />已记录</span>
             <span><i className="legend-dot selected-dot" />当前选中</span>
-            <span><i className="legend-dot today-dot" />今天</span>
+            <span><i className="calendar-today-mark" aria-hidden="true">今</i>今天</span>
+            <span><i className="legend-dot future-dot" />未到日期</span>
           </div>
+          {selectedRecords.length > 0 ? <section className="calendar-selected-records" aria-label={`${formatCalendarDate(selectedDate)}的收获`}>
+            <h3>{formatCalendarDate(selectedDate)}的收获<span>{selectedRecords.length} 份记录</span></h3>
+            {modeMissing ? <p className="calendar-mode-explanation">这天已保存{activeEntryMode === "manual" ? " AI 提炼" : "手动记录"}，{activeEntryMode === "manual" ? "手动记录" : "AI 提炼"}尚未保存。</p> : null}
+            <ul>{selectedRecords.map(record => {
+              const mode = record.entryMode ?? "manual";
+              const modeLabel = mode === "ai" ? "AI 提炼" : "手动记录";
+              return <li key={mode}>
+                <div><span className="calendar-record-mode">{modeLabel}<span>{mode === activeEntryMode ? "当前方式" : "已保存"}</span></span><p>{record.attention}</p></div>
+                {onSelectEntryMode ? <button className="calendar-open-record" disabled={disabled} type="button" aria-label={`查看这天的 ${modeLabel}`} onClick={() => onSelectEntryMode(mode)}>查看<ArrowUpRight aria-hidden="true" size={14} /></button> : null}
+              </li>;
+            })}</ul>
+          </section> : null}
         </>
       ) : null}
     </section>

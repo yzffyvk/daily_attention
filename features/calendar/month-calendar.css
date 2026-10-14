@@ -1,0 +1,58 @@
+.calendar-section .calendar-heading { align-items: center; }
+.calendar-section .calendar-context { margin: -.1rem 0 1.1rem; }
+.calendar-section .calendar-month-progress { margin: 0 0 .35rem; color: var(--foreground); font-size: .8rem; line-height: 1.6; }
+.calendar-month-progress strong { color: var(--aura-gold); font-weight: 500; font-variant-numeric: tabular-nums; }
+.calendar-section .calendar-guidance { margin: 0; color: var(--ink-soft); font-size: .72rem; line-height: 1.6; }
+
+.calendar-section .calendar-cell-top { gap: .25rem; align-items: center; }
+.calendar-section .calendar-cell.today .calendar-cell-top { padding-right: 0; }
+.calendar-day-flags { display: inline-flex; align-items: center; gap: .2rem; }
+.calendar-section .calendar-day-flags i { display: inline-flex; align-items: center; width: auto; height: auto; color: var(--ink-soft); }
+.calendar-section .calendar-cell.today .calendar-day-flags i { display: inline-flex; }
+.calendar-section .calendar-today-mark { position: static; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-width: 1rem; height: 1rem; margin: 0; padding: 0; border: 1px solid color-mix(in srgb, var(--aura-gold) 65%, transparent); border-radius: 3px; background: color-mix(in srgb, var(--aura-gold) 10%, transparent); color: var(--aura-gold); font-size: .6rem; font-style: normal; line-height: 1; }
+.calendar-section .calendar-cell.today .calendar-cell-top b { color: var(--aura-gold); }
+.calendar-section .calendar-cell.today .calendar-today-mark { color: var(--aura-gold); font-weight: 400; }
+.calendar-section .calendar-cell.selected, .calendar-section .calendar-cell.recorded.selected { box-shadow: inset 0 0 0 2px var(--theme-accent, #d5dbe4); }
+.calendar-section .calendar-cell.future:disabled { opacity: 1; border-color: var(--line); background: color-mix(in srgb, var(--paper-soft) 45%, var(--background)); box-shadow: none; transform: none; cursor: not-allowed; }
+.calendar-section .calendar-cell.future .calendar-cell-top b { color: var(--ink-soft); }
+.calendar-section .calendar-cell.future small, .calendar-section .calendar-cell.future .calendar-day-modes { opacity: .65; }
+.calendar-day-modes { display: flex; align-items: center; flex-wrap: wrap; gap: .2rem; margin-top: auto; }
+.calendar-mode-mark { display: inline-flex; align-items: center; justify-content: center; min-width: .85rem; padding: .1rem .2rem; border: 1px solid var(--line-strong); border-radius: 3px; color: var(--ink-soft); font-size: .56rem; line-height: 1.1; letter-spacing: 0; }
+.calendar-section .calendar-legend { gap: .8rem 1.1rem; margin-top: 1rem; }
+.calendar-section .calendar-recorded-mark { flex-shrink: 0; color: var(--ink-soft); }
+.calendar-section .calendar-legend .calendar-today-mark { min-width: .8rem; height: .8rem; font-size: .5rem; }
+.calendar-section .future-dot { border: 1px dashed var(--line-strong); border-radius: 2px; background: var(--paper-soft); }
+
+.calendar-selected-records { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.calendar-section .calendar-selected-records h3 { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .35rem; margin: 0 0 .8rem; color: var(--foreground); font-size: .87rem; font-weight: 500; }
+.calendar-selected-records h3 > span { color: var(--ink-soft); font-size: .65rem; font-weight: 400; }
+.calendar-section .calendar-mode-explanation { margin: 0 0 .8rem; color: var(--ink-soft); font-size: .74rem; line-height: 1.7; }
+.calendar-selected-records ul { display: grid; gap: .6rem; margin: 0; padding: 0; list-style: none; }
+.calendar-selected-records li { display: flex; align-items: center; justify-content: space-between; gap: .75rem; min-width: 0; padding: .75rem .85rem; border-left: 2px solid var(--line-strong); background: var(--paper); }
+.calendar-selected-records li > div { min-width: 0; }
+.calendar-record-mode { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .6rem; color: var(--ink-soft); font-size: .63rem; }
+.calendar-record-mode > span { color: var(--aura-gold); font-size: .6rem; }
+.calendar-section .calendar-selected-records li p { margin: .3rem 0 0; color: var(--foreground); font-size: .82rem; line-height: 1.7; overflow-wrap: anywhere; }
+.calendar-open-record { display: inline-flex; align-items: center; gap: .25rem; flex-shrink: 0; min-height: 44px; padding: .4rem .25rem .4rem .5rem; border: 0; border-radius: 3px; background: transparent; color: var(--ink-soft); font-size: .7rem; cursor: pointer; }
+.calendar-open-record:hover:not(:disabled) { color: var(--aura-gold); }
+.calendar-open-record:focus-visible { outline: 2px solid var(--aura-gold); outline-offset: 3px; }
+
+@media (max-width: 640px) {
+  .calendar-section .calendar-cell, .calendar-section .calendar-cell.recorded, .calendar-section .calendar-cell.today, .calendar-section .calendar-cell.blank { height: 5.5rem; gap: .3rem; }
+  .calendar-section .calendar-cell small { font-size: .63rem; line-height: 1.55; }
+  .calendar-section .calendar-cell-top b { font-size: .72rem; }
+  .calendar-section .calendar-today-mark { min-width: .8rem; height: .8rem; font-size: .5rem; }
+  .calendar-day-flags { gap: .15rem; }
+  .calendar-section .calendar-day-flags svg { width: 9px; height: 9px; }
+  .calendar-mode-mark { padding: .08rem .12rem; font-size: .5rem; }
+  .calendar-section .calendar-legend { gap: .7rem .9rem; font-size: .64rem; }
+}
+@media (max-width: 380px) {
+  .calendar-section .calendar-cell, .calendar-section .calendar-cell.recorded, .calendar-section .calendar-cell.today, .calendar-section .calendar-cell.blank { height: 4rem; padding: .35rem .15rem; }
+  .calendar-section .calendar-cell small { display: none; }
+  .calendar-section .calendar-cell-top { gap: .1rem; }
+  .calendar-section .calendar-cell-top b { font-size: .66rem; }
+  .calendar-section .calendar-today-mark { min-width: .65rem; height: .7rem; font-size: .45rem; }
+  .calendar-section .calendar-day-flags svg { width: 8px; height: 8px; }
+  .calendar-section .calendar-legend { gap: .6rem .75rem; }
+}

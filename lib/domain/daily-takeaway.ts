@@ -1,4 +1,5 @@
 import { z } from "zod";
+export { getLearningDate, nextLearningMidnight } from "./learning-date.ts";
 
 export const TAKEAWAY_TIMEZONE = "Asia/Shanghai" as const;
 export const TAKEAWAY_TOPICS = {
@@ -67,14 +68,6 @@ export const takeawayStateSchema = z.object({
   quizResults: z.array(takeawayQuizResultSchema),
 });
 export type TakeawayState = z.infer<typeof takeawayStateSchema>;
-
-export function getLearningDate(now = new Date()) {
-  return new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
-
-export function nextLearningMidnight(now = new Date()) {
-  return new Date(Date.parse(`${getLearningDate(now)}T16:00:00Z`)).toISOString();
-}
 
 export function takeawayStage(input: { totalLessons: number; collectedToday: boolean; hasCurrentLesson: boolean }) {
   if (input.collectedToday) return "done";

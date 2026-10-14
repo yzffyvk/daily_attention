@@ -1,4 +1,4 @@
-import { checkInEntryModeSchema, checkInInputSchema, dateKeySchema } from "@/lib/domain/checkin";
+import { checkInEntryModeSchema, checkInInputSchema, dateKeySchema, writableDateKeySchema } from "@/lib/domain/checkin";
 import {
   logServerError,
   operationalErrorFields,
@@ -22,9 +22,9 @@ type RouteContext = {
 
 export const dynamic = "force-dynamic";
 
-async function parseDate(context: RouteContext, requestId: string) {
+async function parseDate(context: RouteContext, requestId: string, forWrite = false) {
   const { date } = await context.params;
-  const parsed = dateKeySchema.safeParse(date);
+  const parsed = (forWrite ? writableDateKeySchema : dateKeySchema).safeParse(date);
   if (!parsed.success) {
     return {
       response: checkInFailure(
@@ -96,7 +96,7 @@ export async function PUT(request: Request, routeContext: RouteContext) {
       );
     }
 
-    const parsedDate = await parseDate(routeContext, requestId);
+    const parsedDate = await parseDate(routeContext, requestId, true);
     if ("response" in parsedDate) return parsedDate.response;
 
     let body: unknown;
