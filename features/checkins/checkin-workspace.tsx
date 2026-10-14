@@ -6,6 +6,7 @@ import { CalendarDays, Check, ImageDown, PanelLeftClose, PanelLeftOpen } from "l
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MonthCalendar } from "@/features/calendar/month-calendar";
 import { useAiGeneration } from "@/features/ai-generation/use-ai-generation";
+import { CancellationDialog } from "@/features/ai-generation/cancellation-dialog";
 import type { CheckInEntryMode } from "@/lib/domain/checkin";
 import type { ActiveAiJob } from "@/features/ai-generation/types";
 import type { AiGenerationResult } from "@/lib/domain/ai-generation";
@@ -222,6 +223,7 @@ export function CheckInWorkspace({
   const [isAbandoningDraft, setIsAbandoningDraft] = useState(false);
   const [isPreparingImage, setIsPreparingImage] = useState(false);
   const [activeAiJob, setActiveAiJob] = useState<ActiveAiJob | null>(null);
+  const [aiSucceededDates, setAiSucceededDates] = useState<Set<string>>(() => new Set());
   const toastTimerRef = useRef<number | null>(null);
   const todayRef = useRef(initialToday);
   const selectedDateRef = useRef(selectedDate);
@@ -280,11 +282,14 @@ export function CheckInWorkspace({
       if (!active || active.targetDate !== targetDate || terminalAiJobIdsRef.current.has(active.jobId)) return;
       const job = { ...active, generationContext: generationContext ?? active.generationContext };
       terminalAiJobIdsRef.current.add(job.jobId);
+      setAiSucceededDates((current) => new Set(current).add(targetDate));
       const identity = entryIdentity(targetDate, "ai");
       if (readyDraftIdentityRef.current === identity && selectedDateRef.current === targetDate && entryModeRef.current === "ai" && !modeSwitchInFlightRef.current) {
         setDraft((current) => draftWithAiResult(current, job, result));
         setStatus("AI 小结已生成，请审阅后手动保存", "success");
+        showToast("AI 提炼成功，请审阅后保存。");
       } else {
+        showToast(`${formatDate(targetDate)}的 AI 提炼成功，请切换到 AI 提炼审阅后保存。`);
         // Incoming local reads must finish before changing the editor draft.
         pendingAiResultsRef.current.set(identity, { job, result });
         if (!userId) return;
@@ -306,7 +311,6 @@ export function CheckInWorkspace({
           persistResult,
           persistResult,
         );
-        showToast(`${formatDate(targetDate)}的 AI 小结已生成`);
       }
     },
     onTerminal: (jobId) => { terminalAiJobIdsRef.current.add(jobId); },
@@ -642,6 +646,9 @@ export function CheckInWorkspace({
         checkInKeys.date(activeDate, entryModeRef.current),
       );
       hydrateDraft(latestRecord === undefined ? record : latestRecord, activeDate);
+      if (entryModeRef.current === "ai") {
+        setAiSucceededDates((current) => { const next = new Set(current); next.delete(activeDate); return next; });
+      }
       return true;
     } finally {
       draftAbandonInFlightRef.current = false;
@@ -1012,6 +1019,10 @@ export function CheckInWorkspace({
             aiProgress={aiGeneration.progress}
             aiAttemptCount={aiGeneration.attemptCount}
             aiRetryMessage={aiGeneration.retryMessage}
+            aiIsCancelling={aiGeneration.isCancelling}
+            aiCancellation={aiGeneration.cancellation}
+            aiCancellationMessage={aiGeneration.cancellationMessage}
+            aiSucceeded={entryMode === "ai" && aiSucceededDates.has(selectedDate)}
             date={selectedDate}
             draft={draft}
             isDirty={isDirty}
@@ -1031,11 +1042,16 @@ export function CheckInWorkspace({
                   aiGeneration.clearError();
                 }
                 setDraft((current) => ({ ...current, ...change }));
+                if (entryModeRef.current === "ai" && change.summary !== undefined && !change.summary.trim()) {
+                  setAiSucceededDates((current) => { const next = new Set(current); next.delete(selectedDate); return next; });
+                }
               }
             }}
             onAiCancel={() => void aiGeneration.cancel()}
             onAiGenerate={() => {
               if (entryModeRef.current !== "ai" || editorLockedRef.current || selectedDate > getTodayKey()) return;
+              if (aiGeneration.activeJob || aiGeneration.isCreating) return;
+              setAiSucceededDates((current) => { const next = new Set(current); next.delete(selectedDate); return next; });
               void aiGeneration.generate({
                 sourceUrl: draft.sourceUrl.trim(),
                 userPrompt: draft.userPrompt ?? "",
@@ -1071,6 +1087,11 @@ export function CheckInWorkspace({
       </section>
 
       {toast ? <div aria-live="polite" className="light-toast" role="status">{toast}</div> : null}
+      {aiGeneration.cancellationConfirmationRequired && aiGeneration.activeJob ? <CancellationDialog
+        isBusy={aiGeneration.isCancelling}
+        onContinue={aiGeneration.dismissCancellationConfirmation}
+        onConfirm={() => void aiGeneration.cancel(true)}
+      /> : null}
       {echoDate ? <DailyEchoDialog key={echoDate} date={echoDate} onClose={() => setEchoDate(null)} /> : null}
       {isCelebrating && !echoDate ? (
         <div aria-live="polite" className="celebration-banner" role="status">

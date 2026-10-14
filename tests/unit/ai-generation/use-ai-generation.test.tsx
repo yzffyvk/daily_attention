@@ -1,6 +1,7 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAiGeneration } from "@/features/ai-generation/use-ai-generation";
+import { ApiError } from "@/features/checkins/api";
 import {
   cancelAiGeneration,
   createAiGeneration,
@@ -56,6 +57,143 @@ function options(overrides: Record<string, unknown> = {}) {
 }
 
 describe("useAiGeneration", () => {
+  it("can cancel a newly restored job while an older job cancellation is still pending", async () => {
+    const activeJob = { jobId: created.jobId, targetDate: "2026-10-13", sourceUrl: "https://example.com", createdAt: new Date().toISOString() };
+    const nextJob = { ...activeJob, jobId: "10000000-0000-4000-8000-000000000002", targetDate: "2026-10-14" };
+    const responses = new Map<string, (value: Awaited<ReturnType<typeof cancelAiGeneration>>) => void>();
+    vi.mocked(cancelAiGeneration).mockImplementation(id => new Promise(resolve => responses.set(id, resolve)));
+    const input = options();
+    const { result: hook, rerender } = renderHook(({ activeJob: current }) => useAiGeneration({ ...input, activeJob: current }), { initialProps: { activeJob } });
+    let oldCancel!: Promise<void>;
+    act(() => { oldCancel = hook.current.cancel(); });
+    expect(hook.current.isCancelling).toBe(true);
+    rerender({ activeJob: nextJob });
+    expect(hook.current.isCancelling).toBe(false);
+    let newCancel!: Promise<void>;
+    act(() => { newCancel = hook.current.cancel(); });
+    expect(cancelAiGeneration).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      responses.get(activeJob.jobId)!({ jobId: activeJob.jobId, status: "cancelled", stage: "complete" });
+      await oldCancel;
+    });
+    expect(hook.current.activeJob).toEqual(nextJob);
+    expect(hook.current.isCancelling).toBe(true);
+    expect(input.onTerminal).not.toHaveBeenCalled();
+    await act(async () => {
+      responses.get(nextJob.jobId)!({ jobId: nextJob.jobId, status: "cancelled", stage: "complete" });
+      await newCancel;
+    });
+    expect(hook.current.activeJob).toBeNull();
+    expect(input.onTerminal).toHaveBeenCalledExactlyOnceWith(nextJob.jobId);
+  });
+  it.each(["fetching", "generating", "retryable"] as const)("cancels %s without applying partial output and prevents duplicate requests", async (status) => {
+    const activeJob = { jobId: created.jobId, targetDate: "2026-10-13", sourceUrl: "https://example.com", createdAt: new Date().toISOString() };
+    vi.mocked(getAiGeneration).mockResolvedValue({ jobId: created.jobId, status, stage: status === "retryable" ? "retrying" : status, progress: { phase: "writing", preview: "预览", updatedAt: new Date().toISOString() }, cancellation: { freeRemaining: 2, requiresConfirmation: false, charged: null } });
+    let complete!: (value: Awaited<ReturnType<typeof cancelAiGeneration>>) => void;
+    vi.mocked(cancelAiGeneration).mockReturnValue(new Promise((resolve) => { complete = resolve; }));
+    const input = options({ activeJob });
+    const { result: hook } = renderHook(() => useAiGeneration(input));
+    await act(() => vi.advanceTimersByTimeAsync(1500));
+    let pending!: Promise<void>;
+    act(() => { pending = hook.current.cancel(); void hook.current.cancel(); });
+    expect(hook.current.isCancelling).toBe(true);
+    expect(hook.current.activeJob).toEqual(activeJob);
+    expect(cancelAiGeneration).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      complete({ jobId: created.jobId, status: "cancelled", stage: "complete", quota: { used: 0, reserved: 0, consumed: 0, limit: 5, remaining: 5 }, cancellation: { freeRemaining: 1, requiresConfirmation: false, charged: false } });
+      await pending;
+    });
+    expect(hook.current.activeJob).toBeNull();
+    expect(hook.current.progress).toBeNull();
+    expect(hook.current.quotaRemaining).toBe(5);
+    expect(hook.current.cancellationMessage).toMatch(/退回.*剩余 1 次/);
+    expect(input.onSucceeded).not.toHaveBeenCalled();
+  });
+
+  it("requires explicit confirmation for a charged cancellation while polling continues", async () => {
+    const activeJob = { jobId: created.jobId, targetDate: "2026-10-13", sourceUrl: "https://example.com", createdAt: new Date().toISOString() };
+    vi.mocked(getAiGeneration).mockResolvedValue({ jobId: created.jobId, status: "generating", stage: "generating", cancellation: { freeRemaining: 0, requiresConfirmation: true, charged: null } });
+    const { result: hook } = renderHook(() => useAiGeneration(options({ activeJob })));
+    await act(() => vi.advanceTimersByTimeAsync(1500));
+    await act(() => hook.current.cancel());
+    expect(hook.current.cancellationConfirmationRequired).toBe(true);
+    expect(cancelAiGeneration).not.toHaveBeenCalled();
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(getAiGeneration).toHaveBeenCalledTimes(2);
+    vi.mocked(cancelAiGeneration).mockResolvedValue({ jobId: created.jobId, status: "cancelled", stage: "complete", quota: { used: 1, reserved: 0, consumed: 1, limit: 5, remaining: 4 }, cancellation: { freeRemaining: 0, requiresConfirmation: false, charged: true } });
+    await act(() => hook.current.cancel(true));
+    expect(cancelAiGeneration).toHaveBeenCalledWith(created.jobId, true);
+    expect(hook.current.cancellationMessage).toMatch(/扣除 1 次.*剩余 0 次/);
+    expect(hook.current.quotaRemaining).toBe(4);
+  });
+
+  it("opens confirmation on a server policy race and keeps the job active after rejection", async () => {
+    const activeJob = { jobId: created.jobId, targetDate: "2026-10-13", sourceUrl: "https://example.com", createdAt: new Date().toISOString() };
+    vi.mocked(getAiGeneration).mockResolvedValue({ jobId: created.jobId, status: "generating", stage: "generating", cancellation: { freeRemaining: 1, requiresConfirmation: false, charged: null } });
+    vi.mocked(cancelAiGeneration).mockRejectedValue(new ApiError("取消需确认", { code: "CANCELLATION_CONFIRMATION_REQUIRED", status: 409, requestId: "cancel" }));
+    const input = options({ activeJob });
+    const { result: hook } = renderHook(() => useAiGeneration(input));
+    await act(() => vi.advanceTimersByTimeAsync(1500));
+    await act(() => hook.current.cancel());
+    expect(hook.current.cancellationConfirmationRequired).toBe(true);
+    expect(hook.current.activeJob).toEqual(activeJob);
+    expect(hook.current.isCancelling).toBe(false);
+    expect(input.onTerminal).not.toHaveBeenCalled();
+    act(() => hook.current.dismissCancellationConfirmation());
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(getAiGeneration).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps polling and the prior draft untouched when cancellation fails", async () => {
+    const activeJob = { jobId: created.jobId, targetDate: "2026-10-13", sourceUrl: "https://example.com", createdAt: new Date().toISOString() };
+    vi.mocked(getAiGeneration).mockResolvedValue({ jobId: created.jobId, status: "generating", stage: "generating" });
+    vi.mocked(cancelAiGeneration).mockRejectedValue(new Error("网络暂时不可用"));
+    const input = options({ activeJob });
+    const { result: hook } = renderHook(() => useAiGeneration(input));
+    await act(() => vi.advanceTimersByTimeAsync(1500));
+    await act(() => hook.current.cancel());
+    expect(hook.current.error).toBe("网络暂时不可用");
+    expect(hook.current.activeJob).toEqual(activeJob);
+    expect(input.onTerminal).not.toHaveBeenCalled();
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(getAiGeneration).toHaveBeenCalledTimes(2);
+  });
+
+  it("applies the generated result when completion wins the cancellation race", async () => {
+    const activeJob = { jobId: created.jobId, targetDate: "2026-10-13", sourceUrl: "https://example.com", createdAt: new Date().toISOString() };
+    vi.mocked(cancelAiGeneration).mockResolvedValue({ jobId: created.jobId, status: "succeeded", stage: "complete", result, quota: { used: 1, reserved: 0, consumed: 1, limit: 5, remaining: 4 } });
+    const input = options({ activeJob });
+    const { result: hook } = renderHook(() => useAiGeneration(input));
+    await act(() => hook.current.cancel());
+    expect(input.onSucceeded).toHaveBeenCalledWith(result, activeJob.targetDate, undefined);
+    expect(hook.current.activeJob).toBeNull();
+    expect(hook.current.cancellationMessage).toBe("");
+    expect(input.onTerminal).toHaveBeenCalledOnce();
+  });
+
+  it("allows cancelling a new job while a stale cancellation response is still pending", async () => {
+    const activeJob = { jobId: created.jobId, targetDate: "2026-10-13", sourceUrl: "https://example.com", createdAt: new Date().toISOString() };
+    let completeOld!: (value: Awaited<ReturnType<typeof cancelAiGeneration>>) => void;
+    vi.mocked(cancelAiGeneration).mockReturnValueOnce(new Promise((resolve) => { completeOld = resolve; }))
+      .mockResolvedValueOnce({ jobId: "new-job", status: "cancelled", stage: "complete" });
+    vi.mocked(getAiGeneration).mockResolvedValueOnce({ jobId: created.jobId, status: "succeeded", stage: "complete", result });
+    vi.mocked(createAiGeneration).mockResolvedValue({ ...created, jobId: "new-job" });
+    const input = options({ activeJob });
+    const { result: hook } = renderHook(() => useAiGeneration(input));
+    let oldCancel!: Promise<void>;
+    act(() => { oldCancel = hook.current.cancel(); });
+    await act(() => vi.advanceTimersByTimeAsync(1500));
+    await act(() => hook.current.generate({ sourceUrl: "https://example.com/new", targetDate: "2026-10-13" }));
+    await act(() => hook.current.cancel());
+    expect(hook.current.activeJob).toBeNull();
+    expect(cancelAiGeneration).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      completeOld({ jobId: created.jobId, status: "succeeded", stage: "complete", result });
+      await oldCancel;
+    });
+    expect(input.onSucceeded).toHaveBeenCalledOnce();
+  });
+
   it("keeps partial output separate from the draft and polls long generations every second", async () => {
     const activeJob = { jobId: created.jobId, targetDate: "2026-10-13", sourceUrl: "https://example.com", createdAt: new Date(Date.now() - 130_000).toISOString() };
     const progress = { phase: "writing" as const, preview: "正在生成的正文", updatedAt: new Date().toISOString() };

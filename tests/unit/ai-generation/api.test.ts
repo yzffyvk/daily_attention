@@ -15,6 +15,15 @@ function success(data: unknown) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("AI generation browser API", () => {
+  it("sends quota consumption consent only when the caller explicitly confirms", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(success({ jobId: "job-1", status: "cancelled", stage: "complete" })));
+    vi.stubGlobal("fetch", fetchMock);
+    await cancelAiGeneration("job-1");
+    await cancelAiGeneration("job-1", true);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ confirmQuotaConsumption: false });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ confirmQuotaConsumption: true });
+  });
+
   it("sends the caller's stable idempotency key", async () => {
     const fetchMock = vi.fn().mockResolvedValue(success({
       jobId: "10000000-0000-4000-8000-000000000001",

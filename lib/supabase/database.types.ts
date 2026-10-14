@@ -322,6 +322,14 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      cancel_ai_generation_job_v2: {
+        Args: {
+          target_user_id: string
+          target_job_id: string
+          target_confirm_quota_consumption?: boolean
+        }
+        Returns: Json
+      }
       claim_ai_generation_job: {
         Args: { target_job_id: string }
         Returns: Database["public"]["CompositeTypes"]["ai_generation_job_record"][]
@@ -633,6 +641,14 @@ export type Database = {
           isOneToOne: false
           isSetofReturn: true
         }
+      }
+      read_ai_generation_job_state: {
+        Args: { target_user_id: string; target_job_id: string }
+        Returns: Json
+      }
+      read_ai_generation_job_execution_status: {
+        Args: { target_job_id: string }
+        Returns: string
       }
       read_ai_generation_queue: {
         Args: { target_batch_limit: number; target_visibility_timeout: number }

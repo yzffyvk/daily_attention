@@ -17,6 +17,31 @@ type RouteContext = {
 };
 
 const jobIdSchema = z.uuid("任务标识格式不正确");
+const cancellationSchema = z.strictObject({ confirmQuotaConsumption: z.boolean().optional().default(false) });
+
+async function cancellationBody(request: Request) {
+  if (!request.body) return cancellationSchema.parse({});
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 512) {
+        await reader.cancel();
+        throw new Error("VALIDATION_ERROR");
+      }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  const text = new TextDecoder().decode(bytes);
+  return cancellationSchema.parse(text.trim() ? JSON.parse(text) : {});
+}
 
 export const dynamic = "force-dynamic";
 
@@ -79,17 +104,21 @@ export async function GET(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   routeContext: RouteContext,
 ): Promise<Response> {
   const requestId = crypto.randomUUID();
   try {
     const parsed = await requestContext(routeContext, requestId);
     if (!parsed.ok) return parsed.response;
+    let body: z.infer<typeof cancellationSchema>;
+    try { body = await cancellationBody(request); }
+    catch { return aiValidationFailure({ message: "取消请求格式不正确", path: [] }, requestId); }
     const job = await cancelGeneration(
       parsed.context.userId,
       parsed.jobId,
       parsed.context.repository,
+      body.confirmQuotaConsumption,
     );
     return aiSuccess(toAiGenerationJobData(job), requestId);
   } catch (error) {

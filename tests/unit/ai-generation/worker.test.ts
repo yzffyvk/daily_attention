@@ -58,6 +58,7 @@ describe("AI generation queue worker", () => {
     };
     vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/read_ai_generation_job_execution_status")) return Response.json("generating");
       if (url.endsWith("/claim_ai_generation_job") || url.endsWith("/begin_ai_generation")) {
         return Response.json([jobRow]);
       }

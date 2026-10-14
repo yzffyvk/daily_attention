@@ -43,10 +43,15 @@ function rpcJob(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function rpcState(overrides: Record<string, unknown> = {}) {
+  return { job: rpcJob(overrides), quota: { used: 1, reserved: 0, consumed: 1, limit: 5, remaining: 4 },
+    cancellation: { freeRemaining: 0, requiresConfirmation: true, charged: null } };
+}
+
 describe("AI generation repository", () => {
   it("reads a completed long summary without dropping the generated result", async () => {
     const summary = '知'.repeat(30000);
-    const rpc = vi.fn().mockResolvedValue({ data: [rpcJob({ status: 'succeeded', summary })], error: null });
+    const rpc = vi.fn().mockResolvedValue({ data: rpcState({ status: 'succeeded', summary }), error: null });
     const repository = createAiGenerationRepository({ rpc });
     await expect(repository.findOwned(userId, jobId)).resolves.toMatchObject({ summary });
   });
@@ -98,13 +103,13 @@ describe("AI generation repository", () => {
   });
 
   it("normalizes a legacy job without a stored user prompt to an empty prompt", async () => {
-    const repository = createAiGenerationRepository({ rpc: async () => ({ data: [rpcJob()], error: null }) });
+    const repository = createAiGenerationRepository({ rpc: async () => ({ data: rpcState(), error: null }) });
     expect(await repository.findOwned(userId, jobId)).toMatchObject({ userPrompt: "", promptVersion: "ai-summary-v1" });
   });
 
   it("returns null for an unowned or missing job", async () => {
     const repository = createAiGenerationRepository({
-      rpc: vi.fn().mockResolvedValue({ data: [], error: null }),
+      rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
     });
 
     await expect(repository.findOwned(userId, jobId)).resolves.toBeNull();
@@ -112,24 +117,43 @@ describe("AI generation repository", () => {
 
   it("cancels through the ownership-scoped RPC", async () => {
     const rpc = vi.fn().mockResolvedValue({
-      data: [{
-        job: rpcJob({ status: "cancelled", finished_at: "2026-07-31T01:00:00.000Z" }),
-        quota_used: 0,
-        quota_reserved: 0,
-        quota_consumed: 0,
-        quota_remaining: 5,
-      }],
+      data: { ...rpcState({ status: "cancelled", finished_at: "2026-07-31T01:00:00.000Z" }),
+        quota: { used: 0, reserved: 0, consumed: 0, limit: 5, remaining: 5 },
+        cancellation: { freeRemaining: 1, requiresConfirmation: false, charged: false } },
       error: null,
     });
     const repository = createAiGenerationRepository({ rpc });
 
     await expect(repository.cancelOwned(userId, jobId)).resolves.toMatchObject({
       status: "cancelled",
+      quota: { remaining: 5 },
+      cancellation: { freeRemaining: 1, charged: false },
     });
-    expect(rpc).toHaveBeenCalledWith("cancel_ai_generation_job", {
+    expect(rpc).toHaveBeenCalledWith("cancel_ai_generation_job_v2", {
       target_user_id: userId,
       target_job_id: jobId,
+      target_confirm_quota_consumption: false,
     });
+  });
+
+  it("reads the server cancellation policy and explicitly forwards paid confirmation", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: rpcState({ status: "generating" }), error: null });
+    const repository = createAiGenerationRepository({ rpc });
+    await expect(repository.findOwned(userId, jobId)).resolves.toMatchObject({
+      cancellation: { freeRemaining: 0, requiresConfirmation: true }, quota: { remaining: 4 },
+    });
+    expect(rpc).toHaveBeenCalledWith("read_ai_generation_job_state", { target_user_id: userId, target_job_id: jobId });
+    await repository.cancelOwned(userId, jobId, true);
+    expect(rpc).toHaveBeenLastCalledWith("cancel_ai_generation_job_v2", {
+      target_user_id: userId, target_job_id: jobId, target_confirm_quota_consumption: true,
+    });
+  });
+
+  it("rejects inconsistent quota in cancellation responses", async () => {
+    const repository = createAiGenerationRepository({ rpc: async () => ({
+      data: { ...rpcState(), quota: { used: 1, reserved: 0, consumed: 1, limit: 5, remaining: 5 } }, error: null,
+    }) });
+    await expect(repository.cancelOwned(userId, jobId)).rejects.toThrow("Malformed AI generation RPC response");
   });
 
   it("fails closed for malformed RPC data", async () => {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AiJobWithQuota } from "@/server/ai/repository";
 
 const mocks = vi.hoisted(() => ({
@@ -59,6 +59,16 @@ function routeContext(id = jobId) {
 }
 
 describe("AI generation routes", () => {
+  afterEach(() => vi.useRealTimers());
+  it("rejects tomorrow before consuming rate limits or creating a job", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-14T15:59:59Z"));
+    const response = await POST(postRequest({ ...requestBody, targetDate: "2026-10-15" }));
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "VALIDATION_ERROR", details: { field: "targetDate" } } });
+    expect(mocks.consume).not.toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.context.mockResolvedValue({ userId, admin: {}, repository: {} });
@@ -154,5 +164,33 @@ describe("AI generation routes", () => {
       routeContext(),
     );
     expect(started.status).toBe(409);
+  });
+
+  it("defaults an empty cancellation body to no quota confirmation", async () => {
+    const response = await DELETE(new Request(`https://example.test/api/ai/generations/${jobId}`, { method: "DELETE" }), routeContext());
+    expect(response.status).toBe(200);
+    expect(mocks.cancel).toHaveBeenCalledWith(userId, jobId, {}, false);
+  });
+
+  it("forwards explicit quota confirmation and returns a completion that won the race", async () => {
+    mocks.cancel.mockResolvedValue({ status: "succeeded", result: { summary: "已完成" } });
+    const response = await DELETE(new Request(`https://example.test/api/ai/generations/${jobId}`, {
+      method: "DELETE", body: JSON.stringify({ confirmQuotaConsumption: true }),
+    }), routeContext());
+    expect(mocks.cancel).toHaveBeenCalledWith(userId, jobId, {}, true);
+    await expect(response.json()).resolves.toMatchObject({ ok: true, data: { status: "succeeded" } });
+  });
+
+  it.each(['{"confirmQuotaConsumption":"true"}', '{', '{"confirmQuotaConsumption":true,"unexpected":true}', ' '.repeat(513)])("rejects invalid or oversized cancellation body", async body => {
+    const response = await DELETE(new Request(`https://example.test/api/ai/generations/${jobId}`, { method: "DELETE", body }), routeContext());
+    expect(response.status).toBe(422);
+    expect(mocks.cancel).not.toHaveBeenCalled();
+  });
+
+  it("returns an actionable confirmation conflict when free cancellations are exhausted", async () => {
+    mocks.cancel.mockRejectedValue({ code: "P0001", message: "CANCELLATION_CONFIRMATION_REQUIRED" });
+    const response = await DELETE(new Request(`https://example.test/api/ai/generations/${jobId}`, { method: "DELETE" }), routeContext());
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "CANCELLATION_CONFIRMATION_REQUIRED", message: expect.stringContaining("1 次 AI 额度") } });
   });
 });

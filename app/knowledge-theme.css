@@ -317,3 +317,14 @@ html:has(.narrative-editor) { scroll-padding-block: 1.5rem 8rem; }
 @keyframes ai-live-blink { 50% { opacity: 0; } }
 @media (max-width: 560px) { .ai-live-progress { padding: 14px; } .ai-live-steps { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } .ai-live-preview { max-height: 280px; } }
 @media (prefers-reduced-motion: reduce) { .ai-live-spinner, .ai-live-caret { animation: none; } }
+
+.ai-cancel-row { display: flex; align-items: center; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+.ai-cancel-row > button { min-height: 44px; font-size: 13px; }
+.ai-cancel-row > p { margin: 0; flex: 1 1 230px; color: var(--theme-text-secondary, #9ba3af); font-size: 12px; line-height: 1.7; }
+.ai-success-banner { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 22px; padding: 18px 20px; border: 1px solid var(--theme-accent-border, #756446); border-radius: 12px; background: var(--theme-accent-wash, #d8bc8318); color: var(--theme-accent, #e0c897); }
+.ai-success-banner > svg { flex-shrink: 0; margin-top: 1px; }
+.ai-success-banner p { margin: 0 0 5px; font-size: 16px; line-height: 1.6; font-weight: 600; }
+.ai-success-banner small { color: var(--theme-text-secondary, #9ba3af); font-size: 12px; line-height: 1.7; }
+.ai-cancellation-dialog .dialog-actions { flex-wrap: wrap; }
+.ai-cancellation-dialog .dialog-actions button { min-height: 44px; }
+@media (max-width: 560px) { .ai-success-banner { padding: 16px; } .ai-cancellation-dialog .dialog-actions button { flex: 1 1 100%; } }

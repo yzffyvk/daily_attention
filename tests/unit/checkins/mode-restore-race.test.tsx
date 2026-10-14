@@ -79,9 +79,12 @@ function edit(id: string, value: string) {
 }
 
 async function switchTo(mode: Mode) {
+  await waitFor(() => expect(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ })).toBeEnabled());
   fireEvent.click(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ }));
   await waitFor(() => expect(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ })).toHaveAttribute("aria-pressed", "true"));
   await waitFor(() => expect(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ })).toBeEnabled());
+  // The incoming editor can still be restoring its draft after mode navigation unlocks.
+  await waitFor(() => expect(document.querySelector(".checkin-form")).toHaveAttribute("aria-busy", "false"));
 }
 
 beforeEach(() => {

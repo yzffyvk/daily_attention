@@ -307,8 +307,12 @@ export function createProductionDependencies(
         }
         : null;
     },
-    async loadSource(sourceUrl) {
-      const fetched = await safeFetch(sourceDownloadUrl(sourceUrl), AbortSignal.timeout(25_000));
+    async isCancelled(jobId) {
+      return await rpc(client, "read_ai_generation_job_execution_status", { target_job_id: jobId }) === "cancelled";
+    },
+    async loadSource(sourceUrl, signal) {
+      const timeout = AbortSignal.timeout(25_000);
+      const fetched = await safeFetch(sourceDownloadUrl(sourceUrl), signal ? AbortSignal.any([signal, timeout]) : timeout);
       return extractLearningSource({ html: fetched.body, finalUrl: fetched.finalUrl, contentType: fetched.contentType });
     },
     async begin(jobId) {
@@ -329,7 +333,8 @@ export function createProductionDependencies(
     },
     generate(input) {
       const timeoutMs = options.dedicatedWorker ? dedicatedAiTiming.modelTimeoutMs : 120_000;
-      return provider.generate({ ...input, signal: AbortSignal.timeout(timeoutMs) });
+      const timeout = AbortSignal.timeout(timeoutMs);
+      return provider.generate({ ...input, signal: input.signal ? AbortSignal.any([input.signal, timeout]) : timeout });
     },
     async complete(input) {
       await rpc(client, "complete_ai_generation_job", {

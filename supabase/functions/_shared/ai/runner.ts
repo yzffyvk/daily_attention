@@ -65,7 +65,8 @@ export type AiExtractedSource = {
 
 export type AiJobRunnerPorts = {
   claim(jobId: string): Promise<AiClaimedJob | null>;
-  loadSource(sourceUrl: string): Promise<AiExtractedSource>;
+  isCancelled?(jobId: string): Promise<boolean>;
+  loadSource(sourceUrl: string, signal?: AbortSignal): Promise<AiExtractedSource>;
   begin(jobId: string): Promise<void>;
   anonymousUserId(userId: string): Promise<string>;
   reportProgress?(jobId: string, attemptCount: number, progress: AiGenerationProgress): Promise<void>;
@@ -76,6 +77,7 @@ export type AiJobRunnerPorts = {
     userPrompt?: string;
     promptVersion?: string;
     anonymousUserId: string;
+    signal?: AbortSignal;
     onProgress?: (progress: AiGenerationProgress) => Promise<void>;
   }): Promise<AiSummaryProviderResult>;
   complete(input: {
@@ -120,82 +122,123 @@ export async function runAiJob(
   const job = await ports.claim(jobId);
   if (!job) return "ignored";
 
-  let source: AiExtractedSource;
-  try {
-    source = await ports.loadSource(job.sourceUrl);
-  } catch (error) {
-    const candidate = stableErrorCode(error);
-    const transient = candidate === "FETCH_TIMEOUT" || candidate === "FETCH_SERVICE_UNAVAILABLE";
-    const knownCode = transient || permanentFetchCodes.has(candidate ?? "")
-      ? candidate!
-      : "CONTENT_BLOCKED";
-    const retryable = transient && job.attemptCount < MAX_ATTEMPTS;
-    const code = knownCode === "FETCH_TIMEOUT" && !retryable
-      ? "TASK_RETRY_EXHAUSTED"
-      : knownCode;
-    await ports.markFetchFailure({
-      jobId,
-      code,
-      message: fetchFailureMessages[code] ?? fetchFailureMessages.CONTENT_BLOCKED!,
-      retryable,
-    });
-    return retryable ? "retryable" : "completed";
-  }
-
-  await ports.begin(jobId);
+  const controller = ports.isCancelled ? new AbortController() : null;
+  let watching = true;
+  let cancelled = false;
+  let polling = false;
+  let watcher: ReturnType<typeof setInterval> | undefined;
+  const checkCancelled = async () => {
+    if (cancelled) return true;
+    if (!ports.isCancelled) return false;
+    try {
+      const stopped = await ports.isCancelled(jobId);
+      if (stopped && watching) {
+        cancelled = true;
+        controller?.abort();
+      }
+    } catch { /* A transient status read must not cancel a paid generation. */ }
+    return cancelled;
+  };
 
   try {
-    const anonymousUserId = await ports.anonymousUserId(job.userId);
-    let progressAvailable = true;
-    const generated = await ports.generate({
-      sourceTitle: source.title,
-      sourceText: source.text,
-      sourceTruncated: source.truncated ?? false,
-      userPrompt: job.userPrompt?.trim() ?? "",
-      promptVersion: job.promptVersion,
-      anonymousUserId,
-      ...(ports.reportProgress ? { onProgress: async (progress: AiGenerationProgress) => {
-        if (!progressAvailable) return;
-        try { await ports.reportProgress!(jobId, job.attemptCount, progress); }
-        catch { progressAvailable = false; } // Preview failure must not fail a paid generation.
-      } } : {}),
-    });
-    const result = { ...generated.result };
-    if (source.truncated) {
-      const notice = SOURCE_TRUNCATION_NOTICE;
-      result.warnings = [...new Set([notice, ...result.warnings])].slice(0, 10);
-      const questions = parseQuestionSummary(result.summary);
-      if (questions) {
-        questions.warnings = result.warnings;
-        result.summary = serializeQuestionSummary(questions);
-      } else result.summary = `${notice}\n\n${result.summary}`;
+    if (await checkCancelled()) return "ignored";
+    if (controller) watcher = setInterval(async () => {
+      if (polling || !watching) return;
+      polling = true;
+      try { await checkCancelled(); } finally { polling = false; }
+    }, 1_000);
+
+    let source: AiExtractedSource;
+    try {
+      source = controller
+        ? await ports.loadSource(job.sourceUrl, controller.signal)
+        : await ports.loadSource(job.sourceUrl);
+    } catch (error) {
+      if (await checkCancelled()) return "ignored";
+      const candidate = stableErrorCode(error);
+      const transient = candidate === "FETCH_TIMEOUT" || candidate === "FETCH_SERVICE_UNAVAILABLE";
+      const knownCode = transient || permanentFetchCodes.has(candidate ?? "")
+        ? candidate!
+        : "CONTENT_BLOCKED";
+      const retryable = transient && job.attemptCount < MAX_ATTEMPTS;
+      const code = knownCode === "FETCH_TIMEOUT" && !retryable
+        ? "TASK_RETRY_EXHAUSTED"
+        : knownCode;
+      await ports.markFetchFailure({
+        jobId,
+        code,
+        message: fetchFailureMessages[code] ?? fetchFailureMessages.CONTENT_BLOCKED!,
+        retryable,
+      });
+      return retryable ? "retryable" : "completed";
     }
-    await ports.complete({
-      jobId,
-      sourceTitle: source.title,
-      contentDigestHex: source.contentDigestHex,
-      result,
-      usage: generated.usage,
-      providerCallCount: generated.providerCallCount,
-      model: generated.model,
-      systemFingerprint: generated.systemFingerprint,
-    });
-    return "completed";
+
+    if (await checkCancelled()) return "ignored";
+    const anonymousUserId = await ports.anonymousUserId(job.userId);
+    if (await checkCancelled()) return "ignored";
+    await ports.begin(jobId);
+
+    try {
+      let progressAvailable = true;
+      const generated = await ports.generate({
+        sourceTitle: source.title,
+        sourceText: source.text,
+        sourceTruncated: source.truncated ?? false,
+        userPrompt: job.userPrompt?.trim() ?? "",
+        promptVersion: job.promptVersion,
+        anonymousUserId,
+        ...(controller ? { signal: controller.signal } : {}),
+        ...(ports.reportProgress ? { onProgress: async (progress: AiGenerationProgress) => {
+          if (!progressAvailable || cancelled) return;
+          try { await ports.reportProgress!(jobId, job.attemptCount, progress); }
+          catch { progressAvailable = false; } // Preview failure must not fail a paid generation.
+        } } : {}),
+      });
+      if (await checkCancelled()) return "ignored";
+      const result = { ...generated.result };
+      if (source.truncated) {
+        const notice = SOURCE_TRUNCATION_NOTICE;
+        result.warnings = [...new Set([notice, ...result.warnings])].slice(0, 10);
+        const questions = parseQuestionSummary(result.summary);
+        if (questions) {
+          questions.warnings = result.warnings;
+          result.summary = serializeQuestionSummary(questions);
+        } else result.summary = `${notice}\n\n${result.summary}`;
+      }
+      await ports.complete({
+        jobId,
+        sourceTitle: source.title,
+        contentDigestHex: source.contentDigestHex,
+        result,
+        usage: generated.usage,
+        providerCallCount: generated.providerCallCount,
+        model: generated.model,
+        systemFingerprint: generated.systemFingerprint,
+      });
+      return "completed";
+    } catch (error) {
+      if (await checkCancelled()) return "ignored";
+      const providerError = error instanceof DeepSeekProviderError ? error : null;
+      const candidate = providerError?.code ?? "MODEL_SERVICE_ERROR";
+      const retryable = (providerError?.retryable ?? true) && job.attemptCount < MAX_ATTEMPTS;
+      const code = !retryable && (providerError?.retryable ?? true)
+        ? "TASK_RETRY_EXHAUSTED"
+        : candidate;
+      await ports.markProviderFailure({
+        jobId,
+        code,
+        message: providerFailureMessages[code] ?? providerFailureMessages.MODEL_SERVICE_ERROR!,
+        retryable,
+        providerCallCount: providerError?.providerCallCount ?? 1,
+        usage: providerError?.usage ?? emptyUsage,
+      });
+      return retryable ? "retryable" : "completed";
+    }
   } catch (error) {
-    const providerError = error instanceof DeepSeekProviderError ? error : null;
-    const candidate = providerError?.code ?? "MODEL_SERVICE_ERROR";
-    const retryable = (providerError?.retryable ?? true) && job.attemptCount < MAX_ATTEMPTS;
-    const code = !retryable && (providerError?.retryable ?? true)
-      ? "TASK_RETRY_EXHAUSTED"
-      : candidate;
-    await ports.markProviderFailure({
-      jobId,
-      code,
-      message: providerFailureMessages[code] ?? providerFailureMessages.MODEL_SERVICE_ERROR!,
-      retryable,
-      providerCallCount: providerError?.providerCallCount ?? 1,
-      usage: providerError?.usage ?? emptyUsage,
-    });
-    return retryable ? "retryable" : "completed";
+    if (await checkCancelled()) return "ignored";
+    throw error;
+  } finally {
+    watching = false;
+    if (watcher) clearInterval(watcher);
   }
 }
