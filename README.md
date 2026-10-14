@@ -121,9 +121,8 @@ E2E 仅创建保留的 `e2e.daily-attention.invalid` 测试账户，并在核对
 | Build command | `npm run build` |
 | Deploy command | `npx wrangler deploy` |
 
-仓库中的默认 Worker 名称为 `ai-learning-checkin`。Cloudflare Workers Builds 会使用
-`WRANGLER_CI_OVERRIDE_NAME` 匹配已连接的 Worker 名称，当前站点为 `daily-attention`。
-从本机发布到现有站点时，需要显式指定 `--name daily-attention`。
+仓库中的 Worker 名称与当前生产实例统一为 `daily-attention`，生产构建与分支预览均使用这个名称。
+本机发布命令保留显式的 `--name daily-attention`，便于核对发布目标。
 参见 [Cloudflare 构建说明](https://developers.cloudflare.com/workers/ci-cd/builds/troubleshoot/)。
 
 在 **Build variables and secrets** 添加 `NODE_VERSION=22`、
