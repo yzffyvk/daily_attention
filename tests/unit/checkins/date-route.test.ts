@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   context: vi.fn(),
@@ -64,8 +64,33 @@ function request() {
 }
 
 describe("check-in image replacement cleanup", () => {
+  afterEach(() => vi.useRealTimers());
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it.each(["manual", "ai"])("rejects future %s records before reading or writing storage", async entryMode => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-14T15:59:59Z"));
+    const findByDate = vi.fn().mockResolvedValue(null);
+    mocks.context.mockResolvedValue({ userId: "user-1", supabase: {}, repository: { findByDate } });
+    mocks.save.mockResolvedValue({ ok: true, record: {} });
+    const response = await PUT(new Request("https://example.test/api/checkins/2026-10-15", {
+      method: "PUT", body: JSON.stringify({ ...input, entryMode }),
+    }), { params: Promise.resolve({ date: "2026-10-15" }) });
+    expect(response?.status).toBe(422);
+    await expect(response?.json()).resolves.toMatchObject({ error: { code: "VALIDATION_ERROR", details: { field: "date" } } });
+    expect(findByDate).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.remove).not.toHaveBeenCalled();
+  });
+
+  it("allows the new Beijing day as soon as midnight arrives", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-14T16:00:00Z"));
+    mocks.context.mockResolvedValue({ userId: "user-1", supabase: {}, repository: { findByDate: vi.fn().mockResolvedValue(null) } });
+    mocks.save.mockResolvedValue({ ok: true, record: {} });
+    expect((await PUT(request(), { params: Promise.resolve({ date: "2026-10-15" }) }))?.status).toBe(200);
   });
 
   it.each([["", "manual"], ["?mode=ai", "ai"]])("reads only the selected mode (%s)", async (query, mode) => {

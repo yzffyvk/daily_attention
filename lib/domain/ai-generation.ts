@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { dateKeySchema } from "@/lib/domain/checkin";
+import { writableDateKeySchema } from "@/lib/domain/checkin";
 import { aiUserPromptSchema } from "@/lib/domain/ai-prompt";
 
 const hashRoutePattern = /^#(?:[!/?]|%(?:2f|21|3f))/iu;
@@ -60,7 +60,7 @@ const sourceUrlSchema = z
 export const createAiGenerationSchema = z.object({
   sourceUrl: sourceUrlSchema,
   userPrompt: aiUserPromptSchema.default(""),
-  targetDate: dateKeySchema,
+  targetDate: writableDateKeySchema,
   idempotencyKey: z.uuid("请求标识格式不正确"),
 }).strict();
 

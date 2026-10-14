@@ -79,10 +79,10 @@ function edit(id: string, value: string) {
 }
 
 async function switchTo(mode: Mode) {
-  await waitFor(() => expect(screen.getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ })).toBeEnabled());
-  fireEvent.click(screen.getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ }));
-  await waitFor(() => expect(screen.getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ })).toHaveAttribute("aria-pressed", "true"));
-  await waitFor(() => expect(screen.getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ })).toBeEnabled());
+  await waitFor(() => expect(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ })).toBeEnabled());
+  fireEvent.click(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ }));
+  await waitFor(() => expect(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ })).toHaveAttribute("aria-pressed", "true"));
+  await waitFor(() => expect(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: mode === "ai" ? /AI 提炼/ : /手动记录/ })).toBeEnabled());
   // Mode navigation becomes available before the incoming draft is restored.
   // A real learner can only edit after the editor itself is ready.
   await waitFor(() => expect(document.querySelector('.checkin-form')).toHaveAttribute('aria-busy', 'false'));

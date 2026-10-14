@@ -4,6 +4,7 @@
 import { Check, Download, LoaderCircle, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useColorTheme, type ColorTheme } from "@/features/theme/theme";
 import { useDialogFocus } from "./dirty-switch-dialog";
 import { DailyEchoCard } from "./daily-echo-card";
 import { createDailyEchoPng, downloadDailyEcho } from "./daily-echo-export";
@@ -11,6 +12,12 @@ import { getDailyEcho } from "./daily-echo";
 import "./daily-echo.css";
 
 export function DailyEchoDialog({ date, onClose }: { date: string; onClose: () => void }) {
+  const theme = useColorTheme();
+  // A theme change discards the old PNG and aborts an in-flight export.
+  return <DailyEchoDialogContent key={`${date}:${theme}`} date={date} theme={theme} onClose={onClose} />;
+}
+
+function DailyEchoDialogContent({ date, theme, onClose }: { date: string; theme: ColorTheme; onClose: () => void }) {
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -65,10 +72,10 @@ export function DailyEchoDialog({ date, onClose }: { date: string; onClose: () =
           <div><span className="daily-echo-success"><Check size={13} aria-hidden="true" />打卡成功</span><h2 id="daily-echo-title">今日回响</h2></div>
           <button className="daily-echo-close" type="button" aria-label="关闭纪念卡" onClick={onClose} ref={closeRef}><X size={20} aria-hidden="true" /></button>
         </div>
-        <p id="daily-echo-intro">今天的认真，值得被好好收藏。</p>
+        <p id="daily-echo-intro">收下一句话，陪你走过今天。</p>
         <div className="daily-echo-paper">
-          <div hidden={Boolean(imageUrl)}><DailyEchoCard date={date} svgRef={svgRef} /></div>
-          {imageUrl ? <img className="daily-echo-card" src={imageUrl} alt={`${date.replaceAll("-", ".")} 打卡成功。今日口令：${echo.phrase}。${echo.lines.join("")}`} width={1440} height={1920} /> : null}
+          <div hidden={Boolean(imageUrl)}><DailyEchoCard date={date} theme={theme} svgRef={svgRef} /></div>
+          {imageUrl ? <img className="daily-echo-card" src={imageUrl} alt={`${date.replaceAll("-", ".")} 打卡成功。今日回响：${echo.phrase}。${echo.lines.join("")}`} width={1440} height={1920} /> : null}
         </div>
         <p className={`daily-echo-hint${error ? " daily-echo-error" : ""}`} role={error ? "alert" : "status"}>
           {error || (imageUrl ? "已发起下载，手机上也可长按卡片保存。" : "保存一张，留给以后的自己。")}
@@ -77,7 +84,7 @@ export function DailyEchoDialog({ date, onClose }: { date: string; onClose: () =
           <button className="daily-echo-save" type="button" disabled={saving} onClick={() => void saveImage()}>
             {saving ? <LoaderCircle className="daily-echo-spinner" size={17} aria-hidden="true" /> : <Download size={17} aria-hidden="true" />}{saving ? "正在生成图片…" : "保存图片"}
           </button>
-          <button className="daily-echo-dismiss" type="button" onClick={onClose}>收下这份鼓励</button>
+          <button className="daily-echo-dismiss" type="button" onClick={onClose}>让这句话陪着我</button>
         </div>
       </section>
     </div>, document.body,

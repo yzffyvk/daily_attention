@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "ai-learning-checkin",
+  "name": "daily-attention",
   "main": "worker/index.ts",
   "compatibility_date": "2026-05-15",
   // vite.config.ts supplies nodejs_compat, including for isolated test bindings.

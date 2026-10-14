@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { CheckInWorkspace } from "@/features/checkins/checkin-workspace";
@@ -101,11 +101,11 @@ it("keeps reset effective when switching modes while draft deletion is pending",
  });
  fireEvent.click(screen.getByRole("button", { name: "还原未保存的修改" }));
  await waitFor(() => expect(began).toBe(true));
- expect(screen.getByRole("button", { name: /AI 提炼/ })).toBeDisabled();
- fireEvent.click(screen.getByRole("button", { name: /AI 提炼/ }));
- expect(screen.getByRole("button", { name: /手动记录/ })).toHaveAttribute("aria-pressed", "true");
+ expect(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: /AI 提炼/ })).toBeDisabled();
+ fireEvent.click(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: /AI 提炼/ }));
+ expect(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: /手动记录/ })).toHaveAttribute("aria-pressed", "true");
  await act(async () => { release(); });
- await waitFor(() => expect(screen.getByRole("button", { name: /AI 提炼/ })).toBeEnabled());
+ await waitFor(() => expect(within(screen.getByRole("group", { name: "选择打卡方式" })).getByRole("button", { name: /AI 提炼/ })).toBeEnabled());
  await switchTo("ai");
  await switchTo("manual");
  expect(screen.getByLabelText("今日知识主题")).toHaveValue("");

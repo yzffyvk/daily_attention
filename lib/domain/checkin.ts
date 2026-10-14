@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { aiGenerationContextSchema, aiUserPromptSchema } from "./ai-prompt.ts";
+import { getLearningDate } from "./learning-date.ts";
 
 export const checkInEntryModeSchema = z.enum(["manual", "ai"]);
 export type CheckInEntryMode = z.infer<typeof checkInEntryModeSchema>;
@@ -9,6 +10,11 @@ export const dateKeySchema = z.string().refine((value) => {
   const date = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value;
 }, "日期格式不正确");
+
+export const writableDateKeySchema = dateKeySchema.refine(
+  value => value <= getLearningDate(),
+  "未来日期不能记录，请选择今天或更早的日期",
+);
 
 const sourceUrlSchema = z.union([
   z.literal(""),

@@ -36,6 +36,8 @@ import {
 } from "./dates";
 import { DirtySwitchDialog, useDialogFocus } from "./dirty-switch-dialog";
 import { DailyEchoDialog } from "./daily-echo-dialog";
+import { DailyEchoCompanion } from "./daily-echo-companion";
+import { useDailyEchoReceipt } from "./use-daily-echo-receipt";
 import { DailyTakeawayEntry } from "@/features/daily-takeaways/daily-takeaway-entry";
 import type { ImageSelection } from "./image-note-uploader";
 import { checkInKeys, setMonthRecord, useCheckIn, useMonthCheckIns, useSaveCheckIn } from "./queries";
@@ -192,12 +194,12 @@ export function CheckInWorkspace({
   const [calendarCollapsed, setCalendarCollapsed] = useState(false);
   const knowledgeLeaveGuard = useRef<((leave: () => void) => void) | null>(null);
   const knowledgeListNavigation = useRef<(() => void) | null>(null);
-  const [selectedDate, setSelectedDate] = useState(initialDate);
+  const [selectedDate, setSelectedDate] = useState(initialDate > initialToday ? initialToday : initialDate);
   const [entryMode, setEntryMode] = useState<CheckInEntryMode>(initialEntryMode);
   const entryModeRef = useRef<CheckInEntryMode>(initialEntryMode);
   const modeSwitchInFlightRef = useRef(false);
   const transientDraftsRef = useRef(new Map<string, { draft: CheckInDraft; record: CheckInRecord | null; version: number | null }>());
-  const [month, setMonth] = useState(() => monthKeyForDate(initialDate));
+  const [month, setMonth] = useState(() => monthKeyForDate(initialDate > initialToday ? initialToday : initialDate));
   const [draft, setDraft] = useState<CheckInDraft>(() => draftFromRecord(null));
   const [draftBaseRecord, setDraftBaseRecord] = useState<CheckInRecord | null>(null);
   const [baseVersion, setBaseVersion] = useState<number | null>(null);
@@ -214,7 +216,7 @@ export function CheckInWorkspace({
   const [echoDate, setEchoDate] = useState<string | null>(null);
   const shownEchoesRef = useRef(new Set<string>());
   const echoAccountId = userId ?? initialProfile?.id;
-  const echoStorageKey = echoAccountId ? `aura-daily-echo-shown:${encodeURIComponent(echoAccountId)}` : null;
+  const { receivedDate: receivedEchoDate, receive: receiveEcho, hasReceived: hasReceivedEcho } = useDailyEchoReceipt(echoAccountId, today);
   const [isSaving, setIsSaving] = useState(false);
   const [isCleaningUpImage, setIsCleaningUpImage] = useState(false);
   const [isAbandoningDraft, setIsAbandoningDraft] = useState(false);
@@ -222,7 +224,7 @@ export function CheckInWorkspace({
   const [activeAiJob, setActiveAiJob] = useState<ActiveAiJob | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const todayRef = useRef(initialToday);
-  const selectedDateRef = useRef(initialDate);
+  const selectedDateRef = useRef(selectedDate);
   const draftRef = useRef(draft);
   const draftBaseRecordRef = useRef<CheckInRecord | null>(null);
   const editorLockedRef = useRef(false);
@@ -505,21 +507,14 @@ export function CheckInWorkspace({
   }
 
   function hasShownDailyEcho(date: string) {
-    if (shownEchoesRef.current.has(`${echoAccountId ?? "session"}:${date}`)) return true;
-    try {
-      return echoStorageKey !== null && window.localStorage.getItem(echoStorageKey) === date;
-    } catch {
-      return false;
-    }
+    return shownEchoesRef.current.has(`${echoAccountId ?? "session"}:${date}`) || hasReceivedEcho(date);
   }
 
   function openDailyEcho(date: string) {
     shownEchoesRef.current.add(`${echoAccountId ?? "session"}:${date}`);
     // Remember today's presentation, not whether a record already existed.
     // Reviewing an older card must not overwrite today's marker.
-    if (date === todayRef.current && echoStorageKey) {
-      try { window.localStorage.setItem(echoStorageKey, date); } catch { /* In-memory deduplication still works. */ }
-    }
+    if (date === todayRef.current) receiveEcho(date);
     setEchoDate(date);
   }
 
@@ -579,6 +574,12 @@ export function CheckInWorkspace({
       editorLockedRef.current = false;
       setIsCleaningUpImage(false);
     }
+  }
+
+  async function openCalendarRecord(mode: CheckInEntryMode) {
+    if (editorLockedRef.current || modeSwitchInFlightRef.current || conflict) return;
+    await switchEntryMode(mode);
+    if (entryModeRef.current === mode && !editorLockedRef.current && !conflict) scrollToEditor();
   }
 
   function openDate(date: string) {
@@ -650,6 +651,7 @@ export function CheckInWorkspace({
   }
 
   function requestDateChange(date: string) {
+    if (date > getTodayKey()) return;
     if (editorLockedRef.current || imageCleanupInFlightRef.current) return;
     if (date === selectedDate) {
       scrollToEditor();
@@ -708,6 +710,10 @@ export function CheckInWorkspace({
   }
 
   async function saveCurrentRecord({ showEcho = true }: { showEcho?: boolean } = {}) {
+    if (selectedDate > getTodayKey()) {
+      setStatus("未来日期不能记录，请选择今天或更早的日期", "error");
+      return false;
+    }
     if (isOffline) {
       setStatus(
         draftStorageState === "unavailable"
@@ -936,6 +942,7 @@ export function CheckInWorkspace({
           }}
           today={today}
         />
+        {receivedEchoDate ? <DailyEchoCompanion date={receivedEchoDate} today={today} onOpen={() => openDailyEcho(receivedEchoDate)} /> : null}
         {knowledgeOpen ? <KnowledgeWorkspace today={today} entryMode={entryMode} emptyIllustration={<CurrentLearningPersona initialProfile={initialProfile} />} leaveGuardRef={knowledgeLeaveGuard} listNavigationRef={knowledgeListNavigation} userId={userId ?? initialProfile?.id ?? "current-user"} onClose={() => {
           setKnowledgeOpen(false);
           requestAnimationFrame(() => document.getElementById("knowledge-entry")?.focus());
@@ -976,6 +983,8 @@ export function CheckInWorkspace({
         <div className={`workspace-grid${calendarCollapsed ? " calendar-collapsed" : ""}`} hidden={knowledgeOpen}>
           <div className="calendar-pane" id="learning-calendar" hidden={calendarCollapsed}>
           <MonthCalendar
+            activeEntryMode={entryMode}
+            onSelectEntryMode={(mode) => void openCalendarRecord(mode)}
             errorMessage={monthQuery.isError ? messageForError(monthQuery.error) : ""}
             isLoading={monthQuery.isPending}
             isRetrying={monthQuery.isFetching}
@@ -1026,7 +1035,7 @@ export function CheckInWorkspace({
             }}
             onAiCancel={() => void aiGeneration.cancel()}
             onAiGenerate={() => {
-              if (entryModeRef.current !== "ai" || editorLockedRef.current) return;
+              if (entryModeRef.current !== "ai" || editorLockedRef.current || selectedDate > getTodayKey()) return;
               void aiGeneration.generate({
                 sourceUrl: draft.sourceUrl.trim(),
                 userPrompt: draft.userPrompt ?? "",

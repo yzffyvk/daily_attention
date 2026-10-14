@@ -121,9 +121,8 @@ E2E 仅创建保留的 `e2e.daily-attention.invalid` 测试账户，并在核对
 | Build command | `npm run build` |
 | Deploy command | `npx wrangler deploy` |
 
-仓库中的默认 Worker 名称为 `ai-learning-checkin`。Cloudflare Workers Builds 会使用
-`WRANGLER_CI_OVERRIDE_NAME` 匹配已连接的 Worker 名称，当前站点为 `daily-attention`。
-从本机发布到现有站点时，需要显式指定 `--name daily-attention`。
+仓库中的 Worker 名称与当前生产实例统一为 `daily-attention`，生产构建与分支预览均使用这个名称。
+本机发布命令保留显式的 `--name daily-attention`，便于核对发布目标。
 参见 [Cloudflare 构建说明](https://developers.cloudflare.com/workers/ci-cd/builds/troubleshoot/)。
 
 在 **Build variables and secrets** 添加 `NODE_VERSION=22`、
@@ -176,6 +175,10 @@ AI 后台的两个 Railway 服务同样使用 `main` 分支。AI Worker 需要�
 网关需要同一份 `SAFE_FETCH_GATEWAY_TOKEN`。配置步骤、容器入口及健康检查见 [Railway 部署说明](./services/ai-worker/README.md#railway-生产部署)。
 
 ## 账户与草稿行为
+
+学习日期统一按北京时间计算，仅允许记录今天或过去日期。发布前应用 `supabase/migrations/20261014034015_reject_future_checkin_dates.sql`，数据库同步拒绝未来日期新增或修改，旧记录保留。
+
+每日回响采用 7 组短语轮换，卡片适配深浅皮肤；领取后在首页持续展示，并按账户保留浏览器内最近领取的回响。日历独立标记今天与选中日期，按去重日期显示本月收获天数，选中日期后可打开对应的手动或 AI 记录。
 
 当前开放注册。创建账户或成功找回账户时都会生成恢复码；恢复码仅能使用一次，
 找回账户后会生成新码，请在关闭弹窗前记录新恢复码。
