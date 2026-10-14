@@ -10,7 +10,7 @@ export function LearningPersona({ avatarKey, variant = "hero" }: { avatarKey: nu
   const persona = avatarForKey(avatarKey);
   return <span className={`learning-persona learning-persona--${variant}`}>
     <span className="learning-persona-art" aria-hidden="true">
-      <AvatarImage avatarKey={avatarKey} width={1254} height={1254} />
+      <AvatarImage avatarKey={avatarKey} animated width={1254} height={1254} />
     </span>
     <span className="learning-persona-caption"><strong>{persona.name}</strong><small>你的学习形象</small></span>
   </span>;

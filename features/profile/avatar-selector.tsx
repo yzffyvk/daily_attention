@@ -29,7 +29,7 @@ export function AvatarSelector({ value, name, onChange, disabled = false }: Avat
             value={option.key}
           />
           <span className="aura-avatar-art">
-            <AvatarImage avatarKey={option.key} width={512} height={512} loading="lazy" decoding="async" />
+            <AvatarImage avatarKey={option.key} animated={value === option.key} width={512} height={512} loading="lazy" decoding="async" />
           </span>
           <span className="aura-avatar-name">{option.name}</span>
           <span className="aura-avatar-description" id={`${descriptionId}-${option.key}`}>{option.description}</span>

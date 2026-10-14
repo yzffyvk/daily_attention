@@ -24,6 +24,7 @@ try {
         if(request.method()==='PATCH'){const body=request.postDataJSON();writes.push(body);profile={...profile,...body};}
         data={profile};
       }else if(url.pathname==='/api/checkins/stats')data={totalCount:0,currentStreak:0,hasTodayRecord:false};
+      else if(url.pathname==='/api/daily-takeaways')data={today:'2026-09-10',timeZone:'Asia/Shanghai',nextAvailableAt:'2026-09-10T16:00:00.000Z',totalLessons:0,skippedCount:0,currentLesson:null,history:[],quizResults:[]};
       else if(url.pathname==='/api/knowledge-narratives'||url.pathname==='/api/checkins')data=[];
       else if(url.pathname.startsWith('/api/checkins/'))data=null;
       else {failures.push(`Unhandled API: ${url.pathname}`);return route.abort();}
