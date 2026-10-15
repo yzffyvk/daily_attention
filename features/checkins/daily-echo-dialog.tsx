@@ -84,7 +84,7 @@ function DailyEchoDialogContent({ date, theme, onClose }: { date: string; theme:
           <button className="daily-echo-save" type="button" disabled={saving} onClick={() => void saveImage()}>
             {saving ? <LoaderCircle className="daily-echo-spinner" size={17} aria-hidden="true" /> : <Download size={17} aria-hidden="true" />}{saving ? "正在生成图片…" : "保存图片"}
           </button>
-          <button className="daily-echo-dismiss" type="button" onClick={onClose}>让这句话陪着我</button>
+          <button className="daily-echo-dismiss" type="button" onClick={onClose}>继续记录</button>
         </div>
       </section>
     </div>, document.body,

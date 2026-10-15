@@ -20,7 +20,7 @@
 .daily-echo-dialog button:focus-visible, .daily-echo-companion button:focus-visible { outline: 2px solid var(--aura-gold); outline-offset: 3px; }
 .daily-echo-spinner { animation: echo-spin 1s linear infinite; }
 
-/* A received echo lives alongside the daily workspace, like a note left open. */
+/* Today's words stay at the top of the workspace before and after check-in. */
 .daily-echo-companion { position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(190px, .9fr) minmax(200px, 1.5fr) auto; align-items: center; gap: 32px; overflow: hidden; padding: 27px 32px; border-bottom: 1px solid var(--line); background: var(--paper); }
 .daily-echo-companion::before { position: absolute; z-index: -1; right: -80px; bottom: -230px; width: 390px; height: 390px; border: 1px solid color-mix(in srgb, var(--aura-gold) 20%, transparent); border-radius: 50%; background: radial-gradient(ellipse, color-mix(in srgb, var(--aura-gold) 7%, transparent), transparent 70%); content: ''; pointer-events: none; }
 .daily-echo-companion-title p { margin: 0 0 10px; color: var(--ink-soft); font-size: 10px; letter-spacing: .08em; }

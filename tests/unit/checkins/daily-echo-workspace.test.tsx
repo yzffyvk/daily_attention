@@ -66,12 +66,18 @@ describe("daily echo keepsake", () => {
   });
   it("opens only after the first successful daily save, closes, and can be reopened", async () => {
     const user = setup();
+    const companion = screen.getByRole("region", { name: "每日回响" });
+    expect(companion.querySelector("time")).toHaveAttribute("dateTime", today);
+    expect(within(companion).queryByRole("button", { name: "查看完整回响" })).not.toBeInTheDocument();
+    const words = within(companion).getByRole("heading").textContent!;
     expect(screen.queryByRole("dialog", { name: "今日回响" })).not.toBeInTheDocument();
     await save(user);
     const dialog = await screen.findByRole("dialog", { name: "今日回响" });
+    expect(dialog).toHaveTextContent(words);
     expect(within(dialog).getByRole("button", { name: "保存图片" })).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "让这句话陪着我" }));
+    await user.click(within(dialog).getByRole("button", { name: "继续记录" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(companion).toHaveTextContent(words);
     await user.click(screen.getByRole("button", { name: "查看打卡纪念卡" }));
     expect(screen.getByRole("dialog", { name: "今日回响" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
@@ -87,7 +93,7 @@ describe("daily echo keepsake", () => {
     await screen.findByText("请稍后重试");
     expect(screen.queryByRole("dialog", { name: "今日回响" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "查看打卡纪念卡" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "每日回响" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "每日回响" })).toBeInTheDocument();
   });
 
   it("opens on the first successful save even when today's record already exists", async () => {
@@ -174,9 +180,9 @@ describe("daily echo keepsake", () => {
     expect(screen.getByRole("region", { name: "每日回响" })).toBeInTheDocument();
   });
 
-  it("keeps the received words after closing, refreshing, and switching modes, isolated by account", async () => {
+  it("keeps today's words visible after closing, refreshing, switching modes, and switching accounts", async () => {
     let user = setup();
-    expect(screen.queryByRole("region", { name: "每日回响" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "每日回响" })).toBeInTheDocument();
     await save(user);
     await screen.findByRole("dialog", { name: "今日回响" });
     await user.keyboard("{Escape}");
@@ -197,22 +203,24 @@ describe("daily echo keepsake", () => {
     expect(screen.getByRole("region", { name: "每日回响" })).toHaveTextContent(words!);
     cleanup();
     setup({ accountId: "another-user" });
-    expect(screen.queryByRole("region", { name: "每日回响" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "每日回响" })).toHaveTextContent(words!);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("keeps the previous receipt until today's successful save replaces it", async () => {
+  it("shows today's words before saving even when the previous receipt belongs to an older day", async () => {
     window.localStorage.setItem("aura-daily-echo-shown:echo-user", "2026-01-01");
     const user = setup();
     const companion = await screen.findByRole("region", { name: "每日回响" });
-    expect(companion.querySelector("time")).toHaveAttribute("dateTime", "2026-01-01");
+    expect(companion.querySelector("time")).toHaveAttribute("dateTime", today);
+    const words = within(companion).getByRole("heading").textContent!;
+    expect(within(companion).queryByRole("button", { name: "查看完整回响" })).not.toBeInTheDocument();
     await save(user);
-    await screen.findByRole("dialog", { name: "今日回响" });
+    expect(await screen.findByRole("dialog", { name: "今日回响" })).toHaveTextContent(words);
     await user.keyboard("{Escape}");
     expect(screen.getByRole("region", { name: "每日回响" }).querySelector("time")).toHaveAttribute("dateTime", today);
   });
 
-  it("does not replace the current receipt when viewing a historical card", async () => {
-    window.localStorage.setItem("aura-daily-echo-shown:echo-user", today);
+  it("keeps today's words visible while viewing a historical card, even without a previous receipt", async () => {
     const user = setup({ date: "2026-01-01", existing: [record("2026-01-01")] });
     const reopen = await screen.findByRole("button", { name: "查看打卡纪念卡" });
     await waitFor(() => expect(reopen).toBeEnabled());
@@ -244,6 +252,6 @@ describe("daily echo keepsake", () => {
     window.localStorage.setItem("aura-daily-echo-shown:echo-user", value);
     setup();
     await screen.findByLabelText("今日知识主题");
-    expect(screen.queryByRole("region", { name: "每日回响" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "每日回响" }).querySelector("time")).toHaveAttribute("dateTime", today);
   });
 });
