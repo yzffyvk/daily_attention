@@ -10,6 +10,7 @@ import {
   type AiUsage,
   type AiSummaryProvider,
   type AiSummaryProviderResult,
+  type AiValidationAudit,
 } from "./contracts.ts";
 
 import { structuredSummarySchema, serializeStructuredSummary, hasSourceEvidence, parseKnowledgeStructure } from "../../../../lib/domain/knowledge-structure.ts";
@@ -54,11 +55,18 @@ export class DeepSeekProviderError extends Error {
 class StructuredOutputError extends DeepSeekProviderError {
   readonly content: string;
   readonly feedback: string;
-  constructor(content: string, feedback: string, usage: AiUsage) {
+  readonly validation: Pick<AiValidationAudit, 'reason' | 'issues'>;
+  constructor(content: string, feedback: string, usage: AiUsage, validation: Pick<AiValidationAudit, 'reason' | 'issues'> = { reason: 'schema_invalid', issues: [] }) {
     super("MODEL_OUTPUT_INVALID", true, { usage, providerCallCount: 1 });
     this.content = content;
     this.feedback = feedback;
+    this.validation = validation;
   }
+}
+
+function validationFields(issues: readonly { path: PropertyKey[]; code: string }[]) {
+  // Schema paths/codes only: never put source text or generated prose in logs.
+  return issues.slice(0, 20).map(issue => ({ path: issue.path.map(String).join('.'), code: issue.code }));
 }
 
 function addUsage(first?: AiUsage, second?: AiUsage): AiUsage {
@@ -384,38 +392,46 @@ export function createDeepSeekProvider(config: {
         // Still use the single bounded non-thinking repair, without forwarding reasoning.
         throw new StructuredOutputError(content, content.trim()
           ? "输出达到 token 上限，JSON 被截断。请根据原始资料与已有结构重新输出完整、紧凑的 JSON。"
-          : "输出额度在正文生成前耗尽，尚未返回 JSON。请直接依据原始资料输出完整、紧凑的 JSON。", used);
+          : "输出额度在正文生成前耗尽，尚未返回 JSON。请直接依据原始资料输出完整、紧凑的 JSON。", used, { reason: 'output_truncated', issues: [] });
       }
       if (choice.finish_reason !== "stop" || !choice.message.content?.trim()) {
         return responseError("MODEL_OUTPUT_INVALID", true);
       }
 
       let generatedJson = parseJson(choice.message.content);
+      if (generatedJson === null && usesStructure) {
+        await auditReview('invalid', 0);
+        throw new StructuredOutputError(choice.message.content, '返回内容不是完整的 JSON 对象，请返回完整合法 JSON。', used, { reason: 'json_invalid', issues: [] });
+      }
       if (stage.kind === 'semantic-review') {
         const reviewed = semanticReviewSchema.safeParse(generatedJson);
         const feedback = reviewed.success ? semanticReviewFeedback(reviewed.data, stage.draft, indexedSource!.resolve) : [JSON.stringify(reviewed.error.issues)];
         await auditReview(reviewed.success && !feedback.length ? reviewed.data.verdict : 'invalid', reviewed.success ? reviewed.data.issues.length : 0);
-        if (!reviewed.success || feedback.length) throw new StructuredOutputError(choice.message.content, feedback.join('\n'), used);
+        if (!reviewed.success || feedback.length) throw new StructuredOutputError(choice.message.content, feedback.join('\n'), used, { reason: 'schema_invalid', issues: reviewed.success ? [] : validationFields(reviewed.error.issues) });
         return { review: reviewed.data, usage: used, providerCallCount: 1, model: parsedResponse.data.model, systemFingerprint: parsedResponse.data.system_fingerprint ?? null };
       }
       if (isPlanning) {
         const planned = questionFrameworkSchema.safeParse(generatedJson);
-        if (!planned.success) throw new StructuredOutputError(choice.message.content, JSON.stringify(planned.error.issues), used);
+        if (!planned.success) throw new StructuredOutputError(choice.message.content, JSON.stringify(planned.error.issues), used, { reason: 'schema_invalid', issues: validationFields(planned.error.issues) });
         const missing = planned.data.parts.flatMap(part => [part, ...part.concepts]).filter(item => !indexedSource?.resolve(item.evidence));
-        if (missing.length) throw new StructuredOutputError(choice.message.content, '骨架引用必须选择 source.text 中实际存在的单个片段编号，不得编造依据。', used);
+        if (missing.length) throw new StructuredOutputError(choice.message.content, '骨架引用必须选择 source.text 中实际存在的单个片段编号，不得编造依据。', used, { reason: 'source_invalid', issues: [{ path: 'parts.evidence', code: 'unknown_source_id' }] });
         return { framework: planned.data, usage: used, providerCallCount: 1, model: parsedResponse.data.model, systemFingerprint: parsedResponse.data.system_fingerprint ?? null };
       }
       if (usesQuestions) {
         if (stage.framework && !stage.revision) generatedJson = bindQuestionFramework(generatedJson, stage.framework);
         const structured = generatedQuestionSummarySchema.safeParse(normalizeQuestionViews(generatedJson));
-        if (!structured.success) throw new StructuredOutputError(choice.message.content, JSON.stringify(structured.error.issues), used);
+        if (!structured.success) throw new StructuredOutputError(choice.message.content, JSON.stringify(structured.error.issues), used, { reason: 'schema_invalid', issues: validationFields(structured.error.issues) });
         const resolveCitation = sourceCitationResolver(parsedInput.data.sourceText);
         const normalize = (text: string) => text.normalize("NFKC").replace(/\s+/gu, "");
         const original = normalize(parsedInput.data.sourceText);
         const feedback: string[] = stage.framework && !stage.revision ? questionFrameworkFeedback(structured.data, stage.framework) : [];
+        let reason: AiValidationAudit['reason'] = feedback.length ? 'framework_mismatch' : 'roundtrip_mismatch';
+        const invalidEvidence: AiValidationAudit['issues'] = [];
         for (const key of ["questions", "nodes", "relations"] as const) structured.data.structure[key].forEach((item, index) => {
           item.evidence = indexedSource?.resolve(item.evidence) ?? resolveCitation(item.evidence);
           if (!original.includes(normalize(item.evidence))) {
+            reason = 'source_invalid';
+            invalidEvidence.push({ path: `structure.${key}.${index}.evidence`, code: 'evidence_not_in_source' });
             const nearby = nearbySourceExcerpts(item.evidence, parsedInput.data.sourceText);
             feedback.push(`structure.${key}[${index}].evidence 未在原文中找到。只复制支持该命题的连续原文，不得拼接改写。${nearby.length ? `可核对的不可信原文片段：${JSON.stringify(nearby)}` : ""}`);
           }
@@ -423,7 +439,7 @@ export function createDeepSeekProvider(config: {
         if (parsedInput.data.sourceTruncated) structured.data.warnings = [...new Set([SOURCE_TRUNCATION_NOTICE, ...structured.data.warnings])];
         const summary = serializeQuestionSummary(structured.data);
         if (JSON.stringify(parseQuestionSummary(summary)) !== JSON.stringify(structured.data)) feedback.push("问题结构无法完整往返解析，检查标识、视图归属和引用，不得丢掉问题或关系。");
-        if (feedback.length) throw new StructuredOutputError(choice.message.content, feedback.join("\n"), used);
+        if (feedback.length) throw new StructuredOutputError(choice.message.content, feedback.join("\n"), used, { reason, issues: invalidEvidence });
         generatedJson = { attention: structured.data.attention, summary, inspiration: "", sourceTitle: structured.data.sourceTitle, warnings: structured.data.warnings };
       }
       if (usesRelations) {
@@ -476,6 +492,11 @@ export function createDeepSeekProvider(config: {
           providerCallCount += result.providerCallCount;
           return result;
         } catch (error) {
+          if (error instanceof StructuredOutputError && input.onValidationFailure) {
+            const auditStage = stage.kind === 'framework' ? 'framework' : stage.kind === 'semantic-review' ? 'review' : stage.revision ? 'revision' : 'writing';
+            try { await input.onValidationFailure({ stage: auditStage, repair: Boolean(repair), ...error.validation }); }
+            catch { /* Diagnostics must never replace the original generation outcome. */ }
+          }
           if (error instanceof DeepSeekProviderError) {
             usage = addUsage(usage, error.usage);
             providerCallCount += error.providerCallCount ?? 1;
