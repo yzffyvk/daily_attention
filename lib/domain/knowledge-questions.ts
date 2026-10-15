@@ -6,7 +6,9 @@ const line = (max: number) => z.string().trim().min(1).max(max).regex(/^[^\r\n]+
 const id = z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/u);
 const ids = (max: number) => z.array(id).max(max);
 export const diagramKinds = ['composition', 'flow', 'causal', 'comparison', 'decision', 'argument', 'timeline', 'concepts', 'problem-solution', 'case'] as const;
-const node = knowledgeStructureSchema.shape.nodes.element.extend({ id, homeQuestionId: id });
+// Explanations are prose, not recall labels. Keep complete paragraphs instead
+// of rejecting a valid long-form draft because a model exceeded a style target.
+const node = knowledgeStructureSchema.shape.nodes.element.extend({ id, homeQuestionId: id, explanation: z.string().trim().min(1) });
 const relation = knowledgeStructureSchema.shape.relations.element.extend({ id, from: id, to: id });
 const view = z.object({
   id, title: line(80), diagramKind: z.enum(diagramKinds), nodeIds: ids(32).min(1), relationIds: ids(48),

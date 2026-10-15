@@ -28,6 +28,19 @@ function setup(outputs: unknown[], config: { reviewModel?: string } = {}, before
 }
 
 describe('semantic acceptance of finished recall documents', () => {
+  it('delivers a complete long explanation without rejecting it or paying for a format rewrite', async () => {
+    const draft = questionSummaryFixture();
+    const explanation = '将实际结果与目标逐项对照，分析差距的原因，再用这些反馈调整下一次行动。'.repeat(30);
+    draft.structure.nodes[1].explanation = explanation;
+    const { provider, requests } = setup([framework(), draft, passed()]);
+    const result = await provider.generate(input);
+    const saved = parseQuestionSummary(result.result.summary)!;
+    expect(saved.structure.nodes[1].explanation).toBe(explanation);
+    expect(result.semanticReview?.verdict).toBe('pass');
+    expect(result.providerCallCount).toBe(3);
+    expect(requests[2].model).toBe('deepseek-v4-pro');
+  });
+
   it('requires a separate Pro review of the exact validated document against the full original source', async () => {
     const { provider, requests } = setup([framework(), questionSummaryFixture(), passed()]);
     const audit = vi.fn(), progress = vi.fn();

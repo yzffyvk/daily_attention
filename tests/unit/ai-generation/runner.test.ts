@@ -56,6 +56,18 @@ function ports(overrides: Partial<AiJobRunnerPorts> = {}): AiJobRunnerPorts {
 }
 
 describe("AI job runner", () => {
+  it('associates format diagnostics with the task while keeping logging failures non-fatal', async () => {
+    const audit = { stage: 'writing' as const, repair: false, reason: 'schema_invalid' as const, issues: [{ path: 'structure.nodes.0.role', code: 'invalid_value' }] };
+    const reportValidationFailure = vi.fn().mockRejectedValue(new Error('log unavailable'));
+    const runnerPorts = ports({ reportValidationFailure, generate: async input => {
+      await input.onValidationFailure?.(audit);
+      return generated;
+    } });
+    await expect(runAiJob(job.id, runnerPorts)).resolves.toBe('completed');
+    expect(reportValidationFailure).toHaveBeenCalledWith(job.id, audit);
+    expect(runnerPorts.complete).toHaveBeenCalledOnce();
+  });
+
   it('records reviewer identity against the job and keeps audit failures separate from acceptance', async () => {
     const audit = { stage: 'document' as const, requestedModel: 'deepseek-v4-pro', returnedModel: 'deepseek-flash', round: 1, verdict: 'pass' as const, issueCount: 0, durationMs: 2000, usage: generated.usage };
     const reportSemanticReview = vi.fn().mockRejectedValue(new Error('log unavailable'));

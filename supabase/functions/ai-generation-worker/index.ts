@@ -331,6 +331,9 @@ export function createProductionDependencies(
         target_progress: progress,
       });
     },
+    reportValidationFailure(jobId, audit) {
+      console.warn(JSON.stringify({ event: 'ai_output_validation_failed', jobId, ...audit }));
+    },
     reportSemanticReview(jobId, audit) {
       console.info(JSON.stringify({ event: 'ai_semantic_review', jobId, ...audit }));
     },

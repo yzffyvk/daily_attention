@@ -38,6 +38,13 @@ export type AiReviewAudit = {
   usage: AiUsage;
 };
 
+export type AiValidationAudit = {
+  stage: 'framework' | 'writing' | 'review' | 'revision';
+  repair: boolean;
+  reason: 'output_truncated' | 'json_invalid' | 'schema_invalid' | 'source_invalid' | 'framework_mismatch' | 'roundtrip_mismatch';
+  issues: { path: string; code: string }[];
+};
+
 export type AiSummaryProviderResult = {
   result: AiGenerationResult;
   usage: AiUsage;
@@ -58,5 +65,6 @@ export interface AiSummaryProvider {
     signal?: AbortSignal;
     onProgress?: (progress: AiGenerationProgress) => Promise<void> | void;
     onSemanticReview?: (audit: AiReviewAudit) => Promise<void> | void;
+    onValidationFailure?: (audit: AiValidationAudit) => Promise<void> | void;
   }): Promise<AiSummaryProviderResult>;
 }

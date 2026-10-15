@@ -6,6 +6,7 @@ import type {
   AiSummaryProviderResult,
   AiUsage,
   AiReviewAudit,
+  AiValidationAudit,
 } from "./contracts.ts";
 import { DeepSeekProviderError } from "./deepseek.ts";
 import type { AiGenerationProgress } from "../../../../lib/domain/ai-progress.ts";
@@ -73,6 +74,7 @@ export type AiJobRunnerPorts = {
   anonymousUserId(userId: string): Promise<string>;
   reportProgress?(jobId: string, attemptCount: number, progress: AiGenerationProgress): Promise<void>;
   reportSemanticReview?(jobId: string, audit: AiReviewAudit): Promise<void> | void;
+  reportValidationFailure?(jobId: string, audit: AiValidationAudit): Promise<void> | void;
   generate(input: {
     sourceTitle: string;
     sourceText: string;
@@ -83,6 +85,7 @@ export type AiJobRunnerPorts = {
     signal?: AbortSignal;
     onProgress?: (progress: AiGenerationProgress) => Promise<void>;
     onSemanticReview?: (audit: AiReviewAudit) => Promise<void>;
+    onValidationFailure?: (audit: AiValidationAudit) => Promise<void>;
   }): Promise<AiSummaryProviderResult>;
   complete(input: {
     jobId: string;
@@ -192,6 +195,10 @@ export async function runAiJob(
         promptVersion: job.promptVersion,
         anonymousUserId,
         ...(controller ? { signal: controller.signal } : {}),
+        ...(ports.reportValidationFailure ? { onValidationFailure: async (audit: AiValidationAudit) => {
+          try { await ports.reportValidationFailure!(jobId, audit); }
+          catch { /* Diagnostic availability must not change generation. */ }
+        } } : {}),
         ...(ports.reportSemanticReview ? { onSemanticReview: async (audit: AiReviewAudit) => {
           try { await ports.reportSemanticReview!(jobId, audit); }
           catch { /* Log availability does not change the quality verdict. */ }
