@@ -1,3 +1,4 @@
+import { AI_RESULT_WARNING_LIMIT } from '@/lib/domain/ai-review';
 import { z } from "zod";
 import { writableDateKeySchema } from "@/lib/domain/checkin";
 import { aiUserPromptSchema } from "@/lib/domain/ai-prompt";
@@ -69,7 +70,7 @@ export const aiGenerationResultSchema = z.object({
   summary: z.string().trim().min(1),
   inspiration: z.string().trim().max(2000),
   sourceTitle: z.string().trim().min(1).max(300),
-  warnings: z.array(z.string().trim().min(1).max(500)).max(10),
+  warnings: z.array(z.string().trim().min(1).max(500)).max(AI_RESULT_WARNING_LIMIT),
 }).strict();
 
 export type CreateAiGenerationInput = z.input<typeof createAiGenerationSchema>;

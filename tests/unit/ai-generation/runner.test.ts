@@ -56,6 +56,17 @@ function ports(overrides: Partial<AiJobRunnerPorts> = {}): AiJobRunnerPorts {
 }
 
 describe("AI job runner", () => {
+  it('records reviewer identity against the job and keeps audit failures separate from acceptance', async () => {
+    const audit = { stage: 'document' as const, requestedModel: 'deepseek-v4-pro', returnedModel: 'deepseek-flash', round: 1, verdict: 'pass' as const, issueCount: 0, durationMs: 2000, usage: generated.usage };
+    const reportSemanticReview = vi.fn().mockRejectedValue(new Error('log unavailable'));
+    const runnerPorts = ports({ reportSemanticReview, generate: async input => {
+      await input.onSemanticReview?.(audit);
+      return generated;
+    } });
+    await expect(runAiJob(job.id, runnerPorts)).resolves.toBe('completed');
+    expect(reportSemanticReview).toHaveBeenCalledWith(job.id, audit);
+    expect(runnerPorts.complete).toHaveBeenCalledOnce();
+  });
   it("fences progress by attempt and keeps successful generation when preview storage fails", async () => {
     const progress = { phase: "writing" as const, preview: "正文", updatedAt: new Date().toISOString() };
     const reportProgress = vi.fn().mockRejectedValue(new Error("storage unavailable"));
@@ -112,7 +123,7 @@ describe("AI job runner", () => {
     expect(saved?.result.summary).toContain("后续内容未纳入");
     expect(saved!.result.summary).toContain('知'.repeat(30000));
     expect(saved?.result.warnings[0]).toContain("后续内容未纳入");
-    expect(saved!.result.warnings.length).toBeLessThanOrEqual(10);
+    expect(saved!.result.warnings).toHaveLength(11);
   });
 
   it('adds truncation warnings without breaking the editable question document', async () => {

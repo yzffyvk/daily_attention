@@ -34,6 +34,39 @@ Agent
 afterEach(cleanup);
 
 describe("KnowledgeSummaryView", () => {
+  it('shows pending-review status before reading without hiding it in a collapsed source-warning section', async () => {
+    const document = questionSummaryFixture();
+    document.warnings = ['待核对：已生成学习草稿，仍有内容需要核对。', '待核对：检查：解释只有名称，没有说明如何验证。', '原文只覆盖已提供范围。'];
+    render(<KnowledgeSummaryView value={serializeQuestionSummary(document)} />);
+    const notice = screen.getByRole('note', { name: '提炼结果待核对' });
+    expect(notice).toBeVisible();
+    expect(within(notice).getByText('已生成学习草稿，仍有内容需要核对。')).toBeVisible();
+    await userEvent.setup().click(within(notice).getByText('查看核对提示'));
+    expect(within(notice).getByText('检查：解释只有名称，没有说明如何验证。')).toBeVisible();
+    await userEvent.setup().click(screen.getByRole('button', { name: '展开阅读' }));
+    expect(within(screen.getByRole('dialog')).getByRole('note', { name: '提炼结果待核对' })).toBeVisible();
+  });
+  it('describes review findings with knowledge names rather than internal identifiers', async () => {
+    const document = questionSummaryFixture();
+    document.warnings = ['待核对：已生成学习草稿，骨架仍需核对。', '待核对：q2 的 question/answer 与 n1 的 homeQuestionId 不一致。'];
+    render(<KnowledgeSummaryView value={serializeQuestionSummary(document)} />);
+    const notice = screen.getByRole('note', { name: '提炼结果待核对' });
+    await userEvent.setup().click(within(notice).getByText('查看核对提示'));
+    expect(notice.textContent).toContain('验证行动');
+    expect(notice.textContent).toContain('计划');
+    expect(notice.textContent).not.toMatch(/q2|n1|question|answer|homeQuestionId/u);
+  });
+  it('preserves a legacy mainline explanation when the outline uses its shorter scope label', async () => {
+    const document = questionSummaryFixture();
+    document.structure.questions[0].mainlineRole = '先明确行动，才能为后续检查提供可比较的目标。';
+    render(<KnowledgeSummaryView value={serializeQuestionSummary(document)} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByText('查看完整小结', { exact: true }));
+    const complete = within(screen.getByTestId('complete-summary'));
+    const part = complete.getByRole('heading', { name: '如何安排？' }).closest('li')!;
+    await user.click(within(part).getByText('范围与依据', { exact: true }));
+    expect(within(part).getByText('先明确行动，才能为后续检查提供可比较的目标。', { exact: true })).toBeVisible();
+  });
   it("renders the complete question summary as readable sections without storage tables or identifiers", async () => {
     const document = questionSummaryFixture();
     document.structure.questionOrder.reverse();
@@ -50,6 +83,8 @@ describe("KnowledgeSummaryView", () => {
     expect(complete.queryByText("它属于什么")).not.toBeInTheDocument();
     expect(complete.queryByText("与其他问题的联系")).not.toBeInTheDocument();
     const part = complete.getByRole("heading", { name: "如何检查？" }).closest("li")!;
+    expect(within(part).getByText('检查实际结果，找出差距。', { exact: true })).toBeVisible();
+    expect(within(part).queryByText('列出下一步行动。', { exact: true })).not.toBeInTheDocument();
     await userEvent.setup().click(within(part).getByText("范围与依据", { exact: true }));
     expect(within(part).getByText("本题检查计划的结果。", { exact: true })).toBeVisible();
     expect(within(part).getByText("检查结果用于改进计划", { exact: true })).toBeVisible();

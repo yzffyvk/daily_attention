@@ -7,6 +7,34 @@ import { questionSummaryFixture } from '../../helpers/knowledge-questions-fixtur
 afterEach(cleanup);
 const summary = () => serializeQuestionSummary(questionSummaryFixture());
 describe('question reader', () => {
+  it('shows the complete recall outline in reading order without repeating borrowed concepts', () => {
+    const document = questionSummaryFixture();
+    document.structure.questionOrder.reverse();
+    render(<KnowledgeSummaryView value={serializeQuestionSummary(document)} />);
+    const outline = within(screen.getByRole('region', { name: '记忆骨架' }));
+    const branches = outline.getAllByRole('list', { name: /的记忆线索$/ });
+    expect(branches.map(branch => branch.getAttribute('aria-label'))).toEqual(['验证行动的记忆线索', '明确行动的记忆线索']);
+    expect(within(branches[0]).getByText('检查', { exact: true })).toBeVisible();
+    expect(within(branches[0]).queryByText('计划', { exact: true })).not.toBeInTheDocument();
+    expect(outline.getAllByText('计划', { exact: true })).toHaveLength(1);
+    expect(outline.getByText('安排步骤', { exact: true })).toBeVisible();
+    expect(screen.queryByText('列出下一步行动。', { exact: true })).not.toBeInTheDocument();
+  });
+  it('explains the selected branch in prose without requiring its graph to be opened', async () => {
+    const document = questionSummaryFixture();
+    document.structure.nodes[1].explanation = '先比较 **实际结果** 与目标。\n\n发现差距后，调整下一次行动。';
+    document.prompts = ['只看明确行动、验证行动，能否解释两者如何配合？'];
+    render(<KnowledgeSummaryView value={serializeQuestionSummary(document)} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: '展开核心部分：验证行动' }));
+    const branch = within(screen.getByRole('region', { name: '验证行动' }));
+    expect(branch.getByText('实际结果', { exact: true }).tagName).toBe('STRONG');
+    expect(branch.getByText('发现差距后，调整下一次行动。', { exact: true }).tagName).toBe('P');
+    expect(branch.queryByText('列出下一步行动。', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: '骨架节点' })).not.toBeInTheDocument();
+    await user.click(screen.getByText('试着讲一遍', { exact: true }));
+    expect(screen.getByText(document.prompts[0], { exact: true })).toBeVisible();
+  });
   it('starts with the whole framework and reveals questions and diagrams only on demand', async () => {
     const user = userEvent.setup(); render(<KnowledgeSummaryView value={summary()} />);
     expect(screen.getByRole('heading', { name: '先明确行动，再检查结果。' })).toBeVisible();
@@ -90,12 +118,13 @@ describe('question reader', () => {
     expect(screen.queryByRole('group', { name: '骨架节点' })).not.toBeInTheDocument();
     expect(screen.getByText(/新增限定：仅用于这个实验/)).toBeVisible();
   });
-  it('includes the final question evidence in a single-question fullscreen keyboard loop', async () => {
+  it('includes the recall entry after the final question evidence in the fullscreen keyboard loop', async () => {
     const v = questionSummaryFixture(); v.structure.questions.pop(); v.structure.nodes.pop(); v.structure.questionOrder = ['q1']; v.structure.relations = []; v.structure.questionLinks = [];
     const user = userEvent.setup(); render(<KnowledgeSummaryView value={serializeQuestionSummary(v)} />);
     await user.click(screen.getByRole('button', { name: '展开阅读' }));
     await user.click(screen.getByRole('button', { name: '展开核心部分：明确行动' }));
     screen.getByText('查看本题原文依据').focus();
+    await user.tab(); expect(screen.getByText('试着讲一遍', { exact: true })).toHaveFocus();
     await user.tab(); expect(screen.getByRole('button', { name: '关闭全屏阅读' })).toHaveFocus();
   });
 });

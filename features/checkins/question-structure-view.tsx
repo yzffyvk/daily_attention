@@ -6,16 +6,21 @@ import { projectQuestionView, type QuestionStructure } from '@/lib/domain/knowle
 import { QuestionStructureMap } from './question-structure-map';
 import { KnowledgeEdgeDetail } from './knowledge-structure-detail';
 import { StructureReaderDialog } from './structure-reader-dialog';
+import { QuestionMemoryOutline, QuestionPartExplanation, questionReadingParts, SummaryText } from './question-reading';
+import { PendingReviewNotice } from './pending-review-notice';
+import { PENDING_REVIEW_PREFIX } from '@/lib/domain/ai-review';
 
 type Selection = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | null;
-type Props = { structure: QuestionStructure; title?: string; thesis?: string; warnings?: string[] };
+type Props = { structure: QuestionStructure; title?: string; thesis?: string; warnings?: string[]; prompts?: string[] };
 
 export function QuestionStructureView(props: Props) {
   return <QuestionReader key={JSON.stringify(props.structure)} {...props} />;
 }
 
-function QuestionReader({ structure: s, thesis, warnings = [] }: Props) {
-  const ordered = s.questionOrder.map(id => s.questions.find(q => q.id === id)!);
+function QuestionReader({ structure: s, thesis, warnings = [], prompts = [] }: Props) {
+  const parts = questionReadingParts(s);
+  const sourceWarnings = warnings.filter(warning => !warning.startsWith(PENDING_REVIEW_PREFIX));
+  const ordered = parts.map(part => part.question);
   const [questionId, setQuestionId] = useState<string | null>(null);
   const [viewId, setViewId] = useState(ordered[0].views[0].id);
   const [selection, setSelection] = useState<Selection>(null);
@@ -62,14 +67,13 @@ function QuestionReader({ structure: s, thesis, warnings = [] }: Props) {
       <h4>{thesis || s.coreQuestion}</h4>
       {thesis ? <p>{s.coreQuestion}</p> : null}
     </div>
-    {warnings.length ? <details className="question-warnings"><summary>资料范围与提醒（{warnings.length}）</summary>{warnings.map((warning, i) => <p key={i}>{warning}</p>)}</details> : null}
-    <p className="question-framework-hint">先记住这几个核心部分，点开再理解。</p>
+    <PendingReviewNotice warnings={warnings} structure={s} />
+    {sourceWarnings.length ? <details className="question-warnings"><summary>资料范围与提醒（{sourceWarnings.length}）</summary>{sourceWarnings.map((warning, i) => <p key={i}>{warning}</p>)}</details> : null}
+    <QuestionMemoryOutline parts={parts} />
+    <p className="question-framework-hint">沿着同一骨架，展开原理、例子与适用条件。</p>
     <div className="question-sections" aria-label="全文记忆框架">
-      {ordered.map((q) => {
+      {parts.map(({ question: q, label, nodes }) => {
         const open = q.id === questionId;
-        // Older documents used a sentence about the section's role here. Their
-        // existing scope is a better topic label than that editorial sentence.
-        const label = /[。！？：]/u.test(q.mainlineRole) || q.mainlineRole.length > 18 ? q.scope : q.mainlineRole;
         const headingId = `${prefix}-question-${q.id}`, bodyId = `${prefix}-answer-${q.id}`;
         return <section key={q.id} className="question-section" data-open={open}>
           <h5 id={headingId}><button type="button" className="question-section-toggle" aria-label={`展开核心部分：${label}`} aria-expanded={open} aria-controls={open ? bodyId : undefined} onClick={() => {
@@ -77,7 +81,8 @@ function QuestionReader({ structure: s, thesis, warnings = [] }: Props) {
           }}><span className="question-framework-marker" aria-hidden="true" /><span>{label}</span><ChevronDown size={19} aria-hidden="true" /></button></h5>
           {open ? <div id={bodyId} role="region" aria-labelledby={headingId} className="question-section-body">
             <h6 className="question-learning-question">{q.title}</h6>
-            <p className="question-direct-answer">{q.answer}</p>
+            <p className="question-direct-answer"><SummaryText value={q.answer} /></p>
+            <QuestionPartExplanation nodes={nodes} />
             <button type="button" className="question-diagram-toggle" aria-expanded={diagramOpen} aria-controls={diagramOpen ? `${bodyId}-diagram` : undefined} onClick={() => { setDiagramOpen(!diagramOpen); setSelection(null); }}>{diagramOpen ? '收起简图' : '查看简图'}<ChevronDown size={16} aria-hidden="true" /></button>
             {diagramOpen ? <div id={`${bodyId}-diagram`}>
             {q.views.length > 1 ? <div className="question-views" role="group" aria-label="本题局部视图">{q.views.map(v => <button type="button" key={v.id} aria-pressed={view.id === v.id} onClick={() => { setViewId(v.id); setSelection(null); setRelationStep(0); }}>{v.title}</button>)}</div> : null}
@@ -98,6 +103,7 @@ function QuestionReader({ structure: s, thesis, warnings = [] }: Props) {
         </section>;
       })}
     </div>
+    {prompts.length ? <details className="question-recall"><summary tabIndex={0}>试着讲一遍</summary><ol>{prompts.map((prompt, index) => <li key={index}><SummaryText value={prompt} /></li>)}</ol></details> : null}
   </div>;
   return expanded ? <StructureReaderDialog restoreFocus={restoreFocus} onClose={() => setExpanded(false)}>{content}</StructureReaderDialog> : content;
 }

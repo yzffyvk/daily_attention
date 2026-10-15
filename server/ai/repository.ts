@@ -1,6 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
+import { AI_RESULT_WARNING_LIMIT } from '@/lib/domain/ai-review';
 import type { AiCancellationInfo, AiGenerationQuota, AiGenerationStatus } from "@/features/ai-generation/types";
 import { dateKeySchema } from "@/lib/domain/checkin";
 import { aiUserPromptSchema } from "@/lib/domain/ai-prompt";
@@ -32,7 +33,7 @@ const jobSchema = z.object({
   attention: z.string().max(120).nullable(),
   summary: z.string().nullable(),
   inspiration: z.string().max(2000).nullable(),
-  warnings: z.array(z.string()).max(10),
+  warnings: z.array(z.string()).max(AI_RESULT_WARNING_LIMIT),
   error_code: z.string().max(80).nullable(),
   error_message: z.string().nullable(),
   provider: z.string().min(1),

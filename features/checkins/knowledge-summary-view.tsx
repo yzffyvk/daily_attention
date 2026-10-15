@@ -68,7 +68,7 @@ export function KnowledgeSummaryView({ value, title }: { value: string; title?: 
   return (
     <div className="knowledge-summary-view">
       {!document.questions && document.thesis ? <p className="knowledge-thesis">{document.thesis}</p> : null}
-      {document.questions ? <QuestionStructureView structure={document.questions.structure} title={title} thesis={document.thesis} warnings={document.questions.warnings} /> : document.structure ? <>
+      {document.questions ? <QuestionStructureView structure={document.questions.structure} title={title} thesis={document.thesis} warnings={document.questions.warnings} prompts={document.questions.prompts} /> : document.structure ? <>
         {document.unmapped ? <div className="knowledge-structure-notes"><KnowledgeText value={document.unmapped} /></div> : null}
         <KnowledgeStructureView structure={document.structure} title={title} />
       </> : selected ? (
