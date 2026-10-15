@@ -949,7 +949,7 @@ export function CheckInWorkspace({
           }}
           today={today}
         />
-        {receivedEchoDate ? <DailyEchoCompanion date={receivedEchoDate} today={today} onOpen={() => openDailyEcho(receivedEchoDate)} /> : null}
+        <DailyEchoCompanion date={today} onOpen={receivedEchoDate === today ? () => openDailyEcho(today) : undefined} />
         {knowledgeOpen ? <KnowledgeWorkspace today={today} entryMode={entryMode} emptyIllustration={<CurrentLearningPersona initialProfile={initialProfile} />} leaveGuardRef={knowledgeLeaveGuard} listNavigationRef={knowledgeListNavigation} userId={userId ?? initialProfile?.id ?? "current-user"} onClose={() => {
           setKnowledgeOpen(false);
           requestAnimationFrame(() => document.getElementById("knowledge-entry")?.focus());

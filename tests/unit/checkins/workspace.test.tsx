@@ -2213,6 +2213,7 @@ describe("CheckInWorkspace", () => {
 
     expect(screen.getByText(formatDate(browserToday), { selector: ".editor-date" })).toBeVisible();
     expect(screen.getByRole("button", { name: new RegExp(`${formatCalendarDate(browserToday)}.*今天`) })).toHaveClass("today");
+    expect(screen.getByRole("region", { name: "每日回响" }).querySelector("time")).toHaveAttribute("dateTime", browserToday);
   });
 
   it("advances the Beijing day at midnight without replacing an unsaved draft", async () => {
@@ -2253,6 +2254,9 @@ describe("CheckInWorkspace", () => {
     const attention = screen.getByLabelText("今日知识主题");
     expect(attention).toBeEnabled();
     fireEvent.change(attention, { target: { value: "跨过午夜也不能丢" } });
+    const companion = screen.getByRole("region", { name: "每日回响" });
+    const oldWords = within(companion).getByRole("heading").textContent;
+    expect(companion.querySelector("time")).toHaveAttribute("dateTime", oldToday);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(nextMidnight.getTime() - beforeMidnight.getTime() + 1);
@@ -2260,6 +2264,9 @@ describe("CheckInWorkspace", () => {
 
     expect(attention).toHaveValue("跨过午夜也不能丢");
     expect(screen.getByText(formatDate(oldToday), { selector: ".editor-date" })).toBeVisible();
+    expect(companion.querySelector("time")).toHaveAttribute("dateTime", nextToday);
+    expect(within(companion).getByRole("heading").textContent).not.toBe(oldWords);
+    expect(screen.queryByRole("dialog", { name: "今日回响" })).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", {
         name: new RegExp(`${formatCalendarDate(nextToday)}.*今天`),
