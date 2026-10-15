@@ -26,16 +26,17 @@ describe("knowledge narrative API lifecycle",()=>{
   it("preserves owned source snapshots through generation, rename, refresh and source changes",async()=>{
     const anonymous=new ApiSession();expect((await anonymous.get("/api/knowledge-narratives")).status).toBe(401);
     const owner=await account(); const other=await account();
-    const note={attention:"记录与复盘",summary:"原始版本的知识",inspiration:"寻找联系",sourceUrl:"",imagePath:null,imageName:"",version:null};
-    for(const date of narrativeDates) expect((await owner.session.put(`/api/checkins/${date}`,note)).status).toBe(200);
-    const input={dates:[...narrativeDates].reverse(),question:"如何形成理解？",idempotencyKey:crypto.randomUUID()};
+    const recordIds=narrativeDates.map(()=>crypto.randomUUID());
+    const note={entryMode:"manual",status:"completed",attention:"记录与复盘",summary:"原始版本的知识",inspiration:"寻找联系",sourceUrl:"",imagePath:null,imageName:""};
+    for(const [index,id] of recordIds.entries()) expect((await owner.session.post("/api/records",{...note,id,date:narrativeDates[0],entryMode:index===1?"ai":"manual"})).status).toBe(201);
+    const input={recordIds:[...recordIds].reverse(),question:"如何形成理解？",idempotencyKey:crypto.randomUUID()};
     const created=await owner.session.post("/api/knowledge-narratives",input);expect(created.status).toBe(202);
     const job=created.body.data;expect(job.status).toBe("queued");expect(job.sources[0].summary).toBe(note.summary);
     const retry=await owner.session.post("/api/knowledge-narratives",input);expect(retry.body.data.id).toBe(job.id);
     expect((await other.session.get(`/api/knowledge-narratives/${job.id}`)).status).toBe(404);
     expect((await other.session.get("/api/knowledge-narratives")).body.data).toEqual([]);
     expect((await other.session.post("/api/knowledge-narratives",{...input,idempotencyKey:crypto.randomUUID()})).status).toBe(422);
-    expect((await owner.session.put(`/api/checkins/${narrativeDates[0]}`,{...note,version:1,summary:"更新后的知识"})).status).toBe(200);
+    expect((await owner.session.request(`/api/records/${recordIds[0]}`,{method:"PATCH",body:JSON.stringify({...note,version:1,summary:"更新后的知识"})})).status).toBe(200);
     const updated=await owner.session.get(`/api/knowledge-narratives/${job.id}`);
     expect(updated.body.data.changedDates).toEqual([narrativeDates[0]]);expect(updated.body.data.sources[0].summary).toBe(note.summary);
 
@@ -48,17 +49,20 @@ describe("knowledge narrative API lifecycle",()=>{
     expect(leased.error).toBeNull();
     const env:Record<string,string>={NEXT_PUBLIC_SUPABASE_URL:url,SUPABASE_SECRET_KEY:process.env.TEST_SUPABASE_SECRET_KEY!,AI_USER_ID_PEPPER:"integration-narrative-pepper-of-32-characters",DEEPSEEK_API_KEY:"unused-fixture-key"};
     const worker=createNarrativeWorker(name=>env[name]);
-    const provider=createNarrativeProvider({apiKey:"unused-fixture-key",fetchImpl:async()=>Response.json({choices:[{finish_reason:"stop",message:{content:JSON.stringify(knowledgeMapFixture())}}]})});
+    const legacyMap=knowledgeMapFixture();
+    const referenceIds=(dates:string[])=>dates.map(date=>recordIds[narrativeDates.indexOf(date)]);
+    const recordMap={...legacyMap,schemaVersion:3,concepts:legacyMap.concepts.map(({sourceDates,...concept})=>({...concept,sourceRecordIds:referenceIds(sourceDates)})),connections:legacyMap.connections.map(({sourceDates,...connection})=>({...connection,sourceRecordIds:referenceIds(sourceDates)}))};
+    const provider=createNarrativeProvider({apiKey:"unused-fixture-key",fetchImpl:async()=>Response.json({choices:[{finish_reason:"stop",message:{content:JSON.stringify(recordMap)}}]})});
     await runNarrativeJob({...worker,claim:async()=>({id:job.id,userId:owner.userId,claimToken,sources:job.sources,question:job.question}),generate:input=>provider.generate(input)});
     const completed=await owner.session.get(`/api/knowledge-narratives/${job.id}`);
-    expect(completed.status).toBe(200);expect(completed.body.data.status).toBe("succeeded");expect(completed.body.data.result.mode).toBe("concept_map");expect(completed.body.data.result.concepts.flatMap((concept:{sourceDates:string[]})=>concept.sourceDates)).toEqual(narrativeDates);
+    expect(completed.status).toBe(200);expect(completed.body.data.status).toBe("succeeded");expect(completed.body.data.result.mode).toBe("concept_map");expect(completed.body.data.result.concepts.flatMap((concept:{sourceRecordIds:string[]})=>concept.sourceRecordIds).sort()).toEqual([...recordIds].sort());
     const renamed=await owner.session.request(`/api/knowledge-narratives/${job.id}`,{method:"PATCH",body:JSON.stringify({title:"我的第一条知识脉络"})});
     expect(renamed.status).toBe(200);expect(renamed.body.data.title).toBe("我的第一条知识脉络");
     expect((await owner.session.get("/api/knowledge-narratives")).body.data[0]).toMatchObject({id:job.id,title:"我的第一条知识脉络",status:"succeeded"});
     expect((await other.session.request(`/api/knowledge-narratives/${job.id}`,{method:"PATCH",body:JSON.stringify({title:"不可覆盖"})})).status).toBe(404);
     const editedResult={...renamed.body.data.result,title:"我的知识地图",overview:"用自己的话改写 AI 总结。"};
     const editBody={result:editedResult,expectedUpdatedAt:renamed.body.data.updatedAt};
-    const invalidResult={...editedResult,concepts:editedResult.concepts.map((concept:object,index:number)=>index===0?{...concept,sourceDates:["2026-09-03"]}:concept)};
+    const invalidResult={...editedResult,concepts:editedResult.concepts.map((concept:object,index:number)=>index===0?{...concept,sourceRecordIds:[crypto.randomUUID()]}:concept)};
     expect((await owner.session.request(`/api/knowledge-narratives/${job.id}`,{method:"PATCH",body:JSON.stringify({...editBody,result:invalidResult})})).status).toBe(422);
     const edited=await owner.session.request(`/api/knowledge-narratives/${job.id}`,{method:"PATCH",body:JSON.stringify(editBody)});
     expect(edited.status).toBe(200);expect(edited.body.data.result).toEqual(editedResult);

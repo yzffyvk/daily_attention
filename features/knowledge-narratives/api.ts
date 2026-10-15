@@ -2,7 +2,7 @@ import type { CheckInEntryMode } from "@/lib/domain/checkin";
 import { requestApi } from "@/features/checkins/api";
 import type { KnowledgeNarrative, NarrativeResult, NarrativeSummary } from "@/lib/domain/knowledge-narrative";
 
-export type CreateNarrativeInput = { entryMode?: CheckInEntryMode; dates: string[]; question: string; idempotencyKey: string };
+export type CreateNarrativeInput = { entryMode?: CheckInEntryMode; dates: string[]; recordIds?: never; question: string; idempotencyKey: string } | { recordIds:string[]; dates?:never; entryMode?:never; question:string; idempotencyKey:string };
 export const getNarratives = () => requestApi<NarrativeSummary[]>("/api/knowledge-narratives");
 export const getNarrative = (id: string) => requestApi<KnowledgeNarrative>(`/api/knowledge-narratives/${encodeURIComponent(id)}`);
 export const createNarrative = (input: CreateNarrativeInput) => requestApi<KnowledgeNarrative>("/api/knowledge-narratives", { method: "POST", body: JSON.stringify(input) });

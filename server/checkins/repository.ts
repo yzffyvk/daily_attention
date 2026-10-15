@@ -68,28 +68,40 @@ export function createCheckInRepository(
         .eq("user_id", userId)
         .eq("checkin_date", date)
         .eq("entry_mode", entryMode)
-        .maybeSingle();
+        .limit(2);
       if (error) throw error;
-      return data ? mapRecord(data) : null;
+      if (data && data.length > 1) throw new Error("CLIENT_UPGRADE_REQUIRED");
+      return data?.[0] ? mapRecord(data[0]) : null;
     },
 
     async findByMonth(userId, month) {
-      const { data, error } = await supabase
-        .from("check_ins")
-        .select("checkin_date, entry_mode, attention, image_path, version, updated_at")
-        .eq("user_id", userId)
-        .gte("checkin_date", `${month}-01`)
-        .lt("checkin_date", `${nextMonth(month)}-01`)
-        .order("checkin_date", { ascending: true });
-      if (error) throw error;
-      return (data ?? []).map((row) => ({
-        date: row.checkin_date,
-        entryMode: checkInEntryModeSchema.parse(row.entry_mode ?? "manual"),
-        attention: row.attention,
-        hasImage: row.image_path !== null,
-        version: row.version,
-        updatedAt: row.updated_at,
-      }));
+      const pageSize = 500;
+      const summaries: CheckInSummary[] = [];
+      for (let offset = 0; ; offset += pageSize) {
+        const { data, error } = await supabase
+          .from("check_ins")
+          .select("id, checkin_date, entry_mode, attention, image_path, version, updated_at, learning_status, album_id, created_at")
+          .eq("user_id", userId)
+          .gte("checkin_date", `${month}-01`)
+          .lt("checkin_date", `${nextMonth(month)}-01`)
+          .order("checkin_date", { ascending: true })
+          .order("id", { ascending: true })
+          .range(offset, offset + pageSize - 1);
+        if (error) throw error;
+        summaries.push(...(data ?? []).map<CheckInSummary>((row) => ({
+          id: row.id,
+          status: row.learning_status === "pending" ? "pending" : "completed",
+          albumId: row.album_id ?? null,
+          createdAt: row.created_at,
+          date: row.checkin_date,
+          entryMode: checkInEntryModeSchema.parse(row.entry_mode ?? "manual"),
+          attention: row.attention,
+          hasImage: row.image_path !== null,
+          version: row.version,
+          updatedAt: row.updated_at,
+        })));
+        if (!data || data.length < pageSize) return summaries;
+      }
     },
 
     async getStats(today) {

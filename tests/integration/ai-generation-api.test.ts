@@ -49,7 +49,7 @@ describe("AI generation API", () => {
     const input = { ...generation(81), userPrompt: "  聚焦实现细节  " };
     const first = await owner.session.post("/api/ai/generations", input);
     expect(first.status).toBe(202);
-    const generationContext = { userPrompt: "聚焦实现细节", promptVersion: "knowledge-questions-v1" };
+    const generationContext = { userPrompt: "聚焦实现细节", promptVersion: "knowledge-recall-v2" };
     expect(first.body.data.generationContext).toEqual(generationContext);
     const repeated = await owner.session.post("/api/ai/generations", { ...input, userPrompt: "聚焦实现细节" });
     expect(repeated.status).toBe(202);
@@ -102,7 +102,7 @@ describe("AI generation API", () => {
     const cancelled = await owner.session.request(`/api/ai/generations/${jobId}`, { method: "DELETE" });
     expect(cancelled.status).toBe(200);
     expect(cancelled.body.data.status).toBe("cancelled");
-    expect((await owner.session.request(`/api/ai/generations/${jobId}`, { method: "DELETE" })).status).toBe(409);
+    expect((await owner.session.request(`/api/ai/generations/${jobId}`, { method: "DELETE" })).status).toBe(200);
 
     expect((await owner.session.post("/api/ai/generations", generation(7))).status).toBe(202);
   });

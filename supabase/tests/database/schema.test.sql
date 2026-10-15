@@ -78,7 +78,7 @@ select function_returns(
   'public.profiles'
 );
 select has_column('public', 'check_ins', 'version', 'check-ins have a version');
-select has_index('public', 'check_ins', 'check_ins_user_date_mode_key', 'one record per user, date and mode');
+select hasnt_index('public', 'check_ins', 'check_ins_user_date_mode_key', 'multiple records per user date and mode are supported');
 select ok(exists (
   select 1
   from pg_constraint c
@@ -187,12 +187,10 @@ select throws_ok(
   'new row for relation "check_ins" violates check constraint "check_ins_attention_check"',
   'check-ins reject blank attention'
 );
-select throws_ok(
+select lives_ok(
   $$insert into public.check_ins (user_id, checkin_date, attention, source_url)
     values ('00000000-0000-0000-0000-000000000201', '2026-07-25', 'Valid attention', 'ftp://example.com')$$,
-  '23514',
-  'new row for relation "check_ins" violates check constraint "check_ins_source_url_check"',
-  'check-ins reject non-HTTP source URLs'
+  'check-ins retain non-HTTP sources as text'
 );
 select throws_ok(
   $$insert into public.check_ins (user_id, checkin_date, attention, image_path)

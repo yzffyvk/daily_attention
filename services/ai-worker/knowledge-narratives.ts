@@ -22,7 +22,7 @@ export async function runNarrativeJob(ports:NarrativeWorkerPorts) {
   try {
     const anonymousUserId=await ports.anonymousUserId(job.userId);
     const generated=await ports.generate({sources:job.sources,question:job.question,anonymousUserId});
-    result=validateNarrativeResult(generated,job.sources.map(source=>source.date));
+    result=validateNarrativeResult(generated,job.sources.map(source=>source.date),job.sources.flatMap(source=>source.id?[source.id]:[]));
   } catch(error) {
     errorCode=error instanceof DeepSeekProviderError ? error.code : "MODEL_SERVICE_ERROR";
     retryable=error instanceof DeepSeekProviderError ? error.retryable : true;
@@ -43,6 +43,9 @@ export function createNarrativeWorker(readEnvironment:(name:string)=>string|unde
   const provider:ReturnType<typeof createNarrativeProvider>=mode==="fake" ? {
     async generate(input:{sources:NarrativeSource[]}):Promise<NarrativeResult>{
       const sources=[...input.sources].sort((a,b)=>a.date.localeCompare(b.date));
+      if(sources.every(source=>Boolean(source.id))) return {
+        schemaVersion:3,mode:"source_records",title:"测试环境的学习记录",reason:"insufficient_material",sourceRecordIds:sources.map(source=>source.id!),
+      };
       return {
         schemaVersion:2,mode:"source_records",title:"测试环境的学习记录",
         reason:"insufficient_material",sourceDates:sources.map(source=>source.date),

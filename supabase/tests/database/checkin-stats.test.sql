@@ -152,14 +152,14 @@ select set_config(
 select results_eq(
   $$select total_count, current_streak, has_today_record
     from public.get_check_in_stats('2026-07-01'::date)$$,
-  $$values (5::bigint, 3, true)$$,
-  'statistics include lifetime totals and a streak across month boundaries'
+  $$values (4::bigint, 3, true)$$,
+  'statistics count completed dates up to the requested date across month boundaries'
 );
 
 select results_eq(
   $$select total_count, current_streak, has_today_record
     from public.get_check_in_stats('2026-07-02'::date)$$,
-  $$values (5::bigint, 3, false)$$,
+  $$values (4::bigint, 3, false)$$,
   'a missing today continues the streak from yesterday'
 );
 
@@ -185,21 +185,21 @@ select set_config(
 select results_eq(
   $$select total_count, current_streak, has_today_record
     from public.get_check_in_stats('2026-07-01'::date)$$,
-  $$values (2::bigint, 1, true)$$,
+  $$values (1::bigint, 1, true)$$,
   'a single current day produces a one-day streak'
 );
 
 select results_eq(
   $$select total_count, current_streak, has_today_record
     from public.get_check_in_stats('2026-07-09'::date)$$,
-  $$values (2::bigint, 0, false)$$,
+  $$values (1::bigint, 0, false)$$,
   'future records do not start the current streak'
 );
 
 select results_eq(
   $$select total_count, current_streak, has_today_record
     from public.get_check_in_stats('2025-12-20'::date)$$,
-  $$values (2::bigint, 0, false)$$,
+  $$values (0::bigint, 0, false)$$,
   'statistics remain isolated from another user history'
 );
 

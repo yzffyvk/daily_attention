@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { AccountProfile } from "@/server/auth/ports";
-import { CheckInWorkspace } from "./checkin-workspace";
+import { LearningWorkspace } from "@/features/learning/learning-workspace";
 
 type CheckInWorkspaceClientProps = {
   initialDate: string;
@@ -28,5 +28,5 @@ export function CheckInWorkspaceClient(props: CheckInWorkspaceClientProps) {
     );
   }
 
-  return <CheckInWorkspace {...props} />;
+  return <LearningWorkspace {...props} />;
 }

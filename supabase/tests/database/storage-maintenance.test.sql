@@ -1,5 +1,5 @@
 begin;
-select plan(22);
+select plan(23);
 
 insert into auth.users (
   id,
@@ -44,8 +44,8 @@ values
     '00000000-0000-4000-8000-000000000801/2026-07-01/00000000-0000-4000-8000-000000000891.png',
     '00000000-0000-4000-8000-000000000801',
     1024,
-    now() - interval '2 hours',
-    now() - interval '1 hour'
+    '0001-01-01'::timestamptz,
+    '0001-01-02'::timestamptz
   ),
   (
     '00000000-0000-4000-8000-000000000801/2026-07-01/00000000-0000-4000-8000-000000000892.png',
@@ -282,11 +282,20 @@ select function_privs_are(
   'service role can list orphan images'
 );
 
+create temporary table expected_reservation_cleanup as
+select count(*)::integer as deleted_count from (
+  select r.path from private.storage_upload_reservations r
+  where r.expires_at<=now() and not exists(select 1 from storage.objects o where o.bucket_id='checkin-images' and o.name=r.path)
+  order by r.expires_at,r.path limit 100
+) due;
 select is(
   public.delete_expired_storage_upload_reservations(100),
-  1,
-  'only expired reservations without stored objects are deleted'
+  (select deleted_count from expected_reservation_cleanup),
+  'cleanup reports the eligible batch on a populated database'
 );
+select is((select count(*) from private.storage_upload_reservations
+  where path='00000000-0000-4000-8000-000000000801/2026-07-01/00000000-0000-4000-8000-000000000891.png'),
+  0::bigint, 'the fixture expired reservation without a stored object is deleted');
 
 select results_eq(
   $$select path

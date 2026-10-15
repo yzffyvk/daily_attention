@@ -103,8 +103,8 @@ select throws_ok(
     set user_id = '00000000-0000-4000-8000-000000000002'
     where user_id = '00000000-0000-4000-8000-000000000001'
       and checkin_date = '2026-07-23'$$,
-  '42501',
-  'new row violates row-level security policy for table "check_ins"',
+  'P0001',
+  'IMMUTABLE_RECORD_IDENTITY',
   'user cannot reassign their own check-in to another user'
 );
 select throws_ok(

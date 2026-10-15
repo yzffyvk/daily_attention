@@ -54,7 +54,19 @@ describe("AI generation repository", () => {
     const rpc = vi.fn().mockResolvedValue({ data: rpcState({ status: 'succeeded', summary: '可读学习草稿', warnings }), error: null });
     await expect(createAiGenerationRepository({ rpc }).findOwned(userId, jobId)).resolves.toMatchObject({ warnings, summary: '可读学习草稿' });
   });
-
+  it("binds creation and returned state to the exact record and content version", async () => {
+    const recordId = "00000000-0000-4000-8000-000000000099";
+    const rpc = vi.fn().mockResolvedValue({ data: [{
+      job: rpcJob({ record_id: recordId, base_version: 7 }),
+      quota_used: 1, quota_reserved: 1, quota_consumed: 0, quota_remaining: 4,
+    }], error: null });
+    const result = await createAiGenerationRepository({ rpc }).create({
+      userId, recordId, targetDate: "2026-07-31", idempotencyKey: "20000000-0000-4000-8000-000000000001",
+      sourceUrl: "https://example.com/article", sourceHost: "example.com",
+    });
+    expect(result.job).toMatchObject({ recordId, baseVersion: 7 });
+    expect(rpc).toHaveBeenCalledWith("create_record_ai_generation_job", expect.objectContaining({ target_record_id: recordId }));
+  });
   it("reads a completed long summary without dropping the generated result", async () => {
     const summary = '知'.repeat(30000);
     const rpc = vi.fn().mockResolvedValue({ data: rpcState({ status: 'succeeded', summary }), error: null });

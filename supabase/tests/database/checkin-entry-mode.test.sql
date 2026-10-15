@@ -19,9 +19,9 @@ select lives_ok($$insert into public.check_ins(user_id, checkin_date, entry_mode
   values ('00000000-0000-4000-8000-000000000901', '2026-09-16', 'ai', 'AI today'),
     ('00000000-0000-4000-8000-000000000901', '2026-09-14', 'ai', 'AI only day')$$,
   'manual and AI records coexist on the same account and date');
-select throws_ok($$insert into public.check_ins(user_id, checkin_date, entry_mode, attention)
-  values ('00000000-0000-4000-8000-000000000901', '2026-09-16', 'ai', 'duplicate AI')$$,
-  '23505', null, 'duplicate records in the same mode are rejected');
+select lives_ok($$insert into public.check_ins(user_id, checkin_date, entry_mode, attention)
+  values ('00000000-0000-4000-8000-000000000901', '2026-09-16', 'ai', 'another AI')$$,
+  'multiple records in the same mode and date are independent');
 select throws_ok($$insert into public.check_ins(user_id, checkin_date, entry_mode, attention)
   values ('00000000-0000-4000-8000-000000000901', '2026-09-17', 'other', 'invalid mode')$$,
   '23514', null, 'unsupported entry modes are rejected');

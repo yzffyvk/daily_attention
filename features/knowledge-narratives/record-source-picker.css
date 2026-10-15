@@ -1,0 +1,14 @@
+.record-source-picker{min-width:0;border:1px solid var(--line);border-radius:20px;padding:24px;background:var(--paper);color:var(--foreground)}
+.record-source-picker>label{display:grid;gap:8px;font-size:14px;font-weight:600}
+.record-source-picker select{width:100%;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:var(--paper);color:var(--foreground);font:inherit}
+.knowledge-record-options,.knowledge-selected-records ul{list-style:none;margin:16px 0;padding:0}
+.knowledge-record-options h4{margin:20px 0 10px;font-size:13px;color:var(--ink-soft)}
+.knowledge-record-options label{display:flex;align-items:flex-start;gap:12px;padding:14px 0;cursor:pointer;border-bottom:1px solid var(--line)}
+.knowledge-record-options input{margin-top:4px;min-width:18px;min-height:18px;accent-color:var(--green)}
+.knowledge-record-options strong,.knowledge-record-options small{display:block;overflow-wrap:anywhere}
+.knowledge-record-options small{margin-top:6px;color:var(--ink-soft)}
+.knowledge-selected-records{margin-top:20px;padding:14px;border-radius:12px;background:var(--paper-soft)}
+.knowledge-selected-records h4{margin:0;font-size:14px}
+.knowledge-selected-records li{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:10px 0;font-size:13px}
+.knowledge-selected-records button{flex-shrink:0;min-height:36px;border:0;background:transparent;color:inherit;text-decoration:underline;cursor:pointer}
+@media(max-width:800px){.record-source-picker{padding:18px}.knowledge-selection:has(.record-source-picker){grid-template-columns:1fr}}

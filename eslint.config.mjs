@@ -13,6 +13,8 @@ const eslintConfig = defineConfig([
     "build/**",
     "dist/**",
     ".worktrees/**",
+    "work/**",
+    ".local-backups/**",
     "next-env.d.ts",
   ]),
 ]);

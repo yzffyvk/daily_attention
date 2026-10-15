@@ -10,11 +10,9 @@ import { AttentionAtmosphere } from "./attention-atmosphere";
 import { AuraMark } from "@/features/brand/aura-mark";
 import { useCheckInStats } from "@/features/checkins/queries";
 import type { AccountProfile } from "@/server/auth/ports";
-import { avatarForKey } from "./avatar-catalog";
 import { AvatarImage } from "./avatar-image";
 import { ThemeToggle } from "@/features/theme/theme-toggle";
 import { AvatarSelector } from "./avatar-selector";
-import { LearningPersona } from "./learning-persona";
 
 const profileKey = ["profile"] as const;
 
@@ -368,7 +366,7 @@ export function AppHeader({
 
   return (
     <>
-      <header className={`app-header${isCelebrating ? " celebrating" : ""}${profile ? " has-learning-persona" : ""}`}>
+      <header className={`app-header${isCelebrating ? " celebrating" : ""}`}>
         <AttentionAtmosphere />
         <div className="header-copy">
           <div className="header-topline">
@@ -432,17 +430,12 @@ export function AppHeader({
             )}
             </div>
           </div>
-          <div className={profile ? "personal-hero" : undefined}>
+          <div>
           <div className="brand-title-row">
             <h1>让每一次学习，连成自己的知识地图。</h1>
           </div>
           <p className="hero-copy">以点成线，以线成面。在记录中积累，在关联中理解。</p>
-          {profile ? <button className="personal-hero-persona" type="button" disabled={isBusy}
-            aria-label={`更换学习形象，当前为${avatarForKey(profile.avatarKey).name}`}
-            onClick={event => { profileReturnFocusRef.current = event.currentTarget; setMenuOpen(false); setProfileOpen(true); }}>
-            <LearningPersona avatarKey={profile.avatarKey} />
-            <span className="persona-edit-hint">更换形象 ↗</span>
-          </button> : null}
+
           </div>
         </div>
 
@@ -484,8 +477,8 @@ export function AppHeader({
               <strong>{stats?.currentStreak ?? "—"}{stats ? <small>天</small> : null}</strong>
             </div>
             <div>
-              <span>累计记录</span>
-              <strong>{stats?.totalCount ?? "—"}{stats ? <small>篇</small> : null}</strong>
+              <span>累计学习</span>
+              <strong>{stats?.totalCount ?? "—"}{stats ? <small>天</small> : null}</strong>
             </div>
           </div>
           {statsQuery.isError ? (

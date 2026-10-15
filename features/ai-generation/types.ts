@@ -33,6 +33,8 @@ export type AiCancellationInfo = {
 };
 
 export type CreateAiGenerationData = {
+  recordId?: string;
+  baseVersion?: number;
   generationContext?: AiGenerationContext;
   jobId: string;
   status: AiGenerationStatus;
@@ -41,6 +43,7 @@ export type CreateAiGenerationData = {
 };
 
 export type ActiveAiJob = {
+  recordId?: string;
   userPrompt?: string;
   generationContext?: AiGenerationContext;
   jobId: string;
@@ -64,6 +67,8 @@ export type AiGenerationTaskErrorCode =
   | "RESULT_EXPIRED";
 
 export type AiGenerationJobData = {
+  recordId?: string;
+  baseVersion?: number;
   generationContext?: AiGenerationContext;
   jobId: string;
   status: AiGenerationStatus;

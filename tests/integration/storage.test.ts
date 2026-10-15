@@ -32,15 +32,16 @@ async function registeredSession() {
   return { session, userId };
 }
 
-function checkIn(imagePath: string | null, version: number | null) {
+function checkIn(imagePath: string | null) {
   return {
+    entryMode: "manual",
+    status: "completed",
     attention: "私有图片",
     sourceUrl: "",
     summary: "",
     inspiration: "",
     imagePath,
     imageName: imagePath ? "checkin.png" : "",
-    version,
   };
 }
 
@@ -74,24 +75,21 @@ describe("private check-in image storage", () => {
       });
     expect(uploaded.error).toBeNull();
 
-    expect((await userOne.session.put(`/api/checkins/${date}`, checkIn(path, null))).status).toBe(200);
-    const read = await userOne.session.get(`/api/checkins/${date}`);
+    const ownerRecordId=crypto.randomUUID();
+    expect((await userOne.session.post("/api/records", {...checkIn(path),id:ownerRecordId,date})).status).toBe(201);
+    const read = await userOne.session.get(`/api/records/${ownerRecordId}`);
     expect(read.status).toBe(200);
     expect(read.body.data.imageUrl).toEqual(expect.stringContaining("/storage/v1/object/sign/"));
     const signedReadUrl = read.body.data.imageUrl as string;
     expect((await fetch(signedReadUrl)).status).toBe(200);
 
-    expect(
-      (await userTwo.session.put(`/api/checkins/${date}`, checkIn(null, null))).status,
-    ).toBe(200);
-    const foreignPersist = await userTwo.session.put(
-      `/api/checkins/${date}`,
-      checkIn(path, 1),
-    );
+    const otherRecordId=crypto.randomUUID();
+    expect((await userTwo.session.post("/api/records",{...checkIn(null),id:otherRecordId,date})).status).toBe(201);
+    const foreignPersist = await userTwo.session.request(`/api/records/${otherRecordId}`, {method:"PATCH",body:JSON.stringify({...checkIn(path),version:1})});
     expect(foreignPersist.status).toBe(403);
     expect(foreignPersist.headers.get("Cache-Control")).toBe("private, no-store");
     expect(foreignPersist.body.error.code).toBe("FORBIDDEN_IMAGE_PATH");
-    const userTwoRecord = await userTwo.session.get(`/api/checkins/${date}`);
+    const userTwoRecord = await userTwo.session.get(`/api/records/${otherRecordId}`);
     expect(userTwoRecord.status).toBe(200);
     expect(userTwoRecord.body.data).toMatchObject({ imagePath: null, imageUrl: null, version: 1 });
 

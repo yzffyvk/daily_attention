@@ -34,18 +34,54 @@ export type Database = {
   }
   public: {
     Tables: {
+      albums: {
+        Row: {
+          created_at: string
+          description: string
+          id: string
+          name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string
+          id?: string
+          name: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          id?: string
+          name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       check_ins: {
         Row: {
+          accepted_ai_job_id: string | null
+          active_ai_job_id: string | null
+          ai_candidate: Json | null
+          ai_error: string | null
           ai_generation_context: Json | null
+          ai_status: string | null
+          album_id: string | null
           attention: string
           checkin_date: string
-          entry_mode: string
+          completed_at: string | null
           created_at: string
+          entry_mode: string
           id: string
           image_name: string
           image_path: string | null
           inspiration: string
+          learning_status: string
           source_url: string | null
+          source_url_key: string | null
           summary: string
           updated_at: string
           user_id: string
@@ -53,16 +89,25 @@ export type Database = {
           version: number
         }
         Insert: {
+          accepted_ai_job_id?: string | null
+          active_ai_job_id?: string | null
+          ai_candidate?: Json | null
+          ai_error?: string | null
           ai_generation_context?: Json | null
+          ai_status?: string | null
+          album_id?: string | null
           attention: string
           checkin_date: string
-          entry_mode?: string
+          completed_at?: string | null
           created_at?: string
+          entry_mode?: string
           id?: string
           image_name?: string
           image_path?: string | null
           inspiration?: string
+          learning_status?: string
           source_url?: string | null
+          source_url_key?: string | null
           summary?: string
           updated_at?: string
           user_id: string
@@ -70,23 +115,40 @@ export type Database = {
           version?: number
         }
         Update: {
+          accepted_ai_job_id?: string | null
+          active_ai_job_id?: string | null
+          ai_candidate?: Json | null
+          ai_error?: string | null
           ai_generation_context?: Json | null
+          ai_status?: string | null
+          album_id?: string | null
           attention?: string
           checkin_date?: string
-          entry_mode?: string
+          completed_at?: string | null
           created_at?: string
+          entry_mode?: string
           id?: string
           image_name?: string
           image_path?: string | null
           inspiration?: string
+          learning_status?: string
           source_url?: string | null
+          source_url_key?: string | null
           summary?: string
           updated_at?: string
           user_id?: string
           user_prompt?: string
           version?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "check_ins_album_owner_fk"
+            columns: ["album_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "albums"
+            referencedColumns: ["id", "user_id"]
+          },
+        ]
       }
       daily_takeaway_lessons: {
         Row: {
@@ -147,8 +209,20 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
-          { foreignKeyName: "daily_takeaway_progress_lesson_id_fkey"; columns: ["lesson_id"]; isOneToOne: false; referencedRelation: "daily_takeaway_lessons"; referencedColumns: ["id"] },
-          { foreignKeyName: "daily_takeaway_progress_user_id_fkey"; columns: ["user_id"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "daily_takeaway_progress_lesson_id_fkey"
+            columns: ["lesson_id"]
+            isOneToOne: false
+            referencedRelation: "daily_takeaway_lessons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_takeaway_progress_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
         ]
       }
       daily_takeaway_quiz_results: {
@@ -177,8 +251,20 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
-          { foreignKeyName: "daily_takeaway_quiz_results_lesson_id_fkey"; columns: ["lesson_id"]; isOneToOne: false; referencedRelation: "daily_takeaway_lessons"; referencedColumns: ["id"] },
-          { foreignKeyName: "daily_takeaway_quiz_results_user_id_fkey"; columns: ["user_id"]; isOneToOne: false; referencedRelation: "profiles"; referencedColumns: ["id"] },
+          {
+            foreignKeyName: "daily_takeaway_quiz_results_lesson_id_fkey"
+            columns: ["lesson_id"]
+            isOneToOne: false
+            referencedRelation: "daily_takeaway_lessons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "daily_takeaway_quiz_results_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
         ]
       }
       knowledge_narratives: {
@@ -298,10 +384,6 @@ export type Database = {
         }
         Returns: Json
       }
-      get_daily_takeaway_state: {
-        Args: { target_user_id: string }
-        Returns: Json
-      }
       begin_ai_generation: {
         Args: { target_job_id: string }
         Returns: Database["public"]["CompositeTypes"]["ai_generation_job_record"][]
@@ -324,9 +406,9 @@ export type Database = {
       }
       cancel_ai_generation_job_v2: {
         Args: {
-          target_user_id: string
-          target_job_id: string
           target_confirm_quota_consumption?: boolean
+          target_job_id: string
+          target_user_id: string
         }
         Returns: Json
       }
@@ -513,10 +595,100 @@ export type Database = {
       }
       create_knowledge_narrative: {
         Args: {
-          target_entry_mode?: string
           target_dates: string[]
+          target_entry_mode?: string
           target_idempotency_key: string
           target_question: string
+          target_user_id: string
+        }
+        Returns: {
+          attempt_count: number
+          available_at: string
+          claim_token: string | null
+          copy_request_key: string | null
+          copy_source_id: string | null
+          created_at: string
+          dates: string[]
+          error_code: string | null
+          finished_at: string | null
+          id: string
+          idempotency_key: string
+          lease_expires_at: string | null
+          question: string
+          quota_date: string
+          result: Json | null
+          source_snapshot: Json
+          started_at: string | null
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "knowledge_narratives"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      create_learning_record: {
+        Args: { payload: Json; target_id: string }
+        Returns: {
+          accepted_ai_job_id: string | null
+          active_ai_job_id: string | null
+          ai_candidate: Json | null
+          ai_error: string | null
+          ai_generation_context: Json | null
+          ai_status: string | null
+          album_id: string | null
+          attention: string
+          checkin_date: string
+          completed_at: string | null
+          created_at: string
+          entry_mode: string
+          id: string
+          image_name: string
+          image_path: string | null
+          inspiration: string
+          learning_status: string
+          source_url: string | null
+          source_url_key: string | null
+          summary: string
+          updated_at: string
+          user_id: string
+          user_prompt: string
+          version: number
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "check_ins"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      create_record_ai_generation_job: {
+        Args: {
+          target_date: string
+          target_idempotency_key: string
+          target_record_id: string
+          target_source_host: string
+          target_source_url: string
+          target_user_id: string
+          target_user_prompt: string
+        }
+        Returns: Database["public"]["CompositeTypes"]["ai_generation_job_with_quota"][]
+        SetofOptions: {
+          from: "*"
+          to: "ai_generation_job_with_quota"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      create_record_knowledge_narrative: {
+        Args: {
+          target_idempotency_key: string
+          target_question: string
+          target_record_ids: string[]
           target_user_id: string
         }
         Returns: {
@@ -565,6 +737,41 @@ export type Database = {
         Args: { target_id: string; target_user_id: string }
         Returns: boolean
       }
+      delete_learning_record: {
+        Args: { expected_version: number; target_id: string }
+        Returns: {
+          accepted_ai_job_id: string | null
+          active_ai_job_id: string | null
+          ai_candidate: Json | null
+          ai_error: string | null
+          ai_generation_context: Json | null
+          ai_status: string | null
+          album_id: string | null
+          attention: string
+          checkin_date: string
+          completed_at: string | null
+          created_at: string
+          entry_mode: string
+          id: string
+          image_name: string
+          image_path: string | null
+          inspiration: string
+          learning_status: string
+          source_url: string | null
+          source_url_key: string | null
+          summary: string
+          updated_at: string
+          user_id: string
+          user_prompt: string
+          version: number
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "check_ins"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       expire_ai_generation_data: {
         Args: { target_limit: number }
         Returns: {
@@ -588,6 +795,22 @@ export type Database = {
           current_streak: number
           has_today_record: boolean
           total_count: number
+        }[]
+      }
+      get_daily_takeaway_state: {
+        Args: { target_user_id: string }
+        Returns: Json
+      }
+      get_learning_albums: {
+        Args: never
+        Returns: {
+          completed_count: number
+          created_at: string
+          description: string
+          id: string
+          name: string
+          record_count: number
+          updated_at: string
         }[]
       }
       list_orphan_checkin_image_paths: {
@@ -632,6 +855,14 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      move_learning_records: {
+        Args: { record_ids: string[]; target_album_id: string }
+        Returns: number
+      }
+      normalize_learning_source_url: {
+        Args: { value: string }
+        Returns: string
+      }
       read_ai_generation_job: {
         Args: { target_job_id: string; target_user_id: string }
         Returns: Database["public"]["CompositeTypes"]["ai_generation_job_record"][]
@@ -642,13 +873,13 @@ export type Database = {
           isSetofReturn: true
         }
       }
-      read_ai_generation_job_state: {
-        Args: { target_user_id: string; target_job_id: string }
-        Returns: Json
-      }
       read_ai_generation_job_execution_status: {
         Args: { target_job_id: string }
         Returns: string
+      }
+      read_ai_generation_job_state: {
+        Args: { target_job_id: string; target_user_id: string }
+        Returns: Json
       }
       read_ai_generation_queue: {
         Args: { target_batch_limit: number; target_visibility_timeout: number }
@@ -658,6 +889,21 @@ export type Database = {
           msg_id: number
           read_count: number
           visible_at: string
+        }[]
+      }
+      read_owned_ai_generation_queue: {
+        Args: {
+          target_batch_limit: number
+          target_created_after: string
+          target_user_id: string
+          target_visibility_timeout: number
+        }
+        Returns: {
+          created_at: string
+          message: Json
+          msg_id: number
+          read_count: number
+          user_id: string
         }[]
       }
       read_profile: {
@@ -765,6 +1011,47 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      update_learning_record: {
+        Args: {
+          candidate_job_id?: string
+          discard_candidate?: boolean
+          expected_version: number
+          patch: Json
+          target_id: string
+        }
+        Returns: {
+          accepted_ai_job_id: string | null
+          active_ai_job_id: string | null
+          ai_candidate: Json | null
+          ai_error: string | null
+          ai_generation_context: Json | null
+          ai_status: string | null
+          album_id: string | null
+          attention: string
+          checkin_date: string
+          completed_at: string | null
+          created_at: string
+          entry_mode: string
+          id: string
+          image_name: string
+          image_path: string | null
+          inspiration: string
+          learning_status: string
+          source_url: string | null
+          source_url_key: string | null
+          summary: string
+          updated_at: string
+          user_id: string
+          user_prompt: string
+          version: number
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "check_ins"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       update_profile: {
         Args: {
           target_avatar_key: number
@@ -828,6 +1115,8 @@ export type Database = {
         updated_at: string | null
         user_prompt: string | null
         progress: Json | null
+        record_id: string | null
+        base_version: number | null
       }
       ai_generation_job_with_quota: {
         job:

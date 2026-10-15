@@ -375,14 +375,16 @@ select is(
 );
 
 update private.ai_generation_jobs
-set result_expires_at = now() - interval '1 minute'
+set result_expires_at = '0001-01-01'::timestamptz
 where id = (select job_id from created_ai_jobs where slot = 2);
 
+create temporary table expected_ai_expiry as select
+  (select count(*)::integer from (select id from private.ai_generation_jobs where status in ('succeeded','failed','cancelled') and result_expires_at<=now() order by result_expires_at,id limit 100) due) cleared_results,
+  (select count(*)::integer from (select id from private.ai_generation_jobs where status in ('succeeded','failed','cancelled') and metadata_expires_at<=now() order by metadata_expires_at,id limit 100) due) deleted_jobs;
 select results_eq(
-  $$select cleared_results, deleted_jobs
-    from public.expire_ai_generation_data(100)$$,
-  $$values (1, 0)$$,
-  'result expiry clears one due result without deleting metadata'
+  $$select cleared_results, deleted_jobs from public.expire_ai_generation_data(100)$$,
+  $$select cleared_results, deleted_jobs from expected_ai_expiry$$,
+  'result expiry reports the due batch including this fixture on a populated database'
 );
 select results_eq(
   $$select attention, summary, inspiration, source_title
@@ -404,17 +406,20 @@ select is(
   'another queued job can be made terminal for metadata expiry'
 );
 update private.ai_generation_jobs
-set metadata_expires_at = now() - interval '1 minute'
+set metadata_expires_at = '0001-01-01'::timestamptz
 where id in (
   (select job_id from created_ai_jobs where slot = 3),
   (select job_id from created_ai_jobs where slot = 4)
 );
 
+truncate expected_ai_expiry;
+insert into expected_ai_expiry select
+  (select count(*)::integer from (select id from private.ai_generation_jobs where status in ('succeeded','failed','cancelled') and result_expires_at<=now() order by result_expires_at,id limit 100) due),
+  (select count(*)::integer from (select id from private.ai_generation_jobs where status in ('succeeded','failed','cancelled') and metadata_expires_at<=now() order by metadata_expires_at,id limit 100) due);
 select results_eq(
-  $$select cleared_results, deleted_jobs
-    from public.expire_ai_generation_data(100)$$,
-  $$values (0, 1)$$,
-  'metadata expiry deletes only one terminal job'
+  $$select cleared_results, deleted_jobs from public.expire_ai_generation_data(100)$$,
+  $$select cleared_results, deleted_jobs from expected_ai_expiry$$,
+  'metadata expiry reports the due terminal batch on a populated database'
 );
 select results_eq(
   $$select

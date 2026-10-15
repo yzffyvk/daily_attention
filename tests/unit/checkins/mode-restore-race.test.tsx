@@ -103,6 +103,7 @@ it("preserves all AI reflections and its image when completion arrives during dr
  });
  const api = fixture(); mount();
  await waitFor(() => expect(screen.getByLabelText("今日知识主题")).toBeEnabled());
+ await waitFor(() => expect(document.querySelector(".checkin-form")).toHaveAttribute("aria-busy", "false"));
  edit("attention", "手动草稿主题");
  edit("summary", "手动草稿小结");
  edit("inspiration", "手动解释不受 AI 影响");

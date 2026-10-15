@@ -16,11 +16,13 @@ function mapSummary(row:SummaryRow):NarrativeSummary {
 export function createNarrativeRepository(client:SupabaseClient<Database>) {
   async function detail(userId:string,row:Row):Promise<KnowledgeNarrative> {
     const sources=z.array(narrativeSourceSchema).min(2).max(14).parse(row.source_snapshot);
-    const {data:current,error}=await client.from("check_ins").select("id,checkin_date,entry_mode,version").eq("user_id",userId).in("checkin_date",row.dates);
+    const ids=sources.flatMap(source=>source.id?[source.id]:[]);
+    const query=client.from("check_ins").select("id,checkin_date,entry_mode,version").eq("user_id",userId);
+    const {data:current,error}=await query.in(ids.length===sources.length?"id":"checkin_date",ids.length===sources.length?ids:row.dates);
     if(error) throw error;
     const versionsById=new Map((current??[]).map(source=>[source.id,source.version]));
     const versionsByMode=new Map((current??[]).map(source=>[`${source.checkin_date}:${source.entry_mode??"manual"}`,source.version]));
-    return {...mapSummary(row),sources,result:row.result===null?null:validateNarrativeResult(row.result,row.dates),changedDates:sources.filter(source=>(source.id ? versionsById.get(source.id) : versionsByMode.get(`${source.date}:${source.entryMode??"manual"}`))!==source.version).map(source=>source.date)};
+    return {...mapSummary(row),sources,result:row.result===null?null:validateNarrativeResult(row.result,row.dates,sources.flatMap(source=>source.id?[source.id]:[])),changedDates:sources.filter(source=>(source.id ? versionsById.get(source.id) : versionsByMode.get(`${source.date}:${source.entryMode??"manual"}`))!==source.version).map(source=>source.date)};
   }
   return {
     async list(userId:string):Promise<NarrativeSummary[]> {
@@ -28,7 +30,8 @@ export function createNarrativeRepository(client:SupabaseClient<Database>) {
       if(error) throw error; return (data??[]).map(mapSummary);
     },
     async create(userId:string,input:CreateNarrativeInput):Promise<KnowledgeNarrative> {
-      const {data,error}=await client.rpc("create_knowledge_narrative",{target_user_id:userId,target_dates:input.dates,target_question:input.question,target_idempotency_key:input.idempotencyKey,target_entry_mode:input.entryMode??"manual"});
+      if (!("recordIds" in input)) throw new Error("CLIENT_UPGRADE_REQUIRED");
+      const {data,error}=await client.rpc("create_record_knowledge_narrative",{target_user_id:userId,target_record_ids:input.recordIds,target_question:input.question,target_idempotency_key:input.idempotencyKey});
       if(error) throw error; const row=data?.[0]; if(!row) throw new Error("NARRATIVE_SERVICE_UNAVAILABLE");
       return detail(userId,row);
     },
@@ -41,10 +44,10 @@ export function createNarrativeRepository(client:SupabaseClient<Database>) {
       if(error) throw error; if(!data?.[0]) throw new Error("NARRATIVE_NOT_FOUND"); return detail(userId,data[0]);
     },
     async update(userId:string,id:string,input:EditNarrativeInput):Promise<KnowledgeNarrative> {
-      const {data:source,error:sourceError}=await client.from("knowledge_narratives").select("dates").eq("user_id",userId).eq("id",id).maybeSingle();
+      const {data:source,error:sourceError}=await client.from("knowledge_narratives").select("dates,source_snapshot").eq("user_id",userId).eq("id",id).maybeSingle();
       if(sourceError) throw sourceError; if(!source) throw new Error("NARRATIVE_NOT_FOUND");
       let result;
-      try {result=validateNarrativeResult(input.result,source.dates);} catch {throw new Error("NARRATIVE_EDIT_INVALID");}
+      try {result=validateNarrativeResult(input.result,source.dates,Array.isArray(source.source_snapshot)?z.array(narrativeSourceSchema).parse(source.source_snapshot).flatMap(item=>item.id?[item.id]:[]):[]);} catch {throw new Error("NARRATIVE_EDIT_INVALID");}
       const {data,error}=await client.rpc("update_knowledge_narrative",{target_user_id:userId,target_id:id,target_result:result,target_expected_updated_at:input.expectedUpdatedAt});
       if(error) throw error; if(!data?.[0]) throw new Error("NARRATIVE_NOT_FOUND"); return detail(userId,data[0]);
     },

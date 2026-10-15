@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { KnowledgeNarrative } from "@/lib/domain/knowledge-narrative";
-import type { ConceptMapResult, KnowledgeConcept, KnowledgeMapResult } from "@/lib/domain/knowledge-map";
+import { sourceReferences, type AnyConceptMapResult, type KnowledgeConcept, type KnowledgeMapResult } from "@/lib/domain/knowledge-map";
 import { SourceSnapshot } from "./source-snapshot";
 
 const provenance = { record: "记录依据", inference: "基于记录推断", ai_supplement: "AI 补充" };
@@ -22,7 +22,7 @@ function focusSourcePanel(panel: HTMLElement | null) {
   panel?.scrollIntoView?.({ block: "nearest", behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
 }
 
-function ConceptGraph({ result, selectedId, onSelect }: { result: ConceptMapResult; selectedId: string; onSelect: (id: string) => void }) {
+function ConceptGraph({ result, selectedId, onSelect }: { result: AnyConceptMapResult; selectedId: string; onSelect: (id: string) => void }) {
   const concepts = new Map(result.concepts.map(concept => [concept.id, concept]));
   return <section className="concept-graph" role="region" aria-label="概念关系图">
     <div className="map-root"><p className="eyebrow">围绕一个问题</p><h3>{result.focusQuestion}</h3><span className="map-organization">{organizations[result.organization]}</span></div>
@@ -65,20 +65,26 @@ export function KnowledgeMapReader({ narrative, result }: { narrative: Knowledge
     setSourceDate(date);
   }
 
-  function citations(dates: string[], label = "引用来源") {
-    return <div className="narrative-citations map-citations" role="group" aria-label={label}>{dates.map(date => <button key={date} type="button" aria-label={`查看来源 ${date}`} onClick={() => revealSource(date)}>{date}</button>)}</div>;
+  function resolveSource(reference: string) {
+    return narrative.sources.find(item => result.schemaVersion === 3 ? item.id === reference : item.date === reference);
+  }
+  function citations(references: string[], label = "引用来源") {
+    return <div className="narrative-citations map-citations" role="group" aria-label={label}>{references.map(reference => {
+      const source = resolveSource(reference);
+      const title = result.schemaVersion === 3 && source ? `${source.date} · ${source.attention}` : reference;
+      return <button key={reference} type="button" aria-label={`查看来源 ${title}`} onClick={() => revealSource(reference)}>{title}</button>;
+    })}</div>;
   }
 
   if (result.mode === "source_records") return <article className="source-records-reader narrative-scroll" aria-label="原始学习记录">
     <div className="source-records-intro"><p className="eyebrow">先保留每一天的原貌</p><h3>{result.reason === "mixed_topics" ? "这些记录涉及不同主题" : "当前材料还不足以形成清晰关系"}</h3><p>{result.reason === "mixed_topics" ? "按日期阅读保存时的原始记录，分别理解每个主题。" : "先回看保存时的原始记录，补充具体理解后再尝试串联。"}</p></div>
-    {[...result.sourceDates].sort().map(date => {
-      const source = narrative.sources.find(item => item.date === date);
-      return source ? <SourceSnapshot key={date} source={source} /> : null;
-    })}
+    {narrative.sources.filter(source => sourceReferences(result).includes(result.schemaVersion === 3 ? source.id ?? "" : source.date)).map(source =>
+      <SourceSnapshot key={source.id ?? source.date} source={source} />
+    )}
   </article>;
 
   const selected: KnowledgeConcept = result.concepts.find(concept => concept.id === selectedId) ?? result.concepts.find(concept => concept.origin === "record") ?? result.concepts[0];
-  const source = narrative.sources.find(item => item.date === sourceDate);
+  const source = sourceDate ? resolveSource(sourceDate) : undefined;
   const concepts = new Map(result.concepts.map(concept => [concept.id, concept]));
   function selectConcept(id: string, revealDetail: boolean) {
     setSelectedId(id);
@@ -100,20 +106,20 @@ export function KnowledgeMapReader({ narrative, result }: { narrative: Knowledge
       <section className="map-detail" role="region" aria-label="概念详情" ref={detailRef} tabIndex={-1}>
         <p className="eyebrow">{conceptKinds[selected.kind]}</p><h3>{selected.label}</h3><Origin origin={selected.origin} />
         <p className="map-detail-explanation">{selected.explanation}</p>
-        {selected.origin === "ai_supplement" ? <div className="map-supplement-reason"><h4>为什么补充这个概念</h4><p>{selected.supplementReason}</p><p className="knowledge-muted">这是 AI 提供的补充概念，没有对应的原始记录日期。</p></div> : citations(selected.sourceDates)}
+        {selected.origin === "ai_supplement" ? <div className="map-supplement-reason"><h4>为什么补充这个概念</h4><p>{selected.supplementReason}</p><p className="knowledge-muted">这是 AI 提供的补充概念，没有对应的原始记录日期。</p></div> : citations(sourceReferences(selected))}
       </section>
     </div>
     <section className="map-relationships" role="region" aria-label="关系说明"><h3>关系说明</h3><p className="map-section-note">对照记录依据与推断，理解每一条联系。</p>
       {result.connections.map(edge => <article className="map-relationship" key={`${edge.fromId}-${edge.toId}`}>
         <div className="map-relationship-title"><span>{concepts.get(edge.fromId)?.label}</span><span aria-hidden="true"> → </span><span>{concepts.get(edge.toId)?.label}</span></div>
-        <h4>{edge.relation}</h4><Origin origin={edge.origin} /><p>{edge.explanation}</p>{edge.origin !== "ai_supplement" ? citations(edge.sourceDates) : null}
+        <h4>{edge.relation}</h4><Origin origin={edge.origin} /><p>{edge.explanation}</p>{edge.origin !== "ai_supplement" ? citations(sourceReferences(edge)) : null}
       </article>)}
     </section>
     <section className="map-outline" role="region" aria-label="讲述提纲"><h3>讲述提纲</h3><p className="map-section-note">沿用图中的概念，试着把理解讲清楚。</p>
       <ol>{result.outline.map((step, index) => <li key={index}><h4>{step.title}</h4><p>{step.body}</p><div className="map-outline-concepts">{step.conceptIds.map(id => <button key={id} type="button" aria-label={`查看概念 ${concepts.get(id)?.label}`} aria-pressed={selected.id === id} onClick={() => selectConcept(id, true)}>{concepts.get(id)?.label}{concepts.get(id)?.origin === "ai_supplement" ? <Origin origin="ai_supplement" /> : null}</button>)}</div></li>)}</ol>
     </section>
     {result.gaps.length ? <section className="map-gaps"><h3>待探索的部分</h3><ul>{result.gaps.map((gap, index) => <li key={index}>{gap}</li>)}</ul></section> : null}
-    <section className="map-all-sources"><h3>回看全部原始来源</h3>{citations([...narrative.dates].sort(), "全部来源日期")}</section>
+    <section className="map-all-sources"><h3>回看全部原始来源</h3>{citations(result.schemaVersion === 3 ? narrative.sources.flatMap(source=>source.id?[source.id]:[]) : [...narrative.dates].sort(), "全部来源日期")}</section>
     {source ? <SourceSnapshot source={source} ref={sourceRef} onClose={() => { setSourceDate(null); citationRef.current?.focus(); }} /> : null}
   </div>;
 }

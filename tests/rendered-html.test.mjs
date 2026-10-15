@@ -22,7 +22,7 @@ test("guards the cloud journal page and installs one query provider", async () =
   assert.match(workspaceClient, /const \[mounted, setMounted\] = useState\(false\)/);
   assert.match(workspaceClient, /requestAnimationFrame\(\(\) => setMounted\(true\)\)/);
   assert.match(workspaceClient, /role="status"/);
-  assert.match(workspaceClient, /<CheckInWorkspace \{\.\.\.props\} \/>/);
+  assert.match(workspaceClient, /<LearningWorkspace \{\.\.\.props\} \/>/);
 });
 
 test("derives social image metadata from a trusted configured origin", async () => {

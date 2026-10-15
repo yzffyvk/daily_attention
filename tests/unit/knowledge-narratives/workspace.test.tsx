@@ -290,8 +290,10 @@ it("guards dirty edits on cancel, internal navigation and browser unload; discar
   const api = mockLibrary(); mount(); const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: "编辑 从检索到应用" }));
   await user.type(await screen.findByLabelText("总览"), "未保存");
-  const unload = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(unload);
-  expect(unload.defaultPrevented).toBe(true);
+  await waitFor(() => {
+    const unload = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+  });
   await user.click(screen.getByRole("button", { name: "取消编辑" }));
   const dialog = screen.getByRole("dialog", { name: "放弃未保存的修改？" });
   await user.click(within(dialog).getByRole("button", { name: "继续编辑" }));

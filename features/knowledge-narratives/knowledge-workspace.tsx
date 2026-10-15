@@ -13,6 +13,7 @@ import type { KnowledgeNarrative, NarrativeStatus, NarrativeSummary } from "@/li
 import { copyNarrative, createNarrative, deleteNarrative, getNarrative, getNarratives, type CreateNarrativeInput } from "./api";
 import { NarrativeReader } from "./narrative-reader";
 import { NarrativeEditor } from "./narrative-editor";
+import { RecordSourcePicker } from "./record-source-picker";
 import { KnowledgeConstellation } from "./knowledge-constellation";
 
 const labels: Record<NarrativeStatus, string> = { queued: "等待生成", generating: "正在生成", succeeded: "已保存", failed: "生成失败" };
@@ -53,9 +54,11 @@ function NarrativeDetail({ narrative, onRegenerate, onEdit }: { narrative: Knowl
   </>;
 }
 
-export function KnowledgeWorkspace({ today, userId, entryMode = "manual", onClose, leaveGuardRef, listNavigationRef, emptyIllustration }: { today: string; userId: string; entryMode?: CheckInEntryMode; onClose: () => void; leaveGuardRef?: RefObject<LeaveGuard | null>; listNavigationRef?: RefObject<(() => void) | null>; emptyIllustration?: ReactNode }) {
+export function KnowledgeWorkspace({ today, userId, entryMode = "manual", onClose, leaveGuardRef, listNavigationRef, emptyIllustration, initialRecordIds, initialAlbumId }: { initialRecordIds?: string[]; initialAlbumId?: string | null; today: string; userId: string; entryMode?: CheckInEntryMode; onClose: () => void; leaveGuardRef?: RefObject<LeaveGuard | null>; listNavigationRef?: RefObject<(() => void) | null>; emptyIllustration?: ReactNode }) {
+  const recordSelection = initialRecordIds !== undefined || initialAlbumId !== undefined;
+  const [recordIds, setRecordIds] = useState<string[]>(initialRecordIds ?? []);
   const client = useQueryClient();
-  const [view, setView] = useState<"list" | "create" | "detail" | "edit">("list");
+  const [view, setView] = useState<"list" | "create" | "detail" | "edit">((initialRecordIds?.length || initialAlbumId !== undefined) ? "create" : "list");
   const [month, setMonth] = useState(() => monthKeyForDate(today));
   const [sourceEntryMode, setSourceEntryMode] = useState<CheckInEntryMode>(entryMode);
   const [dates, setDates] = useState<string[]>([]);
@@ -126,19 +129,19 @@ export function KnowledgeWorkspace({ today, userId, entryMode = "manual", onClos
   function openNarrative(id: string, edit = false) { setNotice(""); setActiveId(id); setView(edit ? "edit" : "detail"); focusHeading(); }
 
   async function generate() {
-    if (requestInFlight.current || dates.length < 2 || dates.length > 14 || question.length > 300) return;
+    if (requestInFlight.current || (recordSelection ? recordIds : dates).length < 2 || (recordSelection ? recordIds : dates).length > 14 || question.length > 300) return;
     requestInFlight.current = true;
-    const normalized = { dates: [...dates].sort(), question: question.trim(), ...(sourceEntryMode === "ai" ? { entryMode: sourceEntryMode } : {}) };
+    const normalized = recordSelection ? { recordIds: [...recordIds].sort(), question: question.trim() } : { dates: [...dates].sort(), question: question.trim(), ...(sourceEntryMode === "ai" ? { entryMode: sourceEntryMode } : {}) };
     const fingerprint = JSON.stringify(normalized);
     const storageKey = `knowledge-request:${userId}`;
     // Keep uncertain requests idempotent, including when a response was lost before refresh.
     if (!requestRef.current) {
       try {
         const saved: CreateNarrativeInput = JSON.parse(sessionStorage.getItem(storageKey) ?? "null");
-        if (saved && Array.isArray(saved.dates) && typeof saved.question === "string" && typeof saved.idempotencyKey === "string") requestRef.current = saved;
+        if (saved && (Array.isArray(saved.dates) || Array.isArray(saved.recordIds)) && typeof saved.question === "string" && typeof saved.idempotencyKey === "string") requestRef.current = saved;
       } catch { /* Storage may be unavailable; the in-memory key still covers retries. */ }
     }
-    if (!requestRef.current || JSON.stringify({ dates: requestRef.current.dates, question: requestRef.current.question, ...(requestRef.current.entryMode === "ai" ? { entryMode: "ai" } : {}) }) !== fingerprint) {
+    if (!requestRef.current || JSON.stringify(requestRef.current.recordIds ? { recordIds: requestRef.current.recordIds, question:requestRef.current.question } : { dates: requestRef.current.dates, question: requestRef.current.question, ...(requestRef.current.entryMode === "ai" ? { entryMode: "ai" } : {}) }) !== fingerprint) {
       requestRef.current = { ...normalized, idempotencyKey: crypto.randomUUID() };
     }
     try { sessionStorage.setItem(storageKey, JSON.stringify(requestRef.current)); } catch { /* Optional recovery storage. */ }
@@ -159,11 +162,12 @@ export function KnowledgeWorkspace({ today, userId, entryMode = "manual", onClos
     // Only the first selection after mounting recovers an unresolved request. A later new selection
     // and every regeneration are explicit new operations, even when the input is unchanged.
     if (source || hasEnteredCreation.current) {
-      requestRef.current = { dates: [...(source?.dates ?? [])].sort(), question: source?.question.trim() ?? "", ...(selectedMode === "ai" ? { entryMode: selectedMode } : {}), idempotencyKey: crypto.randomUUID() };
+      requestRef.current = recordSelection ? {recordIds: source?.sources.flatMap(item=>item.id?[item.id]:[]).sort() ?? [],question:source?.question.trim() ?? "",idempotencyKey:crypto.randomUUID()} : { dates: [...(source?.dates ?? [])].sort(), question: source?.question.trim() ?? "", ...(selectedMode === "ai" ? { entryMode: selectedMode } : {}), idempotencyKey: crypto.randomUUID() };
       try { sessionStorage.removeItem(`knowledge-request:${userId}`); } catch { /* In-memory identity takes precedence. */ }
     }
     hasEnteredCreation.current = true;
     setActiveId(null); setView("create"); setDirty(false); setNotice(""); create.reset();
+    setRecordIds(source?.sources.flatMap(item=>item.id?[item.id]:[]).sort() ?? []);
     setDates(source ? source.dates : []); setQuestion(source?.question ?? "");
     if (source?.dates.length) setMonth(monthKeyForDate(source.dates[source.dates.length - 1]));
     focusHeading();
@@ -214,19 +218,19 @@ export function KnowledgeWorkspace({ today, userId, entryMode = "manual", onClos
         ? <NarrativeEditor key={detail.data.id} narrative={detail.data} onSaved={async value => { await showNarrative(value); setNotice("修改已保存"); }} onCancel={() => requestLeave(() => { setDirty(false); setView("detail"); focusHeading(); })} onDirtyChange={setDirty} onSavingChange={setEditorSaving} />
         : <NarrativeDetail key={detail.data.id} narrative={detail.data} onRegenerate={() => startSelection(detail.data)} onEdit={() => { setNotice(""); setView("edit"); }} /> : null}
     </div> : view === "create" ? <div className="knowledge-selection">
-      <MonthCalendar month={month} selectedDate="" selectedDates={dates} summaries={monthQuery.data?.filter(record => (record.entryMode ?? "manual") === sourceEntryMode)} today={today} disabled={create.isPending}
+      {recordSelection ? <RecordSourcePicker userId={userId} selectedIds={recordIds} initialAlbumId={initialAlbumId} disabled={create.isPending} onChange={ids=>{setRecordIds(ids);create.reset();}} /> : <MonthCalendar month={month} selectedDate="" selectedDates={dates} summaries={monthQuery.data?.filter(record => (record.entryMode ?? "manual") === sourceEntryMode)} today={today} disabled={create.isPending}
         isLoading={monthQuery.isPending} errorMessage={monthQuery.isError ? errorText(monthQuery.error) : ""} isRetrying={monthQuery.isFetching} onRetry={() => void monthQuery.refetch()}
-        onMonthChange={setMonth} onSelectDate={date => { if (create.isPending) return; create.reset(); setDates(current => current.includes(date) ? current.filter(item => item !== date) : current.length < 14 ? [...current, date].sort() : current); }} />
-      <section className="knowledge-compose" aria-labelledby="knowledge-compose-title"><p className="eyebrow">从哪几天开始</p><h3 id="knowledge-compose-title">把零散的收获，连起来</h3>
-        <p className="knowledge-muted">来源：{sourceEntryMode === "ai" ? "AI 提炼" : "手动记录"}。以该方式已保存的知识主题、小结和灵感为基础；未保存草稿和图片正文不会参与生成。</p>
+        onMonthChange={setMonth} onSelectDate={date => { if (create.isPending) return; create.reset(); setDates(current => current.includes(date) ? current.filter(item => item !== date) : current.length < 14 ? [...current, date].sort() : current); }} />}
+      <section className="knowledge-compose" aria-labelledby="knowledge-compose-title"><p className="eyebrow">{recordSelection ? "从哪些记录开始" : "从哪几天开始"}</p><h3 id="knowledge-compose-title">把零散的收获，连起来</h3>
+        <p className="knowledge-muted">{recordSelection ? "选择 2–14 条已完成记录，支持同一天、跨日期和不同整理方式。待整理内容、待确认结果及图片正文不会参与生成。" : `来源：${sourceEntryMode === "ai" ? "AI 提炼" : "手动记录"}。以该方式已保存的知识主题、小结和灵感为基础；未保存草稿和图片正文不会参与生成。`}</p>
         <p className="knowledge-muted">同一主题会整理为概念图谱与表达提纲，必要时补充少量知识并标注「AI 补充」。多领域混合时按原始记录展示。</p>
-        <div className="knowledge-selection-count">已选 <strong>{dates.length}</strong> / 14 天{dates.length < 2 ? <span>至少选择 2 天</span> : null}</div>
+        {recordSelection ? <div className="knowledge-selection-count">已选 <strong>{recordIds.length}</strong> / 14 条{recordIds.length<2?<span>至少选择 2 条</span>:null}</div> : <><div className="knowledge-selection-count">已选 <strong>{dates.length}</strong> / 14 天{dates.length < 2 ? <span>至少选择 2 天</span> : null}</div>
         <ul className="knowledge-selected-dates" aria-label="已选日期">{dates.map(date => <li key={date}><time>{date}</time><button aria-label={`移除 ${date}`} type="button" disabled={create.isPending} onClick={() => { setDates(current => current.filter(item => item !== date)); create.reset(); }}><X size={14} aria-hidden="true" /></button></li>)}</ul>
-        {!dates.length ? <p className="knowledge-selection-empty">在日历中点选有记录的日期，探索它们之间的联系。</p> : null}
+        {!dates.length ? <p className="knowledge-selection-empty">在日历中点选有记录的日期，探索它们之间的联系。</p> : null}</> }
         <label className="knowledge-question-label" htmlFor="knowledge-question">想探索的问题（可选）</label><textarea id="knowledge-question" rows={3} maxLength={300} placeholder="例如：这些学习如何帮助我搭建一个完整的检索流程？" disabled={create.isPending} value={question} onChange={event => { setQuestion(event.target.value); create.reset(); }} />
         <p className="knowledge-character-count">{question.length}/300</p>
         {create.isError ? <p role="alert" className="knowledge-error">{errorText(create.error)}</p> : null}
-        <button className="primary-button knowledge-generate" type="button" disabled={dates.length < 2 || dates.length > 14 || create.isPending} onClick={() => void generate()}>{create.isPending ? "正在提交…" : create.isError ? "重试生成请求" : "生成知识脉络"}</button>
+        <button className="primary-button knowledge-generate" type="button" disabled={(recordSelection ? recordIds : dates).length < 2 || (recordSelection ? recordIds : dates).length > 14 || create.isPending} onClick={() => void generate()}>{create.isPending ? "正在提交…" : create.isError ? "重试生成请求" : "生成知识脉络"}</button>
         <p className="knowledge-muted knowledge-generation-note">生成后自动保存；重新生成会保留旧版本并使用 1 次额度。本账号的知识提炼与知识串联每天合计最多 5 次，按实际请求当天计数，北京时间 0 点重置；切换所选日期不会增加次数。</p>
       </section>
     </div> : <section className="knowledge-history" aria-labelledby="knowledge-history-title">
@@ -234,7 +238,7 @@ export function KnowledgeWorkspace({ today, userId, entryMode = "manual", onClos
       {history.isPending ? <p role="status">正在读取历史脉络…</p> : null}
       {history.isError ? <div role="alert"><p>{errorText(history.error)}</p><button className="text-button" type="button" disabled={history.isFetching} onClick={() => void history.refetch()}>重试历史脉络</button></div> : null}
       {copy.isError ? <p role="alert" className="knowledge-error">{errorText(copy.error)}，请再次点击该条脉络的复制按钮重试。</p> : null}
-      {history.data?.length === 0 ? <div className="knowledge-library-empty">{emptyIllustration ?? <div className="knowledge-empty-thread" aria-hidden="true"><i /><i /><i /></div>}<h4>还没有知识脉络</h4><p>从几天已保存的学习记录开始，把零散的收获连成自己的理解。</p><button className="primary-button" type="button" onClick={() => startSelection()}>创建第一条脉络</button></div> : null}
+      {history.data?.length === 0 ? <div className="knowledge-library-empty">{emptyIllustration ?? <div className="knowledge-empty-thread" aria-hidden="true"><i /><i /><i /></div>}<h4>还没有知识脉络</h4><p>选择已完成的学习记录，把零散的收获连成自己的理解。</p><button className="primary-button" type="button" onClick={() => startSelection()}>创建第一条脉络</button></div> : null}
       {history.data?.length ? <><div className="knowledge-library-columns" aria-hidden="true"><span>脉络名称</span><span>学习日期</span><span>创建时间</span><span>状态</span><span>操作</span></div>
       <ul className="knowledge-library-list">{history.data.map(item => <li className="knowledge-library-row" key={item.id}>
         <button type="button" className="knowledge-library-name" aria-label={`打开知识脉络 ${item.title}，${labels[item.status]}`} onClick={() => openNarrative(item.id)}>{item.title}</button>

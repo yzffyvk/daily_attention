@@ -214,14 +214,26 @@ export async function logout(page: Page) {
   await waitForClient(page);
 }
 
+export async function beginManualRecord(page: Page) {
+  const back = page.getByRole("button", { name: "返回记录列表", exact: true });
+  if (await back.isVisible()) await back.click();
+  await page.locator(".learning-list-heading").getByRole("button", { name: "新增记录", exact: true }).click();
+  await expect(page.getByRole("button", { name: "手动记录", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("textbox", { name: "学习主题", exact: true })).toBeVisible();
+}
+
 export async function saveCheckIn(page: Page, attention: string) {
-  await page.getByRole("textbox", { name: "今日知识主题", exact: true }).fill(attention);
-  await page.getByRole("button", { name: /完成打卡|保存修改/ }).click();
-  await expect(page.getByText(`${attention}`, { exact: true }).first()).toBeVisible();
+  await beginManualRecord(page);
+  await page.getByRole("textbox", { name: "学习主题", exact: true }).fill(attention);
+  const response = page.waitForResponse(response => new URL(response.url()).pathname === "/api/records" && response.request().method() === "POST");
+  await page.getByRole("button", { name: "确认", exact: true }).click();
+  expect((await response).ok()).toBe(true);
+  await expect(page.getByRole("heading", { name: attention, exact: true })).toBeVisible();
 }
 
 export function otherDateLabel() {
-  const date = new Date();
-  date.setDate(date.getDate() === 1 ? 2 : date.getDate() - 1);
-  return `${date.getMonth() + 1}月${date.getDate()}日`;
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const previous = new Date(`${today}T12:00:00Z`);
+  previous.setUTCDate(previous.getUTCDate() - 1);
+  return `${previous.getUTCMonth() + 1}月${previous.getUTCDate()}日`;
 }

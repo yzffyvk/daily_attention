@@ -14,6 +14,7 @@ export async function POST(request:Request){
   try {const context=await createNarrativeContext();if(!context) throw new Error("SESSION_EXPIRED");
     if(process.env.AI_GENERATION_ENABLED!=="true") throw new Error("FEATURE_DISABLED");
     const parsed=await parseNarrativeInput(request,createNarrativeSchema,requestId);if("response" in parsed) return parsed.response;
+    if (!("recordIds" in parsed.data)) throw new Error("CLIENT_UPGRADE_REQUIRED");
     await consumeRateLimit("aiGenerate",`${context.userId}:${requestIp(request)}`,context.admin);
     return narrativeSuccess(await context.repository.create(context.userId,parsed.data),requestId,202);
   }catch(error){return narrativeFailure(error,requestId);}

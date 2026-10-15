@@ -1,5 +1,5 @@
-import { AI_RESULT_WARNING_LIMIT } from '@/lib/domain/ai-review';
 import { z } from "zod";
+import { AI_RESULT_WARNING_LIMIT } from './ai-review';
 import { writableDateKeySchema } from "@/lib/domain/checkin";
 import { aiUserPromptSchema } from "@/lib/domain/ai-prompt";
 
@@ -59,6 +59,7 @@ const sourceUrlSchema = z
   });
 
 export const createAiGenerationSchema = z.object({
+  recordId: z.uuid("记录标识格式不正确").optional(),
   sourceUrl: sourceUrlSchema,
   userPrompt: aiUserPromptSchema.default(""),
   targetDate: writableDateKeySchema,
@@ -75,3 +76,24 @@ export const aiGenerationResultSchema = z.object({
 
 export type CreateAiGenerationInput = z.input<typeof createAiGenerationSchema>;
 export type AiGenerationResult = z.infer<typeof aiGenerationResultSchema>;
+
+export const aiGenerationTaskErrorMessages = {
+  FETCH_TIMEOUT: "读取网页超时，请稍后重试",
+  FETCH_SERVICE_UNAVAILABLE: "网页读取服务暂时不可用，请稍后重试",
+  TOO_MANY_REDIRECTS: "网页跳转次数过多",
+  RESPONSE_TOO_LARGE: "网页内容过大，暂时无法处理",
+  UNSUPPORTED_CONTENT_TYPE: "该链接不是可处理的文本网页",
+  CONTENT_NOT_EXTRACTABLE: "未能从该页面读取足够的公开正文",
+  CONTENT_BLOCKED: "该页面暂时无法访问",
+  MODEL_RATE_LIMITED: "AI 服务繁忙，请稍后重试",
+  MODEL_OUTPUT_INVALID: "AI 返回内容未通过质量校验，请稍后重试",
+  MODEL_SERVICE_ERROR: "AI 服务暂时不可用，请稍后再试",
+  TASK_RETRY_EXHAUSTED: "任务多次尝试后仍未成功",
+  RESULT_EXPIRED: "生成结果已过期，请重新生成",
+} as const;
+
+export function aiGenerationErrorMessage(code: string | null | undefined): string {
+  return code && Object.hasOwn(aiGenerationTaskErrorMessages, code)
+    ? aiGenerationTaskErrorMessages[code as keyof typeof aiGenerationTaskErrorMessages]
+    : "AI 提炼失败，请重试";
+}

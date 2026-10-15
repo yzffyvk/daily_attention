@@ -1,0 +1,15 @@
+begin;
+select plan(7);
+insert into auth.users(id,email) values ('00000000-0000-4000-8000-000000008701','source-text@test.invalid');
+insert into public.profiles(id,email,display_name,avatar_key) values ('00000000-0000-4000-8000-000000008701','source-text@test.invalid','Source learner',1);
+set local role authenticated;
+select set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000008701","role":"authenticated"}',true);
+select lives_ok($$select * from public.create_learning_record('00000000-0000-4000-8000-000000008702','{"date":"2026-07-01","attention":"Manual learning","sourceUrl":"课堂笔记 #1","summary":"My notes","entryMode":"manual","status":"completed"}'::jsonb)$$,'completed records accept a plain-text source');
+select is((select source_url from public.check_ins where id='00000000-0000-4000-8000-000000008702'),'课堂笔记 #1','source text is saved verbatim');
+select lives_ok($$select * from public.update_learning_record('00000000-0000-4000-8000-000000008702',1,'{"sourceUrl":"课堂笔记 #1","summary":"Edited notes","status":"completed"}'::jsonb,null,false)$$,'updates can retain non-URL sources alongside a summary');
+select is((select version from public.check_ins where id='00000000-0000-4000-8000-000000008702'),2,'content updates increment the version normally');
+select throws_ok($$select * from public.create_learning_record('00000000-0000-4000-8000-000000008703',jsonb_build_object('date','2026-07-01','attention','Too long','sourceUrl',repeat('x',2049),'status','completed'))$$,'23514',null,'source text still has a length limit');
+select is(public.normalize_learning_source_url('  课堂笔记 #1  '),'课堂笔记 #1','plain-text comparison preserves hash characters');
+select is(public.normalize_learning_source_url('https://EXAMPLE.com:443#heading'),'https://example.com/','HTTP link normalization is preserved');
+select * from finish();
+rollback;

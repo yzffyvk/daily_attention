@@ -8,15 +8,16 @@ import { createNarrativeRepository } from "./repository";
 
 const headers={"Cache-Control":"private, no-store"};
 const errors:Record<string,{status:number;message:string}>={
+  CLIENT_UPGRADE_REQUIRED:{status:409,message:"记录已升级为多条独立保存，请刷新页面后选择具体记录进行串联。"},
   SESSION_EXPIRED:{status:401,message:"登录已失效，请重新登录"},
   FEATURE_DISABLED:{status:403,message:"AI 生成功能暂未开放"},
   NARRATIVE_NOT_FOUND:{status:404,message:"这条知识脉络不存在或无权访问"},
   NARRATIVE_NOT_READY:{status:409,message:"脉络尚未生成完成或不可访问，请刷新后重试"},
   NARRATIVE_EDIT_CONFLICT:{status:409,message:"这条脉络已在其他页面更新，当前修改仍保留在编辑框内。请先把改动复制到别处，再返回列表重新打开最新内容。"},
-  NARRATIVE_EDIT_INVALID:{status:422,message:"总结格式或引用日期不正确，请检查内容后重试"},
-  NARRATIVE_IDEMPOTENCY_CONFLICT:{status:409,message:"本次请求的日期或问题已变化，请重新生成"},
-  NARRATIVE_SOURCES_MISSING:{status:422,message:"部分日期没有已保存的记录，请重新选择"},
-  NARRATIVE_INVALID_INPUT:{status:422,message:"请选择 2–14 个不同的已保存日期"},
+  NARRATIVE_EDIT_INVALID:{status:422,message:"总结格式或引用来源不正确，请检查内容后重试"},
+  NARRATIVE_IDEMPOTENCY_CONFLICT:{status:409,message:"本次请求的来源或问题已变化，请重新生成"},
+  NARRATIVE_SOURCES_MISSING:{status:422,message:"部分来源已删除或尚未完成，请重新选择"},
+  NARRATIVE_INVALID_INPUT:{status:422,message:"请选择 2–14 条不同的已完成记录"},
   DAILY_AI_LIMIT_REACHED:{status:429,message:"本账号今天的 5 次 AI 生成机会已用完，知识提炼与知识串联共用额度，北京时间 0 点重置"},
   RATE_LIMITED:{status:429,message:"请求过于频繁，请稍后再试"},
   NARRATIVE_SERVICE_UNAVAILABLE:{status:503,message:"知识脉络服务暂时不可用，请稍后重试"},

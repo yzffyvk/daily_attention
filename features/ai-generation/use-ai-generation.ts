@@ -22,6 +22,7 @@ const slowPollDelay = 15_000;
 const longRunningAfterMs = 120_000;
 
 type CreateRequest = {
+  recordId?: string;
   userPrompt: string;
   sourceUrl: string;
   targetDate: string;
@@ -31,7 +32,7 @@ type CreateRequest = {
 type UseAiGenerationInput = {
   activeJob: ActiveAiJob | null;
   onActiveJobChange?: (activeJob: ActiveAiJob | null) => void;
-  onSucceeded(result: AiGenerationResult, targetDate: string, generationContext?: AiGenerationContext): void;
+  onSucceeded(result: AiGenerationResult, targetDate: string, generationContext?: AiGenerationContext, recordId?: string): void;
   onTerminal(jobId: string): void;
 };
 
@@ -52,7 +53,7 @@ export type AiGenerationController = {
   cancellationConfirmationRequired: boolean;
   dismissCancellationConfirmation(): void;
   clearError(): void;
-  generate(input: { sourceUrl: string; targetDate: string; userPrompt?: string }): Promise<void>;
+  generate(input: { recordId?: string; sourceUrl: string; targetDate: string; userPrompt?: string }): Promise<void>;
   retryCreate(): Promise<void>;
   cancel(confirmQuotaConsumption?: boolean): Promise<void>;
 };
@@ -136,7 +137,16 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     setError("");
     if (next.status === "succeeded" && next.result) {
       setCancellationMessage("");
-      callbacksRef.current.onSucceeded(next.result, job.targetDate, next.generationContext ?? job.generationContext);
+      if (job.recordId) {
+        callbacksRef.current.onSucceeded(next.result, job.targetDate, next.generationContext ?? job.generationContext, job.recordId);
+      } else {
+        callbacksRef.current.onSucceeded(next.result, job.targetDate, next.generationContext ?? job.generationContext);
+      }
+      finish(job.jobId);
+      return true;
+    }
+    if (next.status === "succeeded" && next.error) {
+      if (!job.recordId) setError(next.error.message);
       finish(job.jobId);
       return true;
     }
@@ -218,6 +228,7 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
       const created = await createAiGeneration(request);
       const job: ActiveAiJob = {
         jobId: created.jobId,
+        ...((created.recordId ?? request.recordId) ? { recordId: created.recordId ?? request.recordId } : {}),
         targetDate: request.targetDate,
         sourceUrl: request.sourceUrl,
         userPrompt: request.userPrompt,
@@ -242,7 +253,8 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     }
   }, [clearPolling, schedulePoll]);
 
-  const generate = useCallback(async ({ sourceUrl, targetDate, userPrompt = "" }: {
+  const generate = useCallback(async ({ sourceUrl, targetDate, userPrompt = "", recordId }: {
+    recordId?: string;
     sourceUrl: string;
     targetDate: string;
     userPrompt?: string;
@@ -255,9 +267,9 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     }
     const normalizedPrompt = parsedPrompt.data;
     const pending = pendingCreateRef.current;
-    const request = pending?.sourceUrl === sourceUrl && pending.targetDate === targetDate && pending.userPrompt === normalizedPrompt
+    const request = pending?.recordId === recordId && pending?.sourceUrl === sourceUrl && pending.targetDate === targetDate && pending.userPrompt === normalizedPrompt
       ? pending
-      : { sourceUrl, targetDate, userPrompt: normalizedPrompt, idempotencyKey: crypto.randomUUID() };
+      : { ...(recordId ? { recordId } : {}), sourceUrl, targetDate, userPrompt: normalizedPrompt, idempotencyKey: crypto.randomUUID() };
     pendingCreateRef.current = request;
     setCanRetryCreate(false);
     await performCreate(request);

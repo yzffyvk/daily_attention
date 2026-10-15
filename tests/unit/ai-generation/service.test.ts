@@ -32,6 +32,13 @@ function repository(overrides: Partial<AiGenerationRepository> = {}): AiGenerati
 }
 
 describe("AI generation service", () => {
+  it("keeps the record identity through request creation and polling responses", async () => {
+    const recordId = "00000000-0000-4000-8000-000000000099";
+    const repo = repository();
+    await createGeneration(created.job.userId, { ...input, recordId }, repo);
+    expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ recordId }));
+    expect(toAiGenerationJobData({ ...created.job, recordId, baseVersion: 7 })).toMatchObject({ recordId, baseVersion: 7 });
+  });
   it("keeps server quota settlement and cancellation metadata in the public response", async () => {
     const job = { ...created.job, status: "cancelled" as const, quota: { used: 0, reserved: 0, consumed: 0, limit: 5 as const, remaining: 5 },
       cancellation: { freeRemaining: 1, requiresConfirmation: false, charged: false } };

@@ -10,7 +10,7 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
-    exclude: [...configDefaults.exclude, "**/.worktrees/**"],
+    exclude: [...configDefaults.exclude, "**/.worktrees/**", "**/work/**", "**/.local-backups/**"],
     maxWorkers: 1,
     setupFiles: ["./tests/setup.ts"],
     restoreMocks: true,
