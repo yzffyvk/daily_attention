@@ -288,7 +288,7 @@ export function createProductionDependencies(
         };
       },
     }
-    : createDeepSeekProvider({ apiKey: environment.deepSeekApiKey });
+    : createDeepSeekProvider({ apiKey: environment.deepSeekApiKey, reviewModel: readEnvironment('AI_REVIEW_MODEL') });
 
   const runnerPorts: AiJobRunnerPorts = {
     async claim(jobId) {
@@ -330,6 +330,9 @@ export function createProductionDependencies(
         target_attempt_count: attemptCount,
         target_progress: progress,
       });
+    },
+    reportSemanticReview(jobId, audit) {
+      console.info(JSON.stringify({ event: 'ai_semantic_review', jobId, ...audit }));
     },
     generate(input) {
       const timeoutMs = options.dedicatedWorker ? dedicatedAiTiming.modelTimeoutMs : 120_000;

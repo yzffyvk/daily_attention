@@ -25,6 +25,15 @@ export function normalizeQuestionViews<T>(value: T): T {
   if (raw && Array.isArray(raw.structure?.relations)) {
     candidate = structuredClone(value);
     const relations = (candidate as { structure: { relations: unknown[] } }).structure.relations;
+    const nodes = (candidate as { structure: { nodes?: unknown } }).structure.nodes;
+    if (Array.isArray(nodes)) for (const node of nodes) {
+      // Display-role aliases only; keep the name, explanation, evidence and
+      // every factual relationship intact. Unknown roles still fail validation.
+      if (node && typeof node === 'object') {
+        if (node.role === '方法') node.role = '方案';
+        else if (node.role === '区别') node.role = '概念';
+      }
+    }
     for (const edge of relations) {
       // Constraints are a condition on the target; preserve the exact directional
       // claim, label, qualification and evidence. Other unknown kinds still fail.
@@ -43,6 +52,7 @@ export function normalizeQuestionViews<T>(value: T): T {
   const parsed = questionSummarySchema.safeParse(candidate);
   const isViewReferenceIssue = (message: string) => message.startsWith('Uncovered relation ')
     || message.startsWith('Question link lacks connecting evidence: ')
+    || message.startsWith('Missing home view for ')
     || /^[a-z][a-z0-9_-]*: Foreign node must be explicitly referenced: /u.test(message)
     || /^[a-z][a-z0-9_-]*: Relation endpoints must be visible: /u.test(message);
   if (parsed.success || parsed.error.issues.some(issue => issue.code !== 'custom' || !isViewReferenceIssue(issue.message))) return candidate;
@@ -52,6 +62,15 @@ export function normalizeQuestionViews<T>(value: T): T {
   const views = result.structure.questions.flatMap(q => q.views);
   const edges = new Map(result.structure.relations.map(edge => [edge.id, edge]));
   const nodes = new Map(result.structure.nodes.map(node => [node.id, node]));
+  for (const node of result.structure.nodes) {
+    const owner = result.structure.questions.find(question => question.id === node.homeQuestionId);
+    // Ownership is explicit, never inferred from a name or another view.
+    if (!owner) return candidate;
+    if (!owner.views.some(view => view.nodeIds.includes(node.id))) {
+      owner.views[0].nodeIds.push(node.id);
+      owner.views[0].readingOrder.push(node.id);
+    }
+  }
   for (const question of result.structure.questions) for (const view of question.views) {
     // Ownership is already explicit; reference badges are derived metadata.
     view.referenceNodeIds = view.nodeIds.filter(id => nodes.get(id)?.homeQuestionId !== question.id);

@@ -1,14 +1,8 @@
 import type { QuestionSummary } from '@/lib/domain/knowledge-questions';
 import { isSymmetric } from './structure-reader-model';
-
-// Render the limited emphasis used in summaries as React text, never as HTML.
-function SummaryText({ value }: { value: string }) {
-  return <>{value.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/gu).map((part, index) =>
-    part.startsWith('`') && part.endsWith('`') ? <code key={index}>{part.slice(1, -1)}</code>
-      : part.startsWith('**') && part.endsWith('**') ? <strong key={index}>{part.slice(2, -2)}</strong>
-        : part,
-  )}</>;
-}
+import { QuestionMemoryOutline, QuestionPartExplanation, questionReadingParts, SummaryText } from './question-reading';
+import { PendingReviewNotice } from './pending-review-notice';
+import { PENDING_REVIEW_PREFIX } from '@/lib/domain/ai-review';
 
 function Evidence({ value }: { value: string }) {
   return <details className="summary-document-evidence"><summary>原文依据</summary><blockquote><SummaryText value={value} /></blockquote></details>;
@@ -17,6 +11,8 @@ function Evidence({ value }: { value: string }) {
 /** A reading view of the saved document; storage syntax stays in the editor. */
 export function QuestionSummaryDocument({ document }: { document: QuestionSummary }) {
   const s = document.structure;
+  const parts = questionReadingParts(s);
+  const sourceWarnings = document.warnings.filter(warning => !warning.startsWith(PENDING_REVIEW_PREFIX));
   const nodeNames = new Map(s.nodes.map(node => [node.id, node.name]));
   return <article className="summary-document" data-testid="complete-summary" aria-label="完整小结正文">
     <header>
@@ -24,40 +20,33 @@ export function QuestionSummaryDocument({ document }: { document: QuestionSummar
       <h4><SummaryText value={document.attention} /></h4>
       <p className="summary-document-thesis"><SummaryText value={document.thesis} /></p>
     </header>
+    <PendingReviewNotice warnings={document.warnings} structure={s} />
     <section>
       <h5>核心问题</h5>
       <p><SummaryText value={s.coreQuestion} /></p>
     </section>
+    <QuestionMemoryOutline parts={parts} />
     <section>
-      <h5>核心部分</h5>
-      <ol className="summary-document-parts">{s.questionOrder.map(id => {
-        const q = s.questions.find(question => question.id === id)!;
+      <h5>沿骨架展开</h5>
+      <ol className="summary-document-parts">{parts.map(({ question: q, label, nodes }) => {
+        const id = q.id;
         const notes = [...new Set([
           ...q.views.flatMap(view => view.contextNotes.map(note => note.text)),
           ...s.questionLinks.filter(link => link.fromQuestionId === id).map(link => link.label),
         ])];
         return <li key={id}>
-          <p className="summary-document-part-label"><SummaryText value={q.mainlineRole} /></p>
+          <p className="summary-document-part-label"><SummaryText value={label} /></p>
           <h6><SummaryText value={q.title} /></h6>
           <p><SummaryText value={q.answer} /></p>
+          <QuestionPartExplanation nodes={nodes} />
           <details className="summary-document-evidence"><summary>范围与依据</summary>
             <p><SummaryText value={q.scope} /></p>
+            {q.mainlineRole !== label ? <p><SummaryText value={q.mainlineRole} /></p> : null}
             {notes.map(note => <p key={note}><SummaryText value={note} /></p>)}
             <blockquote><SummaryText value={q.evidence} /></blockquote>
           </details>
         </li>;
       })}</ol>
-    </section>
-    <section>
-      <h5>概念解释</h5>
-      <dl className="summary-document-concepts">{s.nodes.map(node => <div key={node.id}>
-        <dt><SummaryText value={node.name} /></dt>
-        <dd>
-          {node.summary !== node.explanation ? <p className="summary-document-definition"><SummaryText value={node.summary} /></p> : null}
-          <p><SummaryText value={node.explanation} /></p>
-          <Evidence value={node.evidence} />
-        </dd>
-      </div>)}</dl>
     </section>
     {s.relations.length ? <details className="summary-document-relations">
       <summary>关系与适用条件</summary>
@@ -70,6 +59,6 @@ export function QuestionSummaryDocument({ document }: { document: QuestionSummar
     </details> : null}
     {document.distinctions ? <section><h5>关键辨析</h5><p><SummaryText value={document.distinctions} /></p></section> : null}
     <section><h5>试着讲一遍</h5><ol className="summary-document-prompts">{document.prompts.map((prompt, index) => <li key={index}><SummaryText value={prompt} /></li>)}</ol></section>
-    {document.warnings.length ? <section className="summary-document-warnings"><h5>资料提醒</h5><ul>{document.warnings.map((warning, index) => <li key={index}><SummaryText value={warning} /></li>)}</ul></section> : null}
+    {sourceWarnings.length ? <section className="summary-document-warnings"><h5>资料提醒</h5><ul>{sourceWarnings.map((warning, index) => <li key={index}><SummaryText value={warning} /></li>)}</ul></section> : null}
   </article>;
 }

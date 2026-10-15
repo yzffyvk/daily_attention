@@ -49,6 +49,12 @@ function rpcState(overrides: Record<string, unknown> = {}) {
 }
 
 describe("AI generation repository", () => {
+  it('reads a successful draft with all source notices and review findings intact', async () => {
+    const warnings = Array.from({ length: 23 }, (_, i) => `待核对：提醒${i}`);
+    const rpc = vi.fn().mockResolvedValue({ data: rpcState({ status: 'succeeded', summary: '可读学习草稿', warnings }), error: null });
+    await expect(createAiGenerationRepository({ rpc }).findOwned(userId, jobId)).resolves.toMatchObject({ warnings, summary: '可读学习草稿' });
+  });
+
   it("reads a completed long summary without dropping the generated result", async () => {
     const summary = '知'.repeat(30000);
     const rpc = vi.fn().mockResolvedValue({ data: rpcState({ status: 'succeeded', summary }), error: null });

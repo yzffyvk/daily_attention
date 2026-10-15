@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { knowledgeContentTypes, knowledgeStructureSchema, type KnowledgeStructure } from './knowledge-structure.ts';
+import { AI_RESULT_WARNING_LIMIT } from './ai-review.ts';
 
 const line = (max: number) => z.string().trim().min(1).max(max).regex(/^[^\r\n]+$/u);
 const id = z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/u);
@@ -85,7 +86,7 @@ export const questionStructureSchema = z.object({
 export const questionSummarySchema = z.object({
   attention: line(120), thesis: line(300), structure: questionStructureSchema,
   distinctions: z.string().trim().max(1200), prompts: z.array(line(220)).min(1).max(2),
-  inspiration: z.literal(''), sourceTitle: line(300), warnings: z.array(line(500)).max(10),
+  inspiration: z.literal(''), sourceTitle: line(300), warnings: z.array(line(500)).max(AI_RESULT_WARNING_LIMIT),
 }).strict();
 export type QuestionStructure = z.infer<typeof questionStructureSchema>;
 export type QuestionSummary = z.infer<typeof questionSummarySchema>;

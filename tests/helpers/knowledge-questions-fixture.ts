@@ -2,7 +2,7 @@ export function questionSummaryFixture() {
   const evidence = '计划列出行动步骤，检查用于验证结果。';
   return {
     attention: '计划与检查', thesis: '先明确行动，再检查结果。', inspiration: '' as const,
-    sourceTitle: '工作方法', warnings: [], distinctions: '建议阅读顺序不等于执行顺序。', prompts: ['检查如何改进计划？'],
+    sourceTitle: '工作方法', warnings: [] as string[], distinctions: '建议阅读顺序不等于执行顺序。', prompts: ['检查如何改进计划？'],
     structure: {
       schemaVersion: 2 as const, coreQuestion: '如何安排并检查行动？', contentTypes: ['方法与决策规则' as const],
       questionOrder: ['q1', 'q2'],

@@ -4,15 +4,21 @@ import {
   AI_LEGACY_PROMPT_VERSION,
   AI_RELATION_PROMPT_VERSION,
   AI_QUESTION_PROMPT_VERSION,
+  AI_RECALL_PROMPT_VERSION,
+  AI_REVIEWED_RECALL_PROMPT_VERSION,
   AI_SUMMARY_PROMPT_VERSION,
   type AiUsage,
   type AiSummaryProvider,
+  type AiSummaryProviderResult,
 } from "./contracts.ts";
 
 import { structuredSummarySchema, serializeStructuredSummary, hasSourceEvidence, parseKnowledgeStructure } from "../../../../lib/domain/knowledge-structure.ts";
 import { questionSummarySchema, serializeQuestionSummary, parseQuestionSummary } from "../../../../lib/domain/knowledge-questions.ts";
 import { SOURCE_TRUNCATION_NOTICE } from "../../../../lib/domain/summary-limits.ts";
 import { questionSystemPrompt } from "./question-prompt.ts";
+import { recallSystemPrompt, recallRevisionSystemPrompt } from "./recall-prompt.ts";
+import { annotateReviewDraft, semanticReviewSchema, semanticReviewFeedback, semanticReviewSystemPrompt, type SemanticReview } from "./semantic-review.ts";
+import { questionFrameworkSchema, bindQuestionFramework, questionFrameworkFeedback, questionFrameworkSystemPrompt, questionFrameworkReviewSystemPrompt, type QuestionFramework } from "./question-framework.ts";
 import { indexQuestionSource, normalizeQuestionViews } from "./question-source.ts";
 import { relationSystemPrompt } from "./relation-prompt.ts";
 import { ChatStreamError, readChatStream } from "./chat-stream.ts";
@@ -20,6 +26,8 @@ import { summaryStreamPreview, type AiGenerationProgress } from "../../../../lib
 
 const DEEPSEEK_ENDPOINT = "https://api.deepseek.com/chat/completions";
 const MAX_RESPONSE_CHARACTERS = 2 * 1024 * 1024;
+// Leave room in the saved document for every program-generated review note.
+const generatedQuestionSummarySchema = questionSummarySchema.extend({ warnings: z.array(z.string().trim().min(1).max(500)).max(10) });
 
 export type DeepSeekProviderErrorCode =
   | "MODEL_RATE_LIMITED"
@@ -90,7 +98,7 @@ const providerInputSchema = z.object({
   sourceText: z.string().min(200).max(60_000),
   sourceTruncated: z.boolean().default(false),
   userPrompt: z.string().trim().max(1000).default(""),
-  promptVersion: z.enum([AI_LEGACY_PROMPT_VERSION, AI_SUMMARY_PROMPT_VERSION, AI_RELATION_PROMPT_VERSION, AI_QUESTION_PROMPT_VERSION]).optional(),
+  promptVersion: z.enum([AI_LEGACY_PROMPT_VERSION, AI_SUMMARY_PROMPT_VERSION, AI_RELATION_PROMPT_VERSION, AI_QUESTION_PROMPT_VERSION, AI_RECALL_PROMPT_VERSION, AI_REVIEWED_RECALL_PROMPT_VERSION]).optional(),
   anonymousUserId: z.string().regex(/^[0-9a-f]{64}$/u),
 });
 
@@ -228,13 +236,20 @@ function sourceCitationResolver(source: string): (quote: string) => string {
 export function createDeepSeekProvider(config: {
   apiKey: string;
   fetchImpl?: typeof fetch;
+  reviewModel?: string;
 }): AiSummaryProvider {
   if (!config.apiKey || config.apiKey.length > 512) {
     throw new Error("DEEPSEEK_CONFIG_INVALID");
   }
   const fetchImpl = config.fetchImpl ?? fetch;
+  const reviewModel = config.reviewModel?.trim() || 'deepseek-v4-pro';
+  if (!/^[a-zA-Z0-9._-]{1,120}$/u.test(reviewModel)) throw new Error('DEEPSEEK_CONFIG_INVALID');
 
-  const generateOnce = async (input: Parameters<AiSummaryProvider["generate"]>[0], repair?: StructuredOutputError) => {
+  type Draft = NonNullable<ReturnType<typeof parseQuestionSummary>>;
+  type Stage = { kind: 'framework'; draft?: QuestionFramework }
+    | { kind: 'summary'; framework?: QuestionFramework; revision?: { draft: Draft; review: SemanticReview } }
+    | { kind: 'semantic-review'; draft: Draft; round: number };
+  const generateOnce = async (input: Parameters<AiSummaryProvider["generate"]>[0], repair?: StructuredOutputError, stage: Stage = { kind: 'summary' }) => {
       const parsedInput = providerInputSchema.safeParse(input);
       if (!parsedInput.success) return providerError("MODEL_OUTPUT_INVALID", false);
       const promptVersion = parsedInput.data.promptVersion
@@ -242,7 +257,11 @@ export function createDeepSeekProvider(config: {
       if (promptVersion === AI_LEGACY_PROMPT_VERSION && parsedInput.data.userPrompt) {
         return providerError("MODEL_OUTPUT_INVALID", false);
       }
-      const usesQuestions = promptVersion === AI_QUESTION_PROMPT_VERSION;
+      const usesSemanticReview = promptVersion === AI_REVIEWED_RECALL_PROMPT_VERSION;
+      const usesRecall = promptVersion === AI_RECALL_PROMPT_VERSION || usesSemanticReview;
+      const usesQuestions = promptVersion === AI_QUESTION_PROMPT_VERSION || usesRecall;
+      const isPlanning = stage.kind === 'framework';
+      const isSemanticReview = stage.kind === 'semantic-review';
       const indexedSource = usesQuestions ? indexQuestionSource(parsedInput.data.sourceText) : null;
       const source = {
         dataType: "untrusted_web_source",
@@ -258,6 +277,10 @@ export function createDeepSeekProvider(config: {
       let lastPreview = "";
       const publish = async (phase: AiGenerationProgress["phase"], content = "", force = false) => {
         if (!input.onProgress) return;
+        if (isSemanticReview && (phase !== 'validating' || content)) return;
+        // The intermediate framework is not a complete draft. Only publish
+        // the thinking state until the prose-writing stage has started.
+        if (isPlanning && (content || phase !== 'thinking')) return;
         const now = Date.now();
         if (!force && lastPreview && now - lastProgressAt < 800) return;
         const preview = summaryStreamPreview(content);
@@ -266,15 +289,15 @@ export function createDeepSeekProvider(config: {
         lastPreview = preview;
         await input.onProgress({ phase, preview, updatedAt: new Date(now).toISOString() });
       };
-      await publish(repair ? "repairing" : "thinking", "", true);
+      await publish(isSemanticReview ? 'validating' : repair ? "repairing" : "thinking", "", true);
       const requestBody = {
-        model: "deepseek-flash",
+        model: isSemanticReview ? reviewModel : "deepseek-flash",
         messages: [
-          { role: "system", content: usesQuestions ? questionSystemPrompt : usesRelations ? relationSystemPrompt : usesUserPrompt ? userPromptSystemPrompt : legacySystemPrompt },
+          { role: "system", content: isSemanticReview ? semanticReviewSystemPrompt : isPlanning ? stage.draft ? questionFrameworkReviewSystemPrompt : questionFrameworkSystemPrompt : stage.kind === 'summary' && stage.revision ? recallRevisionSystemPrompt : usesRecall ? recallSystemPrompt : usesQuestions ? questionSystemPrompt : usesRelations ? relationSystemPrompt : usesUserPrompt ? userPromptSystemPrompt : legacySystemPrompt },
           {
             role: "user",
             content: JSON.stringify(usesUserPrompt
-              ? { userRequirements: parsedInput.data.userPrompt, source }
+              ? { userRequirements: parsedInput.data.userPrompt, source, ...(stage.kind === 'summary' && stage.framework ? { framework: stage.framework } : {}), ...(stage.kind === 'framework' && stage.draft ? { draftFramework: stage.draft } : {}), ...(stage.kind === 'summary' && stage.revision ? { draft: stage.revision.draft, semanticReview: stage.revision.review } : {}), ...(stage.kind === 'semantic-review' ? { draft: stage.draft } : {}) }
               : source),
           },
         ],
@@ -283,9 +306,9 @@ export function createDeepSeekProvider(config: {
         response_format: { type: "json_object" },
         // Thinking shares this budget with the final JSON. Complex question graphs
         // need room for both; the single non-thinking repair keeps its smaller cap.
-        max_tokens: usesQuestions ? (repair ? 16384 : 32768) : usesRelations && !repair ? 16384 : 8192,
-        stream: Boolean(input.onProgress),
-        ...(input.onProgress ? { stream_options: { include_usage: true } } : {}),
+        max_tokens: isSemanticReview || isPlanning ? (repair ? 8192 : 16384) : usesQuestions ? (repair ? 16384 : 32768) : usesRelations && !repair ? 16384 : 8192,
+        stream: Boolean(input.onProgress) && !isPlanning && !isSemanticReview,
+        ...(input.onProgress && !isPlanning && !isSemanticReview ? { stream_options: { include_usage: true } } : {}),
         user_id: parsedInput.data.anonymousUserId,
       };
       if (repair) {
@@ -295,6 +318,7 @@ export function createDeepSeekProvider(config: {
         );
       }
 
+      const requestStartedAt = Date.now();
       let response: Response;
       try {
         response = await fetchImpl(DEEPSEEK_ENDPOINT, {
@@ -302,7 +326,7 @@ export function createDeepSeekProvider(config: {
           headers: {
             Authorization: `Bearer ${config.apiKey}`,
             "Content-Type": "application/json",
-            Accept: input.onProgress ? "text/event-stream" : "application/json",
+            Accept: requestBody.stream ? "text/event-stream" : "application/json",
           },
           body: JSON.stringify(requestBody),
           signal: input.signal,
@@ -339,6 +363,12 @@ export function createDeepSeekProvider(config: {
       const choice = parsedResponse.data.choices[0]!;
       await publish("validating", choice.message.content ?? "", true);
       const used = mapUsage(parsedResponse.data.usage)!;
+      const auditReview = async (verdict: 'pass' | 'revise' | 'invalid', issueCount: number) => {
+        if (stage.kind !== 'semantic-review' || !input.onSemanticReview) return;
+        try { await input.onSemanticReview({ stage: 'document', requestedModel: reviewModel, returnedModel: parsedResponse.data.model, round: stage.round, verdict, issueCount, durationMs: Date.now() - requestStartedAt, usage: used }); }
+        catch { /* Audit transport must not change the acceptance verdict. */ }
+      };
+      if (isSemanticReview && (choice.finish_reason !== 'stop' || !choice.message.content?.trim())) await auditReview('invalid', 0);
       const responseError = (code: DeepSeekProviderErrorCode, retryable: boolean): never => {
         throw new DeepSeekProviderError(code, retryable, { usage: used, providerCallCount: 1 });
       };
@@ -361,13 +391,28 @@ export function createDeepSeekProvider(config: {
       }
 
       let generatedJson = parseJson(choice.message.content);
+      if (stage.kind === 'semantic-review') {
+        const reviewed = semanticReviewSchema.safeParse(generatedJson);
+        const feedback = reviewed.success ? semanticReviewFeedback(reviewed.data, stage.draft, indexedSource!.resolve) : [JSON.stringify(reviewed.error.issues)];
+        await auditReview(reviewed.success && !feedback.length ? reviewed.data.verdict : 'invalid', reviewed.success ? reviewed.data.issues.length : 0);
+        if (!reviewed.success || feedback.length) throw new StructuredOutputError(choice.message.content, feedback.join('\n'), used);
+        return { review: reviewed.data, usage: used, providerCallCount: 1, model: parsedResponse.data.model, systemFingerprint: parsedResponse.data.system_fingerprint ?? null };
+      }
+      if (isPlanning) {
+        const planned = questionFrameworkSchema.safeParse(generatedJson);
+        if (!planned.success) throw new StructuredOutputError(choice.message.content, JSON.stringify(planned.error.issues), used);
+        const missing = planned.data.parts.flatMap(part => [part, ...part.concepts]).filter(item => !indexedSource?.resolve(item.evidence));
+        if (missing.length) throw new StructuredOutputError(choice.message.content, '骨架引用必须选择 source.text 中实际存在的单个片段编号，不得编造依据。', used);
+        return { framework: planned.data, usage: used, providerCallCount: 1, model: parsedResponse.data.model, systemFingerprint: parsedResponse.data.system_fingerprint ?? null };
+      }
       if (usesQuestions) {
-        const structured = questionSummarySchema.safeParse(normalizeQuestionViews(generatedJson));
+        if (stage.framework && !stage.revision) generatedJson = bindQuestionFramework(generatedJson, stage.framework);
+        const structured = generatedQuestionSummarySchema.safeParse(normalizeQuestionViews(generatedJson));
         if (!structured.success) throw new StructuredOutputError(choice.message.content, JSON.stringify(structured.error.issues), used);
         const resolveCitation = sourceCitationResolver(parsedInput.data.sourceText);
         const normalize = (text: string) => text.normalize("NFKC").replace(/\s+/gu, "");
         const original = normalize(parsedInput.data.sourceText);
-        const feedback: string[] = [];
+        const feedback: string[] = stage.framework && !stage.revision ? questionFrameworkFeedback(structured.data, stage.framework) : [];
         for (const key of ["questions", "nodes", "relations"] as const) structured.data.structure[key].forEach((item, index) => {
           item.evidence = indexedSource?.resolve(item.evidence) ?? resolveCitation(item.evidence);
           if (!original.includes(normalize(item.evidence))) {
@@ -375,7 +420,7 @@ export function createDeepSeekProvider(config: {
             feedback.push(`structure.${key}[${index}].evidence 未在原文中找到。只复制支持该命题的连续原文，不得拼接改写。${nearby.length ? `可核对的不可信原文片段：${JSON.stringify(nearby)}` : ""}`);
           }
         });
-        if (parsedInput.data.sourceTruncated) structured.data.warnings = [...new Set([SOURCE_TRUNCATION_NOTICE, ...structured.data.warnings])].slice(0, 10);
+        if (parsedInput.data.sourceTruncated) structured.data.warnings = [...new Set([SOURCE_TRUNCATION_NOTICE, ...structured.data.warnings])];
         const summary = serializeQuestionSummary(structured.data);
         if (JSON.stringify(parseQuestionSummary(summary)) !== JSON.stringify(structured.data)) feedback.push("问题结构无法完整往返解析，检查标识、视图归属和引用，不得丢掉问题或关系。");
         if (feedback.length) throw new StructuredOutputError(choice.message.content, feedback.join("\n"), used);
@@ -420,18 +465,96 @@ export function createDeepSeekProvider(config: {
   };
   return {
     async generate(input) {
-      try { return await generateOnce(input); }
-      catch (first) {
-        if (!(first instanceof StructuredOutputError) || input.signal?.aborted) throw first;
+      if (!providerInputSchema.safeParse(input).success) return providerError('MODEL_OUTPUT_INVALID', false);
+      let usage: AiUsage | undefined;
+      let providerCallCount = 0;
+      let repairAvailable = true;
+      const attempt = async (stage: Stage, repair?: StructuredOutputError) => {
         try {
-          const repaired = await generateOnce(input, first);
-          return { ...repaired, usage: addUsage(first.usage, repaired.usage), providerCallCount: 1 + repaired.providerCallCount };
-        } catch (second) {
-          if (!(second instanceof DeepSeekProviderError)) throw second;
-          throw new DeepSeekProviderError(second.code, second.retryable, {
-            usage: addUsage(first.usage, second.usage), providerCallCount: 1 + (second.providerCallCount ?? 1),
-          });
+          const result = await generateOnce(input, repair, stage);
+          usage = addUsage(usage, result.usage);
+          providerCallCount += result.providerCallCount;
+          return result;
+        } catch (error) {
+          if (error instanceof DeepSeekProviderError) {
+            usage = addUsage(usage, error.usage);
+            providerCallCount += error.providerCallCount ?? 1;
+          }
+          throw error;
         }
+      };
+      const runStage = async (stage: Stage) => {
+        try { return await attempt(stage); }
+        catch (error) {
+          if (!(error instanceof StructuredOutputError) || !repairAvailable || input.signal?.aborted) throw error;
+          repairAvailable = false;
+          return attempt(stage, error);
+        }
+      };
+      type Written = Pick<AiSummaryProviderResult, 'result' | 'model' | 'systemFingerprint'>;
+      let lastWritten: Written | undefined;
+      let lastReview: SemanticReview | undefined;
+      let reviewRounds = 0;
+      let returnedReviewModel: string | null = null;
+      const complete = (written: Written, semanticReview?: AiSummaryProviderResult['semanticReview']): AiSummaryProviderResult => ({
+        ...written, usage: usage!, providerCallCount, ...(semanticReview ? { semanticReview } : {}),
+      });
+      const deliverDraft = (status: 'pass' | 'needs_review' | 'unavailable', review?: SemanticReview) => complete({
+        ...lastWritten!, result: annotateReviewDraft(lastWritten!.result, status, review),
+      }, { requestedModel: reviewModel, returnedModel: returnedReviewModel, rounds: reviewRounds, verdict: status });
+      try {
+        let framework: QuestionFramework | undefined;
+        if (input.promptVersion === AI_RECALL_PROMPT_VERSION || input.promptVersion === AI_REVIEWED_RECALL_PROMPT_VERSION) {
+          const planned = await runStage({ kind: 'framework' });
+          if (!planned.framework) return providerError('MODEL_OUTPUT_INVALID', false);
+          if (input.signal?.aborted) return providerError('MODEL_SERVICE_ERROR', true);
+          framework = planned.framework;
+          if (input.promptVersion === AI_RECALL_PROMPT_VERSION) {
+            const reviewed = await runStage({ kind: 'framework', draft: planned.framework });
+            if (!reviewed.framework) return providerError('MODEL_OUTPUT_INVALID', false);
+            framework = reviewed.framework;
+          }
+          if (input.signal?.aborted) return providerError('MODEL_SERVICE_ERROR', true);
+        }
+        const written = await runStage({ kind: 'summary', framework });
+        if (!written.result) return providerError('MODEL_OUTPUT_INVALID', false);
+        lastWritten = { result: written.result, model: written.model, systemFingerprint: written.systemFingerprint };
+        if (input.promptVersion === AI_REVIEWED_RECALL_PROMPT_VERSION) {
+          for (const round of [1, 2]) {
+            if (input.signal?.aborted) return providerError('MODEL_SERVICE_ERROR', true);
+            const draft = parseQuestionSummary(lastWritten.result.summary);
+            if (!draft) return providerError('MODEL_OUTPUT_INVALID', false);
+            reviewRounds = round;
+            returnedReviewModel = null;
+            const reviewed = await runStage({ kind: 'semantic-review', draft, round });
+            if (!reviewed.review) return providerError('MODEL_OUTPUT_INVALID', false);
+            lastReview = reviewed.review;
+            returnedReviewModel = reviewed.model;
+            if (input.signal?.aborted) return providerError('MODEL_SERVICE_ERROR', true);
+            if (reviewed.review.verdict === 'pass') {
+              return deliverDraft('pass', reviewed.review);
+            }
+            if (round === 2) return deliverDraft('needs_review', reviewed.review);
+            const revised = await runStage({ kind: 'summary', framework, revision: { draft, review: reviewed.review } });
+            if (!revised.result) return providerError('MODEL_OUTPUT_INVALID', false);
+            lastWritten = { result: revised.result, model: revised.model, systemFingerprint: revised.systemFingerprint };
+            // Feedback on the previous draft must not be presented as findings
+            // about a revision that has not yet been reviewed.
+            lastReview = undefined;
+          }
+        }
+        return complete(lastWritten);
+      } catch (error) {
+        if (!(error instanceof DeepSeekProviderError)) throw error;
+        const reason = input.signal?.reason as { name?: unknown } | undefined;
+        const userCancelled = input.signal?.aborted && reason?.name !== 'TimeoutError';
+        if (input.promptVersion === AI_REVIEWED_RECALL_PROMPT_VERSION && lastWritten && !userCancelled) {
+          return deliverDraft(lastReview?.verdict === 'pass' ? 'pass' : lastReview ? 'needs_review' : 'unavailable', lastReview);
+        }
+        // Exhausting the bounded content repair must not automatically replay
+        // the entire paid pipeline through the queue's transient-error retries.
+        const retryable = input.promptVersion === AI_REVIEWED_RECALL_PROMPT_VERSION && error.code === 'MODEL_OUTPUT_INVALID' ? false : error.retryable;
+        throw new DeepSeekProviderError(error.code, retryable, { usage, providerCallCount });
       }
     },
   };

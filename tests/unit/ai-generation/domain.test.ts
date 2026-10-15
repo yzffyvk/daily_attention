@@ -95,7 +95,7 @@ describe("AI generation domain contracts", () => {
     }).success).toBe(false);
     expect(aiGenerationResultSchema.safeParse({
       ...validResult,
-      warnings: Array.from({ length: 11 }, (_, index) => `warning-${index}`),
+      warnings: Array.from({ length: 33 }, (_, index) => `warning-${index}`),
     }).success).toBe(false);
   });
 

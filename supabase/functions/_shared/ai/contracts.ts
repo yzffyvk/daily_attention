@@ -1,7 +1,10 @@
 import { z } from "zod";
 import type { AiGenerationProgress } from "../../../../lib/domain/ai-progress.ts";
+import { AI_RESULT_WARNING_LIMIT } from "../../../../lib/domain/ai-review.ts";
 
 export const AI_QUESTION_PROMPT_VERSION = "knowledge-questions-v1";
+export const AI_RECALL_PROMPT_VERSION = "knowledge-recall-v1";
+export const AI_REVIEWED_RECALL_PROMPT_VERSION = "knowledge-recall-v2";
 export const AI_RELATION_PROMPT_VERSION = "knowledge-relations-v2";
 export const AI_SUMMARY_PROMPT_VERSION = "knowledge-skeleton-user-prompt-v1";
 export const AI_LEGACY_PROMPT_VERSION = "ai-summary-v1";
@@ -11,7 +14,7 @@ export const aiGenerationResultSchema = z.object({
   summary: z.string().trim().min(1),
   inspiration: z.string().trim().max(2000),
   sourceTitle: z.string().trim().min(1).max(300),
-  warnings: z.array(z.string().trim().min(1).max(500)).max(10),
+  warnings: z.array(z.string().trim().min(1).max(500)).max(AI_RESULT_WARNING_LIMIT),
 }).strict();
 
 export type AiGenerationResult = z.infer<typeof aiGenerationResultSchema>;
@@ -24,12 +27,24 @@ export type AiUsage = {
   reasoningTokens: number;
 };
 
+export type AiReviewAudit = {
+  stage: 'document';
+  requestedModel: string;
+  returnedModel: string;
+  round: number;
+  verdict: 'pass' | 'revise' | 'invalid';
+  issueCount: number;
+  durationMs: number;
+  usage: AiUsage;
+};
+
 export type AiSummaryProviderResult = {
   result: AiGenerationResult;
   usage: AiUsage;
   providerCallCount: number;
   model: string;
   systemFingerprint: string | null;
+  semanticReview?: { requestedModel: string; returnedModel: string | null; rounds: number; verdict: 'pass' | 'needs_review' | 'unavailable' };
 };
 
 export interface AiSummaryProvider {
@@ -42,5 +57,6 @@ export interface AiSummaryProvider {
     anonymousUserId: string;
     signal?: AbortSignal;
     onProgress?: (progress: AiGenerationProgress) => Promise<void> | void;
+    onSemanticReview?: (audit: AiReviewAudit) => Promise<void> | void;
   }): Promise<AiSummaryProviderResult>;
 }

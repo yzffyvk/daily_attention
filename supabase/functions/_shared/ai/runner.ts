@@ -1,9 +1,11 @@
 import { parseQuestionSummary, serializeQuestionSummary } from "../../../../lib/domain/knowledge-questions.ts";
 import { SOURCE_TRUNCATION_NOTICE } from "../../../../lib/domain/summary-limits.ts";
+import { AI_RESULT_WARNING_LIMIT } from "../../../../lib/domain/ai-review.ts";
 import type {
   AiGenerationResult,
   AiSummaryProviderResult,
   AiUsage,
+  AiReviewAudit,
 } from "./contracts.ts";
 import { DeepSeekProviderError } from "./deepseek.ts";
 import type { AiGenerationProgress } from "../../../../lib/domain/ai-progress.ts";
@@ -25,7 +27,7 @@ const fetchFailureMessages: Record<string, string> = {
 const providerFailureMessages: Record<string, string> = {
   MODEL_RATE_LIMITED: "AI 服务繁忙，请稍后重试",
   MODEL_SERVICE_ERROR: "AI 服务暂时不可用",
-  MODEL_OUTPUT_INVALID: "AI 返回内容格式异常",
+  MODEL_OUTPUT_INVALID: "AI 返回内容未通过质量校验",
   CONTENT_BLOCKED: "资料内容无法生成摘要",
   TASK_RETRY_EXHAUSTED: "AI 服务多次重试后仍不可用",
 };
@@ -70,6 +72,7 @@ export type AiJobRunnerPorts = {
   begin(jobId: string): Promise<void>;
   anonymousUserId(userId: string): Promise<string>;
   reportProgress?(jobId: string, attemptCount: number, progress: AiGenerationProgress): Promise<void>;
+  reportSemanticReview?(jobId: string, audit: AiReviewAudit): Promise<void> | void;
   generate(input: {
     sourceTitle: string;
     sourceText: string;
@@ -79,6 +82,7 @@ export type AiJobRunnerPorts = {
     anonymousUserId: string;
     signal?: AbortSignal;
     onProgress?: (progress: AiGenerationProgress) => Promise<void>;
+    onSemanticReview?: (audit: AiReviewAudit) => Promise<void>;
   }): Promise<AiSummaryProviderResult>;
   complete(input: {
     jobId: string;
@@ -188,6 +192,10 @@ export async function runAiJob(
         promptVersion: job.promptVersion,
         anonymousUserId,
         ...(controller ? { signal: controller.signal } : {}),
+        ...(ports.reportSemanticReview ? { onSemanticReview: async (audit: AiReviewAudit) => {
+          try { await ports.reportSemanticReview!(jobId, audit); }
+          catch { /* Log availability does not change the quality verdict. */ }
+        } } : {}),
         ...(ports.reportProgress ? { onProgress: async (progress: AiGenerationProgress) => {
           if (!progressAvailable || cancelled) return;
           try { await ports.reportProgress!(jobId, job.attemptCount, progress); }
@@ -198,7 +206,7 @@ export async function runAiJob(
       const result = { ...generated.result };
       if (source.truncated) {
         const notice = SOURCE_TRUNCATION_NOTICE;
-        result.warnings = [...new Set([notice, ...result.warnings])].slice(0, 10);
+        result.warnings = [...new Set([notice, ...result.warnings])].slice(0, AI_RESULT_WARNING_LIMIT);
         const questions = parseQuestionSummary(result.summary);
         if (questions) {
           questions.warnings = result.warnings;
