@@ -12,7 +12,7 @@ export function questionReadingParts(structure: QuestionStructure) {
     ]);
     return {
       question,
-      label: /[。！？：]/u.test(question.mainlineRole) || question.mainlineRole.length > 18 ? question.scope : question.mainlineRole,
+      label: question.mainlineRole,
       nodes: [...orderedIds].flatMap(nodeId => {
         const node = nodes.get(nodeId);
         return node?.homeQuestionId === id ? [node] : [];

@@ -7,6 +7,19 @@ import { questionSummaryFixture } from '../../helpers/knowledge-questions-fixtur
 afterEach(cleanup);
 const summary = () => serializeQuestionSummary(questionSummaryFixture());
 describe('question reader', () => {
+  it.each(['感知工具：控噪与只读红利', '结合任务与实际结果，逐步调整下一次行动。'])('preserves the saved recall label %s instead of replacing it with scope', async label => {
+    const document = questionSummaryFixture();
+    document.structure.questions[0].mainlineRole = label;
+    document.structure.questions[0].scope = '搜索返回候选列表、分页读取、显式截断、缓存及并行，以及多模态感知的三条路径。';
+    render(<KnowledgeSummaryView value={serializeQuestionSummary(document)} />);
+    const outline = within(screen.getByRole('region', { name: '记忆骨架' }));
+    expect(outline.getByText(label, { exact: true })).toBeVisible();
+    expect(outline.queryByText(document.structure.questions[0].scope, { exact: true })).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: `展开核心部分：${label}` }));
+    await user.click(screen.getByRole('button', { name: '展开阅读' }));
+    expect(within(screen.getByRole('dialog')).getByRole('region', { name: label })).toBeVisible();
+  });
   it('shows the complete recall outline in reading order without repeating borrowed concepts', () => {
     const document = questionSummaryFixture();
     document.structure.questionOrder.reverse();
