@@ -60,6 +60,13 @@ function routeContext(id = jobId) {
 
 describe("AI generation routes", () => {
   afterEach(() => vi.useRealTimers());
+  it("returns the durable record binding for linked and legacy creations", async () => {
+    const recordId = "00000000-0000-4000-8000-000000000099";
+    mocks.create.mockResolvedValue({ ...result, job: { ...result.job, recordId, baseVersion: 2 } });
+    const response = await POST(postRequest({ ...requestBody, recordId }));
+    expect(response.status).toBe(202);
+    expect(await response.json()).toMatchObject({ data: { recordId, baseVersion: 2 } });
+  });
   it("rejects tomorrow before consuming rate limits or creating a job", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-14T15:59:59Z"));

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  aiGenerationErrorMessage,
   aiGenerationResultSchema,
   createAiGenerationSchema,
 } from "@/lib/domain/ai-generation";
@@ -19,6 +20,16 @@ const validResult = {
 };
 
 describe("AI generation domain contracts", () => {
+  it("renders persisted AI failure codes without showing internal/provider details", () => {
+    expect(aiGenerationErrorMessage("CONTENT_BLOCKED")).toBe("该页面暂时无法访问");
+    expect(aiGenerationErrorMessage("FETCH_TIMEOUT")).toBe("读取网页超时，请稍后重试");
+    expect(aiGenerationErrorMessage("provider secret: token-123")).toBe("AI 提炼失败，请重试");
+  });
+  it("accepts a stable record ID and rejects invalid record bindings", () => {
+    const recordId = "00000000-0000-4000-8000-000000000099";
+    expect(createAiGenerationSchema.safeParse({ ...validInput, recordId }).success).toBe(true);
+    expect(createAiGenerationSchema.safeParse({ ...validInput, recordId: "bad" }).success).toBe(false);
+  });
   it("normalizes optional learning requirements and enforces their own limit", () => {
     expect(createAiGenerationSchema.parse(validInput).userPrompt).toBe("");
     expect(createAiGenerationSchema.parse({ ...validInput, userPrompt: "  重点解释使用边界\n" }).userPrompt).toBe("重点解释使用边界");

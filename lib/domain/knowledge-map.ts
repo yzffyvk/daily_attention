@@ -29,11 +29,27 @@ export const sourceRecordsSchema = z.object({
   reason: z.enum(["mixed_topics", "insufficient_material"]), sourceDates: dates.min(2),
 }).strict();
 
-export const knowledgeMapResultSchema = z.discriminatedUnion("mode", [conceptMapSchema, sourceRecordsSchema]);
+const recordIds = z.array(z.uuid()).max(14).refine(value => new Set(value).size === value.length);
+export const recordConceptMapSchema = conceptMapSchema.extend({
+  schemaVersion: z.literal(3),
+  concepts: z.array(conceptMapSchema.shape.concepts.element.omit({ sourceDates: true }).extend({ sourceRecordIds: recordIds })).min(2).max(30),
+  connections: z.array(conceptMapSchema.shape.connections.element.omit({ sourceDates: true }).extend({ sourceRecordIds: recordIds })).min(1).max(45),
+});
+export const recordSourceRecordsSchema = sourceRecordsSchema.omit({ sourceDates: true }).extend({
+  schemaVersion: z.literal(3), sourceRecordIds: recordIds.min(2),
+});
+export const knowledgeMapResultSchema = z.union([
+  z.discriminatedUnion("mode", [conceptMapSchema, sourceRecordsSchema]),
+  z.discriminatedUnion("mode", [recordConceptMapSchema, recordSourceRecordsSchema]),
+]);
+export function sourceReferences(value: { sourceDates?: string[]; sourceRecordIds?: string[] }): string[] {
+  return value.sourceRecordIds ?? value.sourceDates ?? [];
+}
+export type AnyConceptMapResult = z.infer<typeof conceptMapSchema> | z.infer<typeof recordConceptMapSchema>;
 export type ConceptMapResult = z.infer<typeof conceptMapSchema>;
 export type SourceRecordsResult = z.infer<typeof sourceRecordsSchema>;
 export type KnowledgeMapResult = z.infer<typeof knowledgeMapResultSchema>;
-export type KnowledgeConcept = ConceptMapResult["concepts"][number];
+export type KnowledgeConcept = AnyConceptMapResult["concepts"][number];
 
 /** Structural provenance checks; semantic accuracy still depends on the cited material. */
 export function validateKnowledgeMapResult(result: KnowledgeMapResult, sourceDates: string[]): KnowledgeMapResult {
@@ -46,8 +62,8 @@ export function validateKnowledgeMapResult(result: KnowledgeMapResult, sourceDat
     if (new Set(references).size !== knownDates.size) throw new Error("NARRATIVE_SOURCE_COVERAGE_INVALID");
   };
   if (result.mode === "source_records") {
-    checkCoverage(result.sourceDates);
-    return { ...result, sourceDates: [...result.sourceDates].sort() };
+    checkCoverage(sourceReferences(result));
+    return result.schemaVersion === 3 ? { ...result, sourceRecordIds: [...result.sourceRecordIds].sort() } : { ...result, sourceDates: [...result.sourceDates].sort() };
   }
 
   const branches = new Set(result.branches.map(branch => branch.id));
@@ -57,12 +73,12 @@ export function validateKnowledgeMapResult(result: KnowledgeMapResult, sourceDat
   if (supplements.length > 3) throw new Error("NARRATIVE_SUPPLEMENT_LIMIT");
   for (const concept of result.concepts) {
     if (!branches.has(concept.branchId)) throw new Error("NARRATIVE_BRANCH_INVALID");
-    checkDates(concept.sourceDates);
-    if (concept.origin === "record" ? !concept.sourceDates.length || Boolean(concept.supplementReason) : concept.sourceDates.length > 0 || !concept.supplementReason) {
+    checkDates(sourceReferences(concept));
+    if (concept.origin === "record" ? !sourceReferences(concept).length || Boolean(concept.supplementReason) : sourceReferences(concept).length > 0 || !concept.supplementReason) {
       throw new Error("NARRATIVE_CONCEPT_PROVENANCE_INVALID");
     }
   }
-  checkCoverage(result.concepts.flatMap(concept => concept.sourceDates));
+  checkCoverage(result.concepts.flatMap(concept => sourceReferences(concept)));
   for (const branch of branches) {
     if (!result.concepts.some(concept => concept.branchId === branch && concept.origin === "record")) throw new Error("NARRATIVE_BRANCH_INVALID");
   }
@@ -72,9 +88,9 @@ export function validateKnowledgeMapResult(result: KnowledgeMapResult, sourceDat
     const key = `${edge.fromId}:${edge.toId}`;
     if (!from || !to || from === to || edges.has(key)) throw new Error("NARRATIVE_CONNECTION_INVALID");
     edges.add(key);
-    checkDates(edge.sourceDates);
+    checkDates(sourceReferences(edge));
     const includesSupplement = from.origin === "ai_supplement" || to.origin === "ai_supplement";
-    if (edge.origin === "ai_supplement" ? edge.sourceDates.length > 0 : includesSupplement || !edge.sourceDates.length) {
+    if (edge.origin === "ai_supplement" ? sourceReferences(edge).length > 0 : includesSupplement || !sourceReferences(edge).length) {
       throw new Error("NARRATIVE_CONNECTION_PROVENANCE_INVALID");
     }
   }

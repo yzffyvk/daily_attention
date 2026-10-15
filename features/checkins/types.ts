@@ -22,7 +22,7 @@ export type CheckInRecord = {
 export type CheckInSummary = Pick<
   CheckInRecord,
   "date" | "entryMode" | "attention" | "version" | "updatedAt"
-> & { hasImage: boolean };
+> & { hasImage: boolean; id?: string; status?: "pending" | "completed"; albumId?: string | null; createdAt?: string };
 
 export type CheckInStats = {
   totalCount: number;

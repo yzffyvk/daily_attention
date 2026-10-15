@@ -25,6 +25,9 @@ const mappedErrors = {
     status: 403,
     message: "无权访问该任务",
   },
+  RECORD_NOT_FOUND: { status: 404, message: "记录不存在或已删除" },
+  AI_RECORD_CONFLICT: { status: 409, message: "记录的日期、链接或提炼要求已变化，请刷新后重试" },
+  AI_RECORD_BUSY: { status: 409, message: "这条记录已有正在进行的提炼任务" },
   JOB_ALREADY_STARTED: {
     status: 409,
     message: "任务已经开始，无法取消",

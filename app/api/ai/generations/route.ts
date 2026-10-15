@@ -48,6 +48,7 @@ export async function POST(request: Request): Promise<Response> {
 
     return aiSuccess({
       jobId: created.job.id,
+      ...(created.job.recordId ? { recordId: created.job.recordId, baseVersion: created.job.baseVersion } : {}),
       status: created.job.status,
       pollAfterMs: 1500,
       quota: created.quota,

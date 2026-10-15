@@ -12,7 +12,7 @@ select (created.job).* from public.create_ai_generation_job(
 ) created;
 
 select is((select user_prompt from prompt_job), '聚焦实现', 'job snapshots the normalized prompt');
-select is((select prompt_version::text from prompt_job), 'knowledge-questions-v1', 'new jobs snapshot the current prompt version');
+select is((select prompt_version::text from prompt_job), 'knowledge-recall-v2', 'new jobs snapshot the current prompt version');
 select is((select (created.job).id from public.create_ai_generation_job(
   '00000000-0000-4000-8000-000000000971', '2026-09-23',
   '10000000-0000-4000-8000-000000000971', 'https://example.com/prompt', 'example.com', '聚焦实现'
@@ -64,10 +64,10 @@ do $$ begin perform public.expire_ai_generation_data(100); end $$;
 select results_eq($$select user_prompt, prompt_version::text from private.ai_generation_jobs where idempotency_key = '10000000-0000-4000-8000-000000000974'$$,
   $$values (''::text, 'ai-summary-v1'::text)$$, 'result expiry preserves old version snapshots until metadata expiry');
 
-insert into public.check_ins (user_id, checkin_date, entry_mode, attention, user_prompt, ai_generation_context)
-values ('00000000-0000-4000-8000-000000000971', '2026-09-23', 'ai', 'AI', '新要求',
+insert into public.check_ins (id, user_id, checkin_date, entry_mode, attention, user_prompt, ai_generation_context)
+values ('30000000-0000-4000-8000-000000000971', '00000000-0000-4000-8000-000000000971', '2026-09-23', 'ai', 'AI', '新要求',
   '{"userPrompt":"旧要求","promptVersion":"knowledge-skeleton-user-prompt-v1"}');
-select results_eq($$select user_prompt, ai_generation_context->>'userPrompt' from public.check_ins where entry_mode = 'ai' and user_id = '00000000-0000-4000-8000-000000000971'$$,
+select results_eq($$select user_prompt, ai_generation_context->>'userPrompt' from public.check_ins where id = '30000000-0000-4000-8000-000000000971'$$,
   $$values ('新要求'::text, '旧要求'::text)$$, 'record prompt remains independent of generated-content context');
 select throws_ok($$update public.check_ins set user_prompt = repeat('长',1001) where user_id = '00000000-0000-4000-8000-000000000971'$$, '23514', null, 'record rejects overlong prompts');
 select throws_ok($$update public.check_ins set ai_generation_context = '{}' where user_id = '00000000-0000-4000-8000-000000000971'$$, '23514', null, 'context requires both fields');

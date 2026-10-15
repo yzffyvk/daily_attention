@@ -84,9 +84,12 @@ describe("Aura persona selection preserves the five numeric avatar keys", () => 
     expect(writes).toEqual([]);
   });
 
-  it("updates the account portrait only after saving the selected persona", async () => {
+  it("keeps the account portrait synchronized without a duplicate large header persona", async () => {
     const { writes, user } = await openProfile(2);
-    const portrait = within(screen.getByRole("button", { name: "打开账户菜单" })).getByAltText("");
+    const account = screen.getByRole("button", { name: "打开账户菜单" });
+    expect(screen.queryByRole("button", { name: /更换学习形象，当前为/ })).not.toBeInTheDocument();
+    expect(account).toHaveTextContent("学习者");
+    const portrait = within(account).getByAltText("");
     const priorSource = portrait.getAttribute("src");
     await user.click(screen.getByRole("radio", { name: "行动派" }));
     expect(portrait).toHaveAttribute("src", priorSource);

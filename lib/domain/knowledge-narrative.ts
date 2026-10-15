@@ -7,12 +7,18 @@ export const MAX_NARRATIVE_DATES = 14;
 export const narrativeDatesSchema = z.array(dateKeySchema).min(MIN_NARRATIVE_DATES, "至少选择 2 个有记录的日期").max(MAX_NARRATIVE_DATES, "一次最多串联 14 个日期")
   .refine(dates => new Set(dates).size === dates.length, "日期不能重复")
   .transform(dates => [...dates].sort());
-export const createNarrativeSchema = z.object({
+const legacyCreateNarrativeSchema = z.object({
   entryMode: checkInEntryModeSchema.default("manual"),
   dates: narrativeDatesSchema,
   question: z.string().trim().max(300, "问题不能超过 300 字").default(""),
   idempotencyKey: z.uuid("请求标识格式不正确"),
+ }).strict();
+export const narrativeRecordIdsSchema = z.array(z.uuid()).min(2, "至少选择 2 条已完成记录").max(14, "一次最多串联 14 条记录")
+  .refine(ids => new Set(ids).size === ids.length, "记录不能重复").transform(ids => [...ids].sort());
+export const createRecordNarrativeSchema = z.object({
+  recordIds: narrativeRecordIdsSchema, question: z.string().trim().max(300).default(""), idempotencyKey: z.uuid(),
 }).strict();
+export const createNarrativeSchema = z.union([createRecordNarrativeSchema, legacyCreateNarrativeSchema]);
 export const renameNarrativeSchema = z.object({ title: z.string().trim().min(1, "请填写脉络名称").max(120, "名称不能超过 120 字") }).strict();
 export const narrativeSourceSchema = z.object({
   id: z.uuid().optional(), entryMode: checkInEntryModeSchema.optional(),
@@ -52,12 +58,15 @@ export type NarrativeSummary = {
 export type KnowledgeNarrative = NarrativeSummary & {
   sources: NarrativeSource[]; result: NarrativeResult | null; changedDates: string[];
 };
-export type CreateNarrativeInput = Omit<z.infer<typeof createNarrativeSchema>, "entryMode"> & { entryMode?: CheckInEntryMode };
+export type CreateNarrativeInput = z.infer<typeof createRecordNarrativeSchema> | (Omit<z.infer<typeof legacyCreateNarrativeSchema>, "entryMode"> & { entryMode?: CheckInEntryMode });
 
 /** Reject structurally valid hallucinated citations, missing days and duplicate edges. */
-export function validateNarrativeResult(value: unknown, sourceDates: string[]): NarrativeResult {
-  const dates = narrativeDatesSchema.parse(sourceDates);
+export function validateNarrativeResult(value: unknown, sourceDates: string[], sourceRecordIds: string[] = []): NarrativeResult {
   const result = narrativeResultSchema.parse(value);
+  if ("schemaVersion" in result && result.schemaVersion === 3) {
+    return validateKnowledgeMapResult(result, narrativeRecordIdsSchema.parse(sourceRecordIds));
+  }
+  const dates = narrativeDatesSchema.parse(sourceDates);
   if ("schemaVersion" in result) return validateKnowledgeMapResult(result, dates);
   const sortedNodes = [...result.nodes].sort((a,b) => a.date.localeCompare(b.date));
   if (sortedNodes.length !== dates.length || sortedNodes.some((node,i) => node.date !== dates[i])) {

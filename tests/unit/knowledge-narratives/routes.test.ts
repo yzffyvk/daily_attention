@@ -7,7 +7,7 @@ import { GET, PATCH, DELETE } from "@/app/api/knowledge-narratives/[id]/route";
 import { POST as copy } from "@/app/api/knowledge-narratives/[id]/copy/route";
 import { narrativeResultFixture } from "../../helpers/narrative-fixtures";
 const id="f805ec72-15a8-4b42-970e-7989e4351a11";
-const input={dates:["2026-08-31","2026-09-02"],question:"",idempotencyKey:id};
+const input={recordIds:["00000000-0000-4000-8000-000000000001","00000000-0000-4000-8000-000000000002"],question:"",idempotencyKey:id};
 const request=(body:unknown=input)=>new Request("http://example.test/api/knowledge-narratives",{method:"POST",body:JSON.stringify(body)});
 const ctx=()=>({params:Promise.resolve({id})});
 describe("owned narrative API",()=>{
@@ -21,12 +21,17 @@ describe("owned narrative API",()=>{
   });
   it("returns a durable job and uses the verified account",async()=>{
     const response=await POST(request());expect(response.status).toBe(202);
-    expect(mocks.create).toHaveBeenCalledWith("owner",{...input,entryMode:"manual"});
+    expect(mocks.create).toHaveBeenCalledWith("owner",input);
     expect(response.headers.get("Cache-Control")).toContain("no-store");
   });
-  it("rejects duplicate selected dates before any generation",async()=>{
-    expect((await POST(request({...input,dates:[input.dates[0],input.dates[0]]}))).status).toBe(422);
+  it("rejects duplicate selected records before any generation",async()=>{
+    expect((await POST(request({...input,recordIds:[input.recordIds[0],input.recordIds[0]]}))).status).toBe(422);
     expect(mocks.create).not.toHaveBeenCalled();
+  });
+  it("asks date-only clients to refresh before reserving quota",async()=>{
+    const response=await POST(request({dates:["2026-08-31","2026-09-02"],question:"",idempotencyKey:id}));
+    expect(response.status).toBe(409);expect((await response.json()).error.code).toBe("CLIENT_UPGRADE_REQUIRED");
+    expect(mocks.create).not.toHaveBeenCalled();expect(mocks.consume).not.toHaveBeenCalled();
   });
   it("returns a field error for malformed JSON",async()=>{
     expect((await POST(new Request("http://example.test",{method:"POST",body:"{"}))).status).toBe(422);

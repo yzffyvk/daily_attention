@@ -16,3 +16,12 @@ export const knowledgeMapPrompt = `你是知序 Aura 的知识框架整理助手
 connections 1–45 条。所有引用数组内部不得重复。AI 补充相关数组为空是明确的来源区分，不可添加日期冒充依据。
 不适合搭图时，只允许以下结构：
 {"schemaVersion":2,"mode":"source_records","title":"最多120字，中性描述所选记录，不虚构统一主题","reason":"mixed_topics 或 insufficient_material","sourceDates":["全部输入日期，按时间升序，每个一次"]}`;
+
+// Version 2 remains available for in-flight date-based jobs without source IDs.
+export const recordKnowledgeMapPrompt = knowledgeMapPrompt
+  .replaceAll('sourceDates', 'sourceRecordIds')
+  .replaceAll('schemaVersion 固定为 2', 'schemaVersion 固定为 3')
+  .replaceAll('"schemaVersion":2', '"schemaVersion":3')
+  .replaceAll('日期', '记录 ID')
+  .replaceAll('一天可包含多个概念，一个概念可引用多天', '一条记录可包含多个概念，一个概念可引用多条记录')
+  + '\n引用必须使用每条输入记录的 id（UUID），不能使用 date。同一天不同 id 是不同来源，必须分别覆盖。展示日期仅用于阅读辅助，不能代替来源身份。';

@@ -57,6 +57,30 @@ function options(overrides: Record<string, unknown> = {}) {
 }
 
 describe("useAiGeneration", () => {
+  it("stops polling an expired task so the persisted candidate can be reloaded", async () => {
+    const activeJob = { jobId: created.jobId, recordId: "00000000-0000-4000-8000-000000000099", targetDate: "2026-07-31", sourceUrl: "https://example.com/article", createdAt: new Date().toISOString() };
+    vi.mocked(getAiGeneration).mockResolvedValue({ jobId: created.jobId, status: "succeeded", stage: "complete",
+      error: { code: "RESULT_EXPIRED", message: "任务结果已过期", retryable: false } });
+    const input = options({ activeJob });
+    const { result: hook } = renderHook(() => useAiGeneration(input));
+    await act(() => vi.advanceTimersByTimeAsync(1500));
+    expect(input.onTerminal).toHaveBeenCalledWith(created.jobId);
+    expect(hook.current.activeJob).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(15000));
+    expect(getAiGeneration).toHaveBeenCalledTimes(1);
+  });
+  it("targets and returns the exact record even when two records share a date", async () => {
+    const recordId = "00000000-0000-4000-8000-000000000099";
+    vi.mocked(createAiGeneration).mockResolvedValue({ ...created, recordId, baseVersion: 1 });
+    vi.mocked(getAiGeneration).mockResolvedValue({ jobId: created.jobId, recordId, status: "succeeded", stage: "complete", result });
+    const input = options();
+    const { result: hook } = renderHook(() => useAiGeneration(input));
+    await act(() => hook.current.generate({ recordId, sourceUrl: "https://example.com/article", targetDate: "2026-07-31" }));
+    expect(createAiGeneration).toHaveBeenCalledWith(expect.objectContaining({ recordId }));
+    expect(hook.current.activeJob?.recordId).toBe(recordId);
+    await act(() => vi.advanceTimersByTimeAsync(1500));
+    expect(input.onSucceeded).toHaveBeenCalledWith(result, "2026-07-31", undefined, recordId);
+  });
   it("can cancel a newly restored job while an older job cancellation is still pending", async () => {
     const activeJob = { jobId: created.jobId, targetDate: "2026-10-13", sourceUrl: "https://example.com", createdAt: new Date().toISOString() };
     const nextJob = { ...activeJob, jobId: "10000000-0000-4000-8000-000000000002", targetDate: "2026-10-14" };

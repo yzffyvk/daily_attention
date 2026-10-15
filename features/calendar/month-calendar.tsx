@@ -13,6 +13,7 @@ type MonthCalendarProps = {
   selectedDates?: string[];
   activeEntryMode?: CheckInEntryMode;
   onSelectEntryMode?: (mode: CheckInEntryMode) => void;
+  onSelectRecord?: (id: string) => void;
   maxSelectedDates?: number;
   summaries: CheckInSummary[] | undefined;
   today: string;
@@ -34,8 +35,9 @@ function calendarLabel(
   selected: boolean,
   today: boolean,
   future: boolean,
+  records: CheckInSummary[],
 ) {
-  const state = summary ? `已保存：${summary.attention}` : "暂无记录";
+  const state = records.some(record => record.status !== undefined) ? `${records.length} 条记录，已完成 ${records.filter(record => record.status !== "pending").length} 条：${summary?.attention ?? ""}` : summary ? `已保存：${summary.attention}` : "暂无记录";
   const suffix = [selected ? "当前选中" : "", today ? "今天" : "", future ? "未到日期，未来日期不能记录" : ""]
     .filter(Boolean)
     .join("，");
@@ -48,6 +50,7 @@ export function MonthCalendar({
   selectedDates,
   activeEntryMode,
   onSelectEntryMode,
+  onSelectRecord,
   maxSelectedDates = 14,
   summaries,
   today,
@@ -87,7 +90,7 @@ export function MonthCalendar({
   }));
   const isCurrentMonth = month === monthKeyForDate(today);
   const isFutureMonth = month > monthKeyForDate(today);
-  const recordedDays = [...groupedSummaries.keys()].filter(date => date <= today).length;
+  const recordedDays = [...groupedSummaries].filter(([date, records]) => date <= today && records.some(record => record.status !== "pending")).length;
   const selectedRecords = !selectedDates && selectedDate <= today ? groupedSummaries.get(selectedDate) ?? [] : [];
   const modeMissing = activeEntryMode && selectedRecords.length > 0 && !selectedRecords.some(record => (record.entryMode ?? "manual") === activeEntryMode);
 
@@ -190,13 +193,14 @@ export function MonthCalendar({
               const isFuture = date > today;
               const dateDisabled = disabled || isFuture || Boolean(selectedDates && (!summary || (!selected && selectedDates.length >= maxSelectedDates)));
               const isToday = date === today;
+              const completed = records.some(record => record.status !== "pending");
               const showPreview = !disabled && Boolean(summary) && previewDate === date;
               return (
                 <button
-                  aria-label={calendarLabel(date, summary, selected, isToday, isFuture)}
+                  aria-label={calendarLabel(date, summary, selected, isToday, isFuture, records)}
                   aria-pressed={selected}
                   aria-describedby={showPreview ? `${previewId}-${date}` : undefined}
-                  className={`calendar-cell${summary ? " recorded" : ""}${isToday ? " today" : ""}${selected ? " selected" : ""}${isFuture ? " future" : ""}`}
+                  className={`calendar-cell${completed ? " recorded" : summary ? " pending-records" : ""}${isToday ? " today" : ""}${selected ? " selected" : ""}${isFuture ? " future" : ""}`}
                   disabled={dateDisabled}
                   title={isFuture ? "未来日期不能记录" : undefined}
                   key={date}
@@ -212,12 +216,12 @@ export function MonthCalendar({
                     <b>{day}</b>
                     <span className="calendar-day-flags" aria-hidden="true">
                       {isToday ? <em className="calendar-today-mark">今</em> : null}
-                      {summary ? <i><Check size={11} strokeWidth={2.5} /></i> : null}
+                      {completed ? <i><Check size={11} strokeWidth={2.5} /></i> : null}
                     </span>
                   </span>
                   <small>{primaryRecord?.attention ?? (isToday ? "记录今天" : "")}</small>
                   {records.length > 0 ? <span className="calendar-day-modes" aria-hidden="true">
-                    {records.map(record => <span className="calendar-mode-mark" key={record.entryMode ?? "manual"} title={record.entryMode === "ai" ? "AI 提炼" : "手动记录"}>{record.entryMode === "ai" ? "AI" : "手"}</span>)}
+                    {records.some(record => record.id) ? <span className="calendar-mode-mark">{records.length} 条</span> : records.map(record => <span className="calendar-mode-mark" key={record.entryMode ?? "manual"} title={record.entryMode === "ai" ? "AI 提炼" : "手动记录"}>{record.entryMode === "ai" ? "AI" : "手"}</span>)}
                   </span> : null}
                   {showPreview ? (
                     <span className="calendar-preview" id={`${previewId}-${date}`} role="tooltip">
@@ -244,9 +248,9 @@ export function MonthCalendar({
             <ul>{selectedRecords.map(record => {
               const mode = record.entryMode ?? "manual";
               const modeLabel = mode === "ai" ? "AI 提炼" : "手动记录";
-              return <li key={mode}>
-                <div><span className="calendar-record-mode">{modeLabel}<span>{mode === activeEntryMode ? "当前方式" : "已保存"}</span></span><p>{record.attention}</p></div>
-                {onSelectEntryMode ? <button className="calendar-open-record" disabled={disabled} type="button" aria-label={`查看这天的 ${modeLabel}`} onClick={() => onSelectEntryMode(mode)}>查看<ArrowUpRight aria-hidden="true" size={14} /></button> : null}
+              return <li key={record.id ?? mode}>
+                <div><span className="calendar-record-mode">{modeLabel}<span>{record.status === "pending" ? "待整理" : mode === activeEntryMode ? "当前方式" : "已保存"}</span></span><p>{record.attention}</p></div>
+                {onSelectRecord && record.id ? <button className="calendar-open-record" disabled={disabled} type="button" aria-label={`查看记录 ${record.attention}`} onClick={() => onSelectRecord(record.id!)}>查看<ArrowUpRight aria-hidden="true" size={14} /></button> : onSelectEntryMode ? <button className="calendar-open-record" disabled={disabled} type="button" aria-label={`查看这天的 ${modeLabel}`} onClick={() => onSelectEntryMode(mode)}>查看<ArrowUpRight aria-hidden="true" size={14} /></button> : null}
               </li>;
             })}</ul>
           </section> : null}

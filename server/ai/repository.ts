@@ -21,6 +21,8 @@ const statusSchema = z.enum([
 const timestampSchema = z.iso.datetime({ offset: true });
 const jobSchema = z.object({
   id: z.uuid(),
+  record_id: z.uuid().nullable().optional(),
+  base_version: z.number().int().positive().nullable().optional(),
   user_id: z.uuid(),
   target_date: dateKeySchema,
   idempotency_key: z.uuid(),
@@ -103,6 +105,8 @@ function rpc(
 }
 
 export type AiJob = {
+  recordId?: string | null;
+  baseVersion?: number | null;
   id: string;
   userId: string;
   targetDate: string;
@@ -154,6 +158,7 @@ export type AiJobWithQuota = {
 };
 
 export type CreateAiJob = {
+  recordId?: string;
   userId: string;
   targetDate: string;
   idempotencyKey: string;
@@ -171,6 +176,8 @@ export interface AiGenerationRepository {
 function mapJob(row: z.infer<typeof jobSchema>): AiJob {
   return {
     id: row.id,
+    recordId: row.record_id ?? null,
+    baseVersion: row.base_version ?? null,
     userId: row.user_id,
     targetDate: row.target_date,
     idempotencyKey: row.idempotency_key,
@@ -238,7 +245,8 @@ export function createAiGenerationRepository(
 ): AiGenerationRepository {
   return {
     async create(input) {
-      const { data, error } = await rpc(client, "create_ai_generation_job", {
+      const { data, error } = await rpc(client, input.recordId ? "create_record_ai_generation_job" : "create_ai_generation_job", {
+        ...(input.recordId ? { target_record_id: input.recordId } : {}),
         target_user_id: input.userId,
         target_date: input.targetDate,
         target_idempotency_key: input.idempotencyKey,

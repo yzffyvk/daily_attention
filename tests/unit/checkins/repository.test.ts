@@ -38,6 +38,39 @@ function setup() {
 }
 
 describe("check-in persistence mode isolation", () => {
+  it("returns late-month calendar entries beyond the server row cap without loading full summaries", async () => {
+    const rows = Array.from({ length: 1002 }, (_, index) => ({
+      id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      user_id: "owner", checkin_date: index === 1001 ? "2026-09-30" : "2026-09-16",
+      entry_mode: "manual", attention: `Record ${index + 1}`, image_path: null,
+      version: 1, learning_status: "completed", album_id: null,
+      created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z",
+    }));
+    const requests: URL[] = [];
+    const client = createClient<Database>("https://database.test", "test-key", {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: crypto.randomUUID() },
+      global: { fetch: async (input) => {
+        const url = new URL(String(input));
+        requests.push(url);
+        // Emulate PostgREST's bounded pages, independently of the caller's chosen page size.
+        const offset = Number(url.searchParams.get("offset") ?? 0);
+        const limit = Math.min(Number(url.searchParams.get("limit") ?? 1000), 1000);
+        return Response.json(rows.slice(offset, offset + limit));
+      } },
+    });
+    const summaries = await createCheckInRepository(client).findByMonth("owner", "2026-09");
+    expect(summaries).toHaveLength(1002);
+    expect(new Set(summaries.map(record => record.id)).size).toBe(1002);
+    expect(summaries.at(-1)).toMatchObject({ id: rows[1001].id, date: "2026-09-30", attention: "Record 1002" });
+    expect(requests.length).toBeGreaterThan(1);
+    for (const request of requests) {
+      expect(request.searchParams.get("select")).not.toBe("*");
+      expect(request.searchParams.get("select")).not.toMatch(/summary|ai_candidate/u);
+      expect(request.searchParams.get("order")).toBe("checkin_date.asc,id.asc");
+      expect(request.searchParams.get("user_id")).toBe("eq.owner");
+    }
+  });
+
   it("preserves omitted AI metadata while allowing each field to be explicitly cleared", async () => {
     const { repository } = setup();
     const aiGenerationContext = { userPrompt: "原有要求", promptVersion: "knowledge-skeleton-user-prompt-v1" };

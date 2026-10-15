@@ -13,13 +13,10 @@ function setup(dates: string[] | null = narrativeDates) {
   return {query,rpc,repository:createNarrativeRepository(client as unknown as SupabaseClient<Database>)};
 }
 describe("narrative edit persistence boundary",()=>{
-  it("passes the selected source mode to narrative creation", async () => {
+  it("rejects ambiguous date-only creation before calling a database function", async () => {
     const { repository, rpc } = setup();
-    await expect(repository.create("owner", { dates: narrativeDates, question: "", idempotencyKey: "00000000-0000-4000-8000-000000000001", entryMode: "ai" })).rejects.toEqual({ message: "NARRATIVE_EDIT_CONFLICT" });
-    expect(rpc).toHaveBeenCalledWith("create_knowledge_narrative", {
-      target_user_id: "owner", target_dates: narrativeDates, target_question: "",
-      target_idempotency_key: "00000000-0000-4000-8000-000000000001", target_entry_mode: "ai",
-    });
+    await expect(repository.create("owner", { dates: narrativeDates, question: "", idempotencyKey: "00000000-0000-4000-8000-000000000001", entryMode: "ai" })).rejects.toThrow("CLIENT_UPGRADE_REQUIRED");
+    expect(rpc).not.toHaveBeenCalled();
   });
   it("compares source record IDs when the same date contains another mode", async () => {
     const sources = narrativeSourcesFixture().map((source, index) => ({
@@ -38,6 +35,7 @@ describe("narrative edit persistence boundary",()=>{
     const client = { from: vi.fn().mockReturnValue(query) };
     const repository = createNarrativeRepository(client as unknown as SupabaseClient<Database>);
     expect((await repository.get("owner", "narrative")).changedDates).toEqual([]);
+    expect(query.in).toHaveBeenCalledWith("id", sources.map(source => source.id));
   });
 
   it("matches legacy date-only sources to manual instead of same-day AI versions", async () => {

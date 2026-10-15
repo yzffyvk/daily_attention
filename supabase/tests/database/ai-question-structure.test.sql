@@ -20,7 +20,7 @@ begin
 
   select (created.job).id, (created.job).prompt_version into test_job, returned_version
   from public.create_ai_generation_job(test_user,current_date,test_key,'https://example.com/questions','example.com','') created;
-  if returned_version <> 'knowledge-questions-v1' then raise exception 'wrong new prompt version'; end if;
+  if returned_version <> 'knowledge-recall-v2' then raise exception 'wrong new prompt version'; end if;
   -- An immutable old job must retain its version when its idempotency key resumes.
   insert into private.ai_generation_jobs(user_id,quota_date,target_date,idempotency_key,source_url,source_host,user_prompt,prompt_version)
   values(test_user,(now() at time zone 'Asia/Shanghai')::date,current_date,old_key,'https://example.com/questions','example.com','','knowledge-relations-v2');

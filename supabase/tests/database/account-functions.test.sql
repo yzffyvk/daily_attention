@@ -2,10 +2,10 @@ begin;
 select plan(65);
 
 select results_eq(
-  $$ select last_value, is_called
-     from private.attention_display_name_seq $$,
-  $$ values (1::bigint, false) $$,
-  'clean-slate email migration resets the display-name sequence'
+  $$ select seqstart, seqmax from pg_catalog.pg_sequence
+     where seqrelid='private.attention_display_name_seq'::regclass $$,
+  $$ values (1::bigint, 999::bigint) $$,
+  'display-name sequence retains the configured start and upper bound'
 );
 
 select function_privs_are(
@@ -389,7 +389,8 @@ select throws_ok(
 );
 
 reset role;
-select setval('private.attention_display_name_seq', 1, false);
+-- Transactional RESTART restores the real counter on rollback, unlike setval.
+alter sequence private.attention_display_name_seq restart with 1;
 set local role service_role;
 
 select results_eq(
@@ -555,7 +556,8 @@ select throws_ok(
   'registration rejects emails longer than 254 characters'
 );
 reset role;
-select setval('private.attention_display_name_seq', 999, true);
+alter sequence private.attention_display_name_seq restart with 999;
+select nextval('private.attention_display_name_seq');
 set local role service_role;
 select throws_ok(
   $$select public.complete_registration(
@@ -569,7 +571,8 @@ select throws_ok(
   'registration rejects default-name values over 999'
 );
 reset role;
-select setval('private.attention_display_name_seq', 1, false);
+-- Transactional RESTART restores the real counter on rollback, unlike setval.
+alter sequence private.attention_display_name_seq restart with 1;
 
 select * from finish();
 rollback;

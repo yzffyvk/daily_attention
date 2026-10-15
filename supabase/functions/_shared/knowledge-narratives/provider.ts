@@ -2,7 +2,7 @@ import { z } from "zod";
 import { narrativeSourceSchema, validateNarrativeResult, type NarrativeResult, type NarrativeSource } from "../../../../lib/domain/knowledge-narrative.ts";
 import { DeepSeekProviderError } from "../ai/deepseek.ts";
 import { knowledgeMapResultSchema } from "../../../../lib/domain/knowledge-map.ts";
-import { knowledgeMapPrompt } from "./prompt.ts";
+import { knowledgeMapPrompt, recordKnowledgeMapPrompt } from "./prompt.ts";
 
 const inputSchema = z.object({
   sources: z.array(narrativeSourceSchema).min(2).max(14),
@@ -22,7 +22,7 @@ export function createNarrativeProvider(config: { apiKey: string; fetchImpl?: ty
           method:"POST", headers:{Authorization:`Bearer ${config.apiKey}`,"Content-Type":"application/json",Accept:"application/json"},
           signal: input.signal ?? AbortSignal.timeout(120_000),
           body:JSON.stringify({model:"deepseek-flash",thinking:{type:"enabled"},reasoning_effort:"high",response_format:{type:"json_object"},max_tokens:16384,stream:false,user_id:input.anonymousUserId,
-            messages:[{role:"system",content:knowledgeMapPrompt},{role:"user",content:JSON.stringify({dataType:"untrusted_learning_records",question:parsed.data.question,sources:parsed.data.sources})}]}),
+            messages:[{role:"system",content:parsed.data.sources.every(source=>Boolean(source.id))?recordKnowledgeMapPrompt:knowledgeMapPrompt},{role:"user",content:JSON.stringify({dataType:"untrusted_learning_records",question:parsed.data.question,sources:parsed.data.sources})}]}),
         });
       } catch { throw new DeepSeekProviderError("MODEL_SERVICE_ERROR", true); }
       if (response.status === 429) throw new DeepSeekProviderError("MODEL_RATE_LIMITED", true);
@@ -50,7 +50,11 @@ export function createNarrativeProvider(config: { apiKey: string; fetchImpl?: ty
       const choice=envelope.data.choices[0];
       if(choice.finish_reason==="content_filter") throw new DeepSeekProviderError("CONTENT_BLOCKED",false);
       if(choice.finish_reason!=="stop"||!choice.message.content) throw new DeepSeekProviderError("MODEL_OUTPUT_INVALID",true);
-      try { return validateNarrativeResult(knowledgeMapResultSchema.parse(JSON.parse(choice.message.content)),parsed.data.sources.map(s=>s.date)); }
+      try {
+        const result=knowledgeMapResultSchema.parse(JSON.parse(choice.message.content));
+        if(parsed.data.sources.every(source=>Boolean(source.id)) && result.schemaVersion !== 3) throw new Error("RECORD_CITATIONS_REQUIRED");
+        return validateNarrativeResult(result,parsed.data.sources.map(s=>s.date),parsed.data.sources.flatMap(s=>s.id?[s.id]:[]));
+      }
       catch { throw new DeepSeekProviderError("MODEL_OUTPUT_INVALID",true); }
     },
   };

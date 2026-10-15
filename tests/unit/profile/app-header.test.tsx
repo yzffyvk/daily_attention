@@ -58,7 +58,8 @@ describe("profile header", () => {
 
     expect(await screen.findByText("41")).toBeVisible();
     expect(screen.getByText("6")).toBeVisible();
-    expect(screen.getByText("累计记录")).toBeVisible();
+    expect(screen.getByText("累计学习")).toBeVisible();
+    expect(screen.getByText("累计学习").parentElement).toHaveTextContent("41天");
     expect(screen.getByText("当前连续")).toBeVisible();
     expect(screen.getByText("已经打卡")).toBeVisible();
   });
