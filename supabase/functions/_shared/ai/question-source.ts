@@ -1,4 +1,6 @@
 import { questionSummarySchema, type QuestionSummary } from "../../../../lib/domain/knowledge-questions.ts";
+
+const nodeRoleSchema = questionSummarySchema.shape.structure.shape.nodes.element.shape.role;
 export function indexQuestionSource(source: string) {
   const fragments: { id: string; text: string }[] = [];
   let offset = 0;
@@ -19,19 +21,21 @@ export function indexQuestionSource(source: string) {
   };
 }
 
-export function normalizeQuestionViews<T>(value: T): T {
+export function normalizeQuestionViews<T>(value: T, onRoleFallback?: (path: string) => void): T {
   let candidate = value;
   const raw = value as { structure?: { relations?: unknown } } | null;
   if (raw && Array.isArray(raw.structure?.relations)) {
     candidate = structuredClone(value);
     const relations = (candidate as { structure: { relations: unknown[] } }).structure.relations;
     const nodes = (candidate as { structure: { nodes?: unknown } }).structure.nodes;
-    if (Array.isArray(nodes)) for (const node of nodes) {
-      // Display-role aliases only; keep the name, explanation, evidence and
-      // every factual relationship intact. Unknown roles still fail validation.
-      if (node && typeof node === 'object') {
-        if (node.role === '方法') node.role = '方案';
-        else if (node.role === '区别') node.role = '概念';
+    if (Array.isArray(nodes)) for (const [index, node] of nodes.entries()) {
+      // Role is a display category. Normalize it at the generation boundary;
+      // prose, evidence, ownership and factual relationships still validate fully.
+      if (node && typeof node === 'object' && !Array.isArray(node)) {
+        const role = typeof node.role === 'string' ? node.role.trim() : node.role;
+        const parsed = nodeRoleSchema.safeParse(role === '方法' ? '方案' : role === '区别' ? '概念' : role);
+        node.role = parsed.success ? parsed.data : '概念';
+        if (!parsed.success) onRoleFallback?.(`structure.nodes.${index}.role`);
       }
     }
     for (const edge of relations) {

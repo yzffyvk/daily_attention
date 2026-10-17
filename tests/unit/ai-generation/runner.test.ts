@@ -56,6 +56,19 @@ function ports(overrides: Partial<AiJobRunnerPorts> = {}): AiJobRunnerPorts {
 }
 
 describe("AI job runner", () => {
+  it('associates role fallbacks with the job and still completes when their logging fails', async () => {
+    const audit = { stage: 'writing' as const, repair: false, paths: ['structure.nodes.0.role'], fallback: '概念' as const };
+    const reportRoleNormalization = vi.fn().mockRejectedValue(new Error('log unavailable'));
+    const runnerPorts = ports({ reportRoleNormalization, generate: async input => {
+      await input.onRoleNormalization?.(audit);
+      return generated;
+    } });
+    await expect(runAiJob(job.id, runnerPorts)).resolves.toBe('completed');
+    expect(reportRoleNormalization).toHaveBeenCalledExactlyOnceWith(job.id, audit);
+    expect(runnerPorts.complete).toHaveBeenCalledOnce();
+    expect(runnerPorts.markProviderFailure).not.toHaveBeenCalled();
+  });
+
   it('associates format diagnostics with the task while keeping logging failures non-fatal', async () => {
     const audit = { stage: 'writing' as const, repair: false, reason: 'schema_invalid' as const, issues: [{ path: 'structure.nodes.0.role', code: 'invalid_value' }] };
     const reportValidationFailure = vi.fn().mockRejectedValue(new Error('log unavailable'));
