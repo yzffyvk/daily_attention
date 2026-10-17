@@ -349,8 +349,12 @@
 .summary-prose li { padding-left: .15rem; white-space: pre-wrap; }
 .summary-prose li + li { margin-top: .4rem; }
 .summary-prose strong, .question-memory-outline strong, .question-mainline strong { font-weight: 700; }
+.summary-formula-callout { margin: 1.15rem 0; border-left: 3px solid var(--theme-accent, #e0c897); padding: .2rem 0 .2rem 1.2rem; min-width: 0; overflow-wrap: anywhere; }
+.summary-prose .summary-formula-expression { margin: 0; color: var(--theme-accent, #e0c897); font-size: 1.08em; line-height: 1.6; }
+.summary-prose .summary-formula-explanation { margin: .45rem 0 0; white-space: pre-wrap; }
 .question-reader .question-views { padding: 0 0 .8rem; border: 0; }
 @container structure-reader (max-width: 600px) {
+  .summary-formula-callout { padding-left: .85rem; }
   .question-reader-toolbar { margin-bottom: .7rem; }
   .question-reader .question-section-toggle { font-size: 1.05rem; grid-template-columns: .5rem minmax(0, 1fr) auto; gap: .45rem; }
   .question-mainline > p, .question-reader .question-direct-answer { font-size: .95rem; }

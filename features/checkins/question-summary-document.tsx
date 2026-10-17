@@ -37,7 +37,7 @@ export function QuestionSummaryDocument({ document }: { document: QuestionSummar
         return <li key={id}>
           <p className="summary-document-part-label"><SummaryText value={label} /></p>
           <h6><SummaryText value={q.title} /></h6>
-          <SummaryProse value={q.answer} />
+          <SummaryProse value={q.answer} emphasizeFormulas={false} />
           <QuestionPartExplanation nodes={nodes} />
           <details className="summary-document-evidence"><summary>范围与依据</summary>
             <p><SummaryText value={q.scope} /></p>

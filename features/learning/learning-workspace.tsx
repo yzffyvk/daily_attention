@@ -56,6 +56,8 @@ export function LearningWorkspace({ initialDate, initialToday = initialDate, ini
     const [view, setView] = useState<LearningView>({ kind: 'date', date: initialDate > initialToday ? initialToday : initialDate });
     const [month, setMonth] = useState(initialDate.slice(0, 7));
     const [selectedId, setSelectedId] = useState<string | null>(null);
+    const [recordOpenRequest, requestRecordOpen] = useState(0);
+    const recordContentRef = useRef<HTMLDivElement>(null);
     const [drafts, setDrafts] = useState<Record<string, LearningDraft>>({});
     const draftsRef = useRef(drafts);
     const draftWrites = useRef<Promise<unknown>>(Promise.resolve());
@@ -110,6 +112,20 @@ export function LearningWorkspace({ initialDate, initialToday = initialDate, ini
     const detailQuery = useQuery({ queryKey: learningKeys.record(selectedId ?? ''), queryFn: () => getRecord(selectedId!), enabled: Boolean(selectedId) && !localSelected?.localOnly, initialData: () => cloudRecords.find(r => r.id === selectedId), refetchInterval: query => query.state.data?.activeAiJobId ? 2500 : false });
     const selectedRecord = localSelected?.localOnly ? null : detailQuery.data ?? null;
     const draft = selectedRecord ? draftForEditing(selectedRecord, localSelected) : localSelected;
+    const recordContentReady = Boolean(draft && draftsReady);
+    useEffect(() => {
+        if (!selectedId || !recordContentReady) return;
+        const frame = requestAnimationFrame(() => {
+            const content = recordContentRef.current;
+            content?.focus({ preventScroll: true });
+            content?.scrollIntoView({
+                behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+                block: 'start',
+                inline: 'nearest',
+            });
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [selectedId, recordContentReady, recordOpenRequest]);
     const sourceToCheck = draft?.localOnly ? draft.sourceUrl.trim() : '';
     useEffect(() => {
         const timer = window.setTimeout(() => {
@@ -167,7 +183,8 @@ export function LearningWorkspace({ initialDate, initialToday = initialDate, ini
     function refresh() { void queryClient.invalidateQueries({ queryKey: learningKeys.all }); void queryClient.invalidateQueries({ queryKey: checkInKeys.all }); }
     function selectView(next: LearningView) { setView(next); setSelectedId(null); setSelectedIds([]); setStatusFilter('all'); setSearchInput(''); setSearch(''); setMessage(''); setConflict(null); if (next.kind === 'date')
         setMonth(next.date.slice(0, 7)); }
-    function openRecord(record: LearningRecord) { setSelectedId(record.id); queryClient.setQueryData(learningKeys.record(record.id), record); setMessage(''); setConflict(null); }
+    function selectRecord(id: string) { setSelectedId(id); requestRecordOpen(current => current + 1); }
+    function openRecord(record: LearningRecord) { selectRecord(record.id); queryClient.setQueryData(learningKeys.record(record.id), record); setMessage(''); setConflict(null); }
     function beginRecord() {
         if (!draftsReady || savingRef.current) return;
         const next = makeLearningDraft(view.kind === 'date' ? view.date : today, view.kind === 'album' ? view.albumId : null, 'manual');
@@ -379,7 +396,7 @@ export function LearningWorkspace({ initialDate, initialToday = initialDate, ini
    {offline?<p className="learning-workspace-message" role="status">{storageError?'离线且浏览器草稿保存失败，请保持页面开启。':'离线，修改已保存在此浏览器，联网后可继续保存。'}</p>:null}
    {storageError ? <p className="learning-workspace-message learning-error" role="alert">浏览器草稿保存不可用，请及时将修改保存到云端。</p> : null}
    {view.kind === 'albums' ? <AlbumLibrary albums={albums} loading={albumsQuery.isPending} error={albumsQuery.isError ? errorText(albumsQuery.error) : ''} busy={saving} onCreate={() => { setDialogError(''); setAlbumDialog({ album: null, assign: false }); }} onOpen={album => selectView({ kind: 'album', albumId: album.id })} onRetry={() => void albumsQuery.refetch()}/> : <div className={`learning-layout${calendarOpen ? '' : ' rail-collapsed'}${selectedId ? ' has-detail' : ''}`}>
-    <aside className="learning-rail" hidden={!calendarOpen}><MonthCalendar month={month} today={today} selectedDate={view.kind === 'date' ? view.date : ''} summaries={monthQuery.data} isLoading={monthQuery.isPending} errorMessage={monthQuery.isError ? errorText(monthQuery.error) : ''} onRetry={() => void monthQuery.refetch()} onMonthChange={setMonth} onSelectDate={date => selectView({ kind: 'date', date })} onSelectToday={() => selectView({ kind: 'date', date: today })} onSelectRecord={id => setSelectedId(id)}/>
+    <aside className="learning-rail" hidden={!calendarOpen}><MonthCalendar month={month} today={today} selectedDate={view.kind === 'date' ? view.date : ''} summaries={monthQuery.data} isLoading={monthQuery.isPending} errorMessage={monthQuery.isError ? errorText(monthQuery.error) : ''} onRetry={() => void monthQuery.refetch()} onMonthChange={setMonth} onSelectDate={date => selectView({ kind: 'date', date })} onSelectToday={() => selectView({ kind: 'date', date: today })} onSelectRecord={selectRecord}/>
     </aside>
     <div className={`learning-main${view.kind === 'all' && !selectedId ? ' learning-main-overview' : ''}`}><section className="learning-list-pane" aria-label="学习记录列表"><header className="learning-list-heading"><div><p className="eyebrow">{view.kind === 'all' ? 'ALL NOTES' : view.kind === 'date' ? 'DAILY NOTES' : view.kind === 'album' ? 'LEARNING ALBUM' : 'LEARNING LIBRARY'}</p><h1>{title}</h1>{view.kind === 'all' ? <p>汇总所有日期和专辑中的记录，按创建时间从新到旧排列。</p> : null}<p>{activeSearch ? '搜索结果 · ' : ''}{recordsQuery.hasNextPage ? '已加载' : '共'} {visibleRecords.length} 条 · 已完成 {completeCount} 条 · 待完成 {visibleRecords.length - completeCount} 条</p>{selectedAlbum?.description ? <p>{selectedAlbum.description}</p> : null}</div><button className="primary-button" type="button" disabled={!draftsReady || saving} onClick={beginRecord}><Plus size={17}/>新增记录</button></header>
       {selectedAlbum ? <div className="learning-album-tools"><button type="button" onClick={() => { setDialogError(''); setAlbumDialog({ album: selectedAlbum, assign: false }); }}><Settings2 size={15}/>编辑专辑</button><button type="button" onClick={() => requestDeleteAlbum(selectedAlbum)}>删除专辑</button><button type="button" onClick={() => enterKnowledge([])}><Layers3 size={15}/>串联知识</button></div> : null}
@@ -391,7 +408,7 @@ export function LearningWorkspace({ initialDate, initialToday = initialDate, ini
       {searchPending || recordsQuery.isPending || !draftsReady ? <p className="learning-empty" role="status">{searchPending || activeSearch ? '正在搜索学习主题…' : '正在读取学习记录…'}</p> : filteredRecords.length ? <ul className={`learning-records${view.kind === 'all' ? ' list-view' : ''}`}>{filteredRecords.map(record => <li className={`learning-record-card${selectedId === record.id ? ' selected' : ''}`} key={record.id}><input type="checkbox" aria-label={`选择记录 ${record.attention || '未命名记录'}`} checked={selectedIds.includes(record.id)} disabled={saving || (!selectedIds.includes(record.id) && selectedIds.length >= 100)} onChange={e => setSelectedIds(current => e.target.checked ? [...current, record.id] : current.filter(id => id !== record.id))}/><button className="learning-record-open" type="button" aria-label={`打开记录 ${record.attention || '未命名记录'}`} onClick={() => openRecord(record)}><span className="learning-card-meta"><span className={`learning-state ${record.status === 'completed' ? 'complete' : ''}`}>{drafts[record.id]?.localOnly ? '浏览器草稿' : recordStateLabel(record)}</span><time>{record.date}</time></span><strong>{record.attention || sourceHost(record.sourceUrl) || '未命名记录'}</strong><span className="learning-card-source"><Link2 size={12}/>{sourceHost(record.sourceUrl) || '手动笔记'} · {record.entryMode === 'ai' ? 'AI 提炼' : '手动记录'}</span>{record.summary ? <p>{record.summary.replace(/[#*`]/g, '').slice(0, 90)}</p> : null}<span className="learning-card-album">{albums.find(album => album.id === record.albumId)?.name ?? '未归类'}{drafts[record.id] && !drafts[record.id].localOnly ? ' · 有未保存修改' : ''}</span></button><button className="learning-record-delete" type="button" aria-label={`删除记录 ${record.attention || '未命名记录'}`} title="删除记录" disabled={saving} onClick={() => requestDelete(record)}><Trash2 size={16}/></button></li>)}</ul> : <div className="learning-empty"><BookOpen size={30}/><h3>{activeSearch ? '没有找到匹配的记录' : statusFilter === 'all' ? '从一条记录开始' : '这个状态下还没有记录'}</h3><p>{activeSearch ? '试试更短的主题关键词，或清空搜索查看全部记录。' : view.kind === 'pending' ? '未整理的资料和待保存的 AI 结果会出现在这里。' : '手动写下学习收获，或用 AI 提炼资料链接。'}</p>{statusFilter === 'all' && !activeSearch ? <button className="secondary-button" type="button" onClick={beginRecord}>新增记录</button> : null}</div>}
       {!searchPending && recordsQuery.hasNextPage ? <button className="secondary-button learning-load-more" type="button" disabled={recordsQuery.isFetchingNextPage} onClick={() => void recordsQuery.fetchNextPage()}>{recordsQuery.isFetchingNextPage ? '正在加载…' : '加载更多记录'}</button> : null}
      </section>
-     {selectedId ? <div className="learning-detail-pane">{conflict ? <div className="learning-conflict" role="alert"><strong>云端记录已更新，本地修改已保留</strong><p>云端版本 {conflict.version} · 主题：{conflict.attention}</p><p>{conflict.summary.slice(0, 200)}</p><p>云端个人收获：{conflict.inspiration || '未填写'}</p><p>云端专辑：{albums.find(album=>album.id===conflict.albumId)?.name??'未归类'} · 本地专辑：{albums.find(album=>album.id===draft?.albumId)?.name??'未归类'}</p><button type="button" disabled={saving} onClick={() => void save(draft?.pendingSaveStatus??conflict.status, { acceptCloudVersion: conflict.version })}>使用本地修改更新云端</button><button type="button" disabled={saving} onClick={() => { queryClient.setQueryData(learningKeys.record(conflict.id), conflict); void clearLocal(conflict.id); setConflict(null); setMessage('已载入云端版本。'); }}>放弃本地修改并载入云端</button><button type="button" disabled={saving} onClick={() => { if (draft) {
+     {selectedId ? <div className="learning-detail-pane" role="group" aria-label="学习记录内容" tabIndex={-1} ref={recordContentRef}>{conflict ? <div className="learning-conflict" role="alert"><strong>云端记录已更新，本地修改已保留</strong><p>云端版本 {conflict.version} · 主题：{conflict.attention}</p><p>{conflict.summary.slice(0, 200)}</p><p>云端个人收获：{conflict.inspiration || '未填写'}</p><p>云端专辑：{albums.find(album=>album.id===conflict.albumId)?.name??'未归类'} · 本地专辑：{albums.find(album=>album.id===draft?.albumId)?.name??'未归类'}</p><button type="button" disabled={saving} onClick={() => void save(draft?.pendingSaveStatus??conflict.status, { acceptCloudVersion: conflict.version })}>使用本地修改更新云端</button><button type="button" disabled={saving} onClick={() => { queryClient.setQueryData(learningKeys.record(conflict.id), conflict); void clearLocal(conflict.id); setConflict(null); setMessage('已载入云端版本。'); }}>放弃本地修改并载入云端</button><button type="button" disabled={saving} onClick={() => { if (draft) {
         const copy = { ...draft, id: crypto.randomUUID(), localOnly: true, baseVersion: null, candidateJobId: undefined, needsCloudReview: false };
         setLocal(copy);
         setSelectedId(copy.id);

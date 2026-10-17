@@ -81,7 +81,7 @@ function QuestionReader({ structure: s, thesis, warnings = [], prompts = [] }: P
           }}><span className="question-framework-marker" aria-hidden="true" /><span>{label}</span><ChevronDown size={19} aria-hidden="true" /></button></h5>
           {open ? <div id={bodyId} role="region" aria-labelledby={headingId} className="question-section-body">
             <h6 className="question-learning-question">{q.title}</h6>
-            <SummaryProse className="question-direct-answer" value={q.answer} />
+            <SummaryProse className="question-direct-answer" value={q.answer} emphasizeFormulas={false} />
             <QuestionPartExplanation nodes={nodes} />
             <button type="button" className="question-diagram-toggle" aria-expanded={diagramOpen} aria-controls={diagramOpen ? `${bodyId}-diagram` : undefined} onClick={() => { setDiagramOpen(!diagramOpen); setSelection(null); }}>{diagramOpen ? '收起简图' : '查看简图'}<ChevronDown size={16} aria-hidden="true" /></button>
             {diagramOpen ? <div id={`${bodyId}-diagram`}>

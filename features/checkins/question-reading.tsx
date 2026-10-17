@@ -22,18 +22,43 @@ export function questionReadingParts(structure: QuestionStructure) {
 }
 
 type ReadingParts = ReturnType<typeof questionReadingParts>;
+const inlineEmphasis = /(`[^`\n]+`|\*\*[^*\n]+\*\*)/gu;
 
 // Support limited emphasis as text. Source-derived HTML is never executed.
 export function SummaryText({ value }: { value: string }) {
-  return <>{value.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/gu).map((part, index) =>
+  return <>{value.split(inlineEmphasis).map((part, index) =>
     part.startsWith('`') && part.endsWith('`') ? <code key={index}>{part.slice(1, -1)}</code>
       : part.startsWith('**') && part.endsWith('**') ? <strong key={index}>{part.slice(2, -2)}</strong>
         : part,
   )}</>;
 }
 
+// Promote only an already-emphasized expression, never infer emphasis from prose.
+function isFormula(value: string) {
+  if (value.length > 160 || /https?:\/\/|[<>。！？\n，,；;：:]/u.test(value)) return false;
+  const terms = value.split(/\s*[=＝≈→⇒+＋]\s*/u);
+  return terms.length > 1 && terms.every(term => /[\p{L}\p{N}]/u.test(term));
+}
+
+function SummaryParagraph({ value, emphasizeFormulas }: { value: string; emphasizeFormulas: boolean }) {
+  const parts = value.split(inlineEmphasis);
+  const index = emphasizeFormulas && !/^\s*(?:`{3,}|~{3,})/mu.test(value)
+    ? parts.findIndex(part => part.startsWith('**') && part.endsWith('**') && isFormula(part.slice(2, -2))) : -1;
+  if (index < 0) return <p><SummaryText value={value} /></p>;
+  const prefix = parts.slice(0, index).join('').trimEnd();
+  // Sentence punctuation after the inline formula becomes display-block spacing.
+  const suffix = parts.slice(index + 1).join('').replace(/^(?:[\s，,：:；;。]|\.(?!\d))+/u, '');
+  return <>
+    {prefix ? <p><SummaryText value={prefix} /></p> : null}
+    <div className="summary-formula-callout">
+      <p className="summary-formula-expression"><strong>{parts[index].slice(2, -2)}</strong></p>
+      {suffix ? <p className="summary-formula-explanation"><SummaryText value={suffix} /></p> : null}
+    </div>
+  </>;
+}
+
 /** Only explicit text/list markers are interpreted; source HTML stays inert. */
-export function SummaryProse({ value, className = '' }: { value: string; className?: string }) {
+export function SummaryProse({ value, className = '', emphasizeFormulas = true }: { value: string; className?: string; emphasizeFormulas?: boolean }) {
   type Block = { kind: 'paragraph'; lines: string[] } | { kind: 'ul' | 'ol'; items: string[]; start?: number };
   const blocks: Block[] = [];
   const state: { current: Block | null } = { current: null };
@@ -60,7 +85,7 @@ export function SummaryProse({ value, className = '' }: { value: string; classNa
   }
   flush();
   return <div className={`summary-prose ${className}`.trim()}>{blocks.map((block, index) => {
-    if (block.kind === 'paragraph') return <p key={index}><SummaryText value={block.lines.join('\n')} /></p>;
+    if (block.kind === 'paragraph') return <SummaryParagraph key={index} value={block.lines.join('\n')} emphasizeFormulas={emphasizeFormulas} />;
     const items = block.items.map((item, itemIndex) => <li key={itemIndex}><SummaryText value={item} /></li>);
     return block.kind === 'ol' ? <ol key={index} start={block.start}>{items}</ol> : <ul key={index}>{items}</ul>;
   })}</div>;
