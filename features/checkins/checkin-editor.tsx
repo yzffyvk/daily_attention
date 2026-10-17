@@ -75,6 +75,7 @@ type CheckInEditorProps = {
   aiError: string;
   aiIsLongRunning: boolean;
   aiQuotaRemaining: number | null;
+  aiQuotaUnlimited?: boolean;
   aiStage: AiGenerationController["stage"];
   aiProgress?: AiGenerationController["progress"];
   aiAttemptCount?: AiGenerationController["attemptCount"];
@@ -116,6 +117,7 @@ export function CheckInEditor({
   aiError,
   aiIsLongRunning,
   aiQuotaRemaining,
+  aiQuotaUnlimited = false,
   aiStage,
   aiProgress = null,
   aiAttemptCount = 0,
@@ -388,17 +390,17 @@ export function CheckInEditor({
                   {aiStage === "creating" ? "正在创建…" : isAiActive ? "生成中…" : "生成知识小结"}
                 </button>
                 <span>
-                  {aiQuotaRemaining === null
-                    ? "本账号每天共 5 次，提炼与串联共享"
+                  {aiQuotaUnlimited ? "测试白名单：AI 提炼与知识串联不限次数" : aiQuotaRemaining === null
+                    ? "提炼与知识串联共享每日额度"
                     : `今日共享额度剩余 ${aiQuotaRemaining} 次`}
                 </span>
               </div>
-              <p className="field-hint">按实际请求当天计数，北京时间 0 点重置；切换日历日期不会增加次数。</p>
+              {!aiQuotaUnlimited ? <p className="field-hint">按实际请求当天计数，北京时间 0 点重置；切换日历日期不会增加次数。</p> : null}
               {isAiActive ? <>
                 <GenerationProgress key={aiActiveJob?.jobId ?? "creating"} stage={aiStage} progress={aiProgress} attemptCount={aiAttemptCount} retryMessage={aiRetryMessage} createdAt={aiActiveJob?.createdAt} isLongRunning={aiIsLongRunning} error={aiError} />
                 {aiActiveJob && ["queued", "fetching", "generating", "retrying"].includes(aiStage) ? <div className="ai-cancel-row">
                   <button className="secondary-button" disabled={aiIsCancelling} onClick={onAiCancel} type="button">{aiIsCancelling ? "正在取消任务…" : "取消任务"}</button>
-                  <p>{aiCancellation?.requiresConfirmation
+                  <p>{aiQuotaUnlimited ? "测试白名单可随时取消，不受每日取消次数限制。" : aiCancellation?.requiresConfirmation
                     ? "今日免费取消已用完，取消前会确认 1 次额度。"
                     : aiStage === "queued" || aiStage === "fetching"
                       ? "生成开始前取消不计次数；开始后每天可免费取消 2 次。"

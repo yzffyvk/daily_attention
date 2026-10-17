@@ -44,6 +44,7 @@ export type AiGenerationController = {
   attemptCount: number;
   retryMessage: string;
   quotaRemaining: number | null;
+  quotaUnlimited: boolean;
   isLongRunning: boolean;
   isCreating: boolean;
   canRetryCreate: boolean;
@@ -76,6 +77,7 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
   const [attemptCount, setAttemptCount] = useState(0);
   const [retryContext, setRetryContext] = useState<{ attemptCount: number; message: string } | null>(null);
   const [quotaRemaining, setQuotaRemaining] = useState<number | null>(null);
+  const [quotaUnlimited, setQuotaUnlimited] = useState(false);
   const [isLongRunning, setIsLongRunning] = useState(false);
   const [canRetryCreate, setCanRetryCreate] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -125,7 +127,10 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     setStage(next.stage);
     setProgress(next.status === "generating" ? next.progress ?? null : null);
     setAttemptCount(next.attemptCount ?? 0);
-    if (next.quota) setQuotaRemaining(next.quota.remaining);
+    if (next.quota) {
+      setQuotaRemaining(next.quota.remaining);
+      setQuotaUnlimited(next.quota.unlimited === true);
+    }
     if (next.cancellation) {
       cancellationRef.current = next.cancellation;
       setCancellation(next.cancellation);
@@ -157,7 +162,9 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
         const charge = outcome?.charged === true
           ? "本次保留扣除 1 次额度。"
           : outcome?.charged === false ? "本次额度已退回。" : "已有小结与修改已保留。";
-        setCancellationMessage(`任务已取消，${charge}${outcome ? `今日免费取消剩余 ${outcome.freeRemaining} 次。` : ""}`);
+        setCancellationMessage(next.quota?.unlimited
+          ? "任务已取消，测试白名单不限次数。已有小结与修改已保留。"
+          : `任务已取消，${charge}${outcome ? `今日免费取消剩余 ${outcome.freeRemaining} 次。` : ""}`);
       }
       finish(job.jobId);
       return true;
@@ -242,6 +249,7 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
       setActiveJob(job);
       setStage("queued");
       setQuotaRemaining(created.quota.remaining);
+      setQuotaUnlimited(created.quota.unlimited === true);
       callbacksRef.current.onActiveJobChange?.(job);
       schedulePoll(job, created.pollAfterMs);
     } catch (nextError) {
@@ -371,6 +379,7 @@ export function useAiGeneration(input: UseAiGenerationInput): AiGenerationContro
     attemptCount,
     retryMessage: retryContext && attemptCount <= retryContext.attemptCount + 1 ? retryContext.message : "",
     quotaRemaining,
+    quotaUnlimited,
     isLongRunning,
     isCreating: stage === "creating",
     canRetryCreate,

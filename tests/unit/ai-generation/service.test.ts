@@ -32,6 +32,15 @@ function repository(overrides: Partial<AiGenerationRepository> = {}): AiGenerati
 }
 
 describe("AI generation service", () => {
+  it('shows the confirmed quality refund and balance without promising refunds for historical failures', () => {
+    const failed = { ...created.job, status: 'failed' as const, errorCode: 'MODEL_OUTPUT_INVALID',
+      errorMessage: '本次提炼未通过质量校验，未消耗使用次数，请重试。',
+      quota: { used: 0, reserved: 0, consumed: 0, limit: 5 as const, remaining: 5 } };
+    const response = toAiGenerationJobData(failed);
+    expect(response.error?.message).toContain('未消耗使用次数');
+    expect(response.quota?.remaining).toBe(5);
+    expect(toAiGenerationJobData({ ...failed, errorMessage: 'AI 返回内容未通过质量校验' }).error?.message).not.toContain('未消耗使用次数');
+  });
   it("keeps the record identity through request creation and polling responses", async () => {
     const recordId = "00000000-0000-4000-8000-000000000099";
     const repo = repository();

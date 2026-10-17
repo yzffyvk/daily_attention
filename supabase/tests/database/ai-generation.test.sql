@@ -148,7 +148,7 @@ select results_eq(
   'idempotent creation does not occupy another slot'
 );
 select is(
-  (select count(*)::integer from pgmq.q_ai_generation_jobs),
+  (select count(*)::integer from pgmq.q_ai_generation_jobs where message->>'job_id' in (select job_id::text from created_ai_jobs)),
   5,
   'one queue message is sent for each created job'
 );
@@ -159,6 +159,7 @@ select ok(
       and message ? 'job_id'
     )
     from pgmq.q_ai_generation_jobs
+    where message->>'job_id' in (select job_id::text from created_ai_jobs)
   ),
   'queue payloads contain only job_id'
 );

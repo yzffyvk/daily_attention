@@ -57,6 +57,24 @@ function options(overrides: Record<string, unknown> = {}) {
 }
 
 describe("useAiGeneration", () => {
+  it("keeps unlimited quota through creation, polling and cancellation", async () => {
+    const quota = { used: 8, reserved: 1, consumed: 7, limit: null, remaining: null, unlimited: true };
+    vi.mocked(createAiGeneration).mockResolvedValue({ ...created, quota });
+    vi.mocked(getAiGeneration).mockResolvedValue({ jobId: created.jobId, status: "generating", stage: "generating", quota });
+    vi.mocked(cancelAiGeneration).mockResolvedValue({ jobId: created.jobId, status: "cancelled", stage: "complete", quota,
+      cancellation: { freeRemaining: 2, requiresConfirmation: false, charged: false } });
+    const input = options();
+    const { result: hook } = renderHook(() => useAiGeneration(input));
+    await act(() => hook.current.generate({ sourceUrl: "https://example.com/article", targetDate: "2026-07-31" }));
+    expect(hook.current.quotaUnlimited).toBe(true);
+    expect(hook.current.quotaRemaining).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(1500));
+    expect(hook.current.quotaUnlimited).toBe(true);
+    await act(() => hook.current.cancel());
+    expect(hook.current.quotaUnlimited).toBe(true);
+    expect(hook.current.cancellationMessage).not.toContain("免费取消剩余");
+    expect(hook.current.cancellationMessage).not.toContain("扣除");
+  });
   it("stops polling an expired task so the persisted candidate can be reloaded", async () => {
     const activeJob = { jobId: created.jobId, recordId: "00000000-0000-4000-8000-000000000099", targetDate: "2026-07-31", sourceUrl: "https://example.com/article", createdAt: new Date().toISOString() };
     vi.mocked(getAiGeneration).mockResolvedValue({ jobId: created.jobId, status: "succeeded", stage: "complete",

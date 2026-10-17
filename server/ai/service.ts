@@ -141,7 +141,8 @@ export function toAiGenerationJobData(job: AiJob): AiGenerationJobData {
       ...base,
       error: {
         code,
-        message: taskErrorMessages[code],
+        message: code === 'MODEL_OUTPUT_INVALID' && job.errorMessage === '本次提炼未通过质量校验，未消耗使用次数，请重试。'
+          ? job.errorMessage : taskErrorMessages[code],
         retryable: false,
       },
     };

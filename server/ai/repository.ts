@@ -61,14 +61,15 @@ const jobSchema = z.object({
 
 const jobWithQuotaSchema = z.object({
   job: jobSchema,
-  quota_used: z.number().int().min(0).max(5),
-  quota_reserved: z.number().int().min(0).max(5),
-  quota_consumed: z.number().int().min(0).max(5),
-  quota_remaining: z.number().int().min(0).max(5),
+  quota_used: z.number().int().min(0),
+  quota_reserved: z.number().int().min(0),
+  quota_consumed: z.number().int().min(0),
+  quota_remaining: z.number().int().min(0).max(5).nullable(),
+  quota_unlimited: z.boolean().optional(),
 }).superRefine((value, context) => {
   if (
     value.quota_used !== value.quota_reserved + value.quota_consumed
-    || value.quota_remaining !== 5 - value.quota_used
+    || value.quota_remaining !== (value.quota_unlimited ? null : Math.max(0, 5 - value.quota_used))
   ) {
     context.addIssue({ code: "custom", message: "inconsistent AI quota" });
   }
@@ -77,9 +78,12 @@ const jobWithQuotaSchema = z.object({
 const jobStateSchema = z.object({
   job: jobSchema,
   quota: z.object({
-    used: z.number().int().min(0).max(5), reserved: z.number().int().min(0).max(5),
-    consumed: z.number().int().min(0).max(5), limit: z.literal(5), remaining: z.number().int().min(0).max(5),
-  }).refine(q => q.used === q.reserved + q.consumed && q.remaining === 5 - q.used),
+    used: z.number().int().min(0), reserved: z.number().int().min(0),
+    consumed: z.number().int().min(0), limit: z.literal(5).nullable(),
+    remaining: z.number().int().min(0).max(5).nullable(), unlimited: z.boolean().optional(),
+  }).refine(q => q.used === q.reserved + q.consumed
+    && q.limit === (q.unlimited ? null : 5)
+    && q.remaining === (q.unlimited ? null : Math.max(0, 5 - q.used))),
   cancellation: z.object({
     freeRemaining: z.number().int().min(0).max(2), requiresConfirmation: z.boolean(), charged: z.boolean().nullable(),
   }),
@@ -148,13 +152,7 @@ export type AiJob = {
 
 export type AiJobWithQuota = {
   job: AiJob;
-  quota: {
-    used: number;
-    reserved: number;
-    consumed: number;
-    limit: 5;
-    remaining: number;
-  };
+  quota: AiGenerationQuota;
 };
 
 export type CreateAiJob = {
@@ -222,8 +220,9 @@ function mapWithQuota(row: z.infer<typeof jobWithQuotaSchema>): AiJobWithQuota {
       used: row.quota_used,
       reserved: row.quota_reserved,
       consumed: row.quota_consumed,
-      limit: 5,
+      limit: row.quota_unlimited ? null : 5,
       remaining: row.quota_remaining,
+      ...(row.quota_unlimited !== undefined ? { unlimited: row.quota_unlimited } : {}),
     },
   };
 }

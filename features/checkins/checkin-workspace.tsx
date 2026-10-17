@@ -1015,6 +1015,7 @@ export function CheckInWorkspace({
             aiError={aiGeneration.error}
             aiIsLongRunning={aiGeneration.isLongRunning}
             aiQuotaRemaining={aiGeneration.quotaRemaining}
+            aiQuotaUnlimited={aiGeneration.quotaUnlimited}
             aiStage={aiGeneration.stage}
             aiProgress={aiGeneration.progress}
             aiAttemptCount={aiGeneration.attemptCount}

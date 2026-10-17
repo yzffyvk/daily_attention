@@ -243,7 +243,7 @@ export async function runAiJob(
       const providerError = error instanceof DeepSeekProviderError ? error : null;
       const candidate = providerError?.code ?? "MODEL_SERVICE_ERROR";
       const retryable = (providerError?.retryable ?? true) && job.attemptCount < MAX_ATTEMPTS;
-      const code = !retryable && (providerError?.retryable ?? true)
+      const code = !retryable && (providerError?.retryable ?? true) && candidate !== 'MODEL_OUTPUT_INVALID'
         ? "TASK_RETRY_EXHAUSTED"
         : candidate;
       await ports.markProviderFailure({

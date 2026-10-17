@@ -253,12 +253,13 @@
 .question-memory-heading { margin: 0 0 .7rem !important; color: var(--theme-text-secondary); font-size: .82rem; }
 .question-memory-outline > ol { list-style: decimal; padding-left: 1.3rem; }
 .question-memory-outline > ol > li + li { margin-top: 1rem; }
-.question-memory-outline ul { list-style: none; margin: .35rem 0 0; padding-left: .9rem; border-left: 1px solid var(--theme-border); color: var(--theme-text-secondary); font-size: .9rem; }
+.question-memory-outline ul { list-style: disc; margin: .35rem 0 0; padding-left: 1.3rem; color: var(--theme-text-secondary); font-size: .9rem; }
 .question-memory-outline ul > li + li { margin-top: .25rem; }
 .question-memory-concept { color: var(--theme-text); font-weight: 500; }
 .question-part-explanations { margin: 1.3rem 0; max-width: 80ch; line-height: 1.9; }
 .question-part-explanations > div + div { margin-top: 1.5rem; }
 .question-part-explanations dt { font-size: 1rem; font-weight: 600; margin-bottom: .5rem; }
+.question-part-explanations dt::before { content: '•'; display: inline-block; margin-right: .55rem; }
 .question-part-explanations dd { margin: 0; }
 .question-part-explanations dd > p { margin: .6rem 0; white-space: pre-wrap; }
 .question-part-explanations .summary-document-evidence { margin-top: .6rem; color: var(--theme-text-secondary); font-size: .82rem; }
@@ -341,6 +342,13 @@
 .summary-document-warnings { color: var(--theme-text-secondary); font-size: .9rem; }
 .summary-document-warnings ul { list-style: disc; padding-left: 1.3rem; }
 .summary-document code { padding: .1rem .25rem; border-radius: 3px; background: var(--theme-surface-soft); font-size: .9em; white-space: pre-wrap; }
+.summary-prose > p { margin: .6rem 0; white-space: pre-wrap; }
+.summary-prose > ul, .summary-prose > ol { margin: .65rem 0; padding-left: 1.4rem; }
+.summary-prose > ul { list-style: disc; }
+.summary-prose > ol { list-style: decimal; }
+.summary-prose li { padding-left: .15rem; white-space: pre-wrap; }
+.summary-prose li + li { margin-top: .4rem; }
+.summary-prose strong, .question-memory-outline strong, .question-mainline strong { font-weight: 700; }
 .question-reader .question-views { padding: 0 0 .8rem; border: 0; }
 @container structure-reader (max-width: 600px) {
   .question-reader-toolbar { margin-bottom: .7rem; }

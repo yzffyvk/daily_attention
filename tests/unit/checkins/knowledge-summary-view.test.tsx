@@ -34,6 +34,42 @@ Agent
 afterEach(cleanup);
 
 describe("KnowledgeSummaryView", () => {
+  it('renders emphasized formulas and actual lists consistently across reading surfaces', async () => {
+    const document = questionSummaryFixture();
+    const formula = 'Agent = LLM + 上下文 + 工具';
+    document.thesis = `核心构成：**${formula}**`;
+    document.structure.questions[0].answer = `**${formula}**\n\n- **LLM**：负责决策\n- **上下文**：承载信息\n- **工具**：执行行动`;
+    document.structure.nodes[0].explanation = '三个组成相互配合。\n\n- **决策**：选择行动\n- **反馈**：更新上下文\n\n1. 观察环境\n2. 执行行动';
+    document.distinctions = '**环境**位于 Agent 边界之外。';
+    render(<KnowledgeSummaryView value={serializeQuestionSummary(document)} />);
+    const user = userEvent.setup();
+    expect(within(screen.getByRole('heading', { name: `核心构成：${formula}` })).getByText(formula).tagName).toBe('STRONG');
+    await user.click(screen.getByRole('button', { name: '展开核心部分：明确行动' }));
+    const check = (scope: ReturnType<typeof within>) => {
+      expect(scope.getAllByText(formula).every((el: HTMLElement) => el.tagName === 'STRONG')).toBe(true);
+      const item = scope.getByText('LLM', { exact: true }).closest('li');
+      expect(item).toHaveTextContent('LLM：负责决策');
+      expect(item?.parentElement?.tagName).toBe('UL');
+      expect(scope.getByText('观察环境').closest('li')?.parentElement?.tagName).toBe('OL');
+    };
+    check(within(screen.getByRole('region', { name: '明确行动' })));
+    await user.click(screen.getByRole('button', { name: '展开阅读' }));
+    check(within(screen.getByRole('region', { name: '明确行动' })));
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByText('查看完整小结', { exact: true }));
+    check(within(screen.getByTestId('complete-summary')));
+    expect(within(screen.getByTestId('complete-summary')).getByText('环境', { exact: true }).tagName).toBe('STRONG');
+  });
+
+  it('keeps safe emphasis and list structure in plain or legacy notes without interpreting source HTML', () => {
+    render(<KnowledgeSummaryView value={'**核心公式**\n\n• **模型**：决策\n• 工具：行动\n\n<script>unsafe()</script>\n\n```text\n- code example\n```'} />);
+    expect(screen.getByText('核心公式').tagName).toBe('STRONG');
+    expect(screen.getByText('模型', { exact: true }).closest('li')).toHaveTextContent('模型：决策');
+    expect(screen.getByText(/- code example/).closest('li')).toBeNull();
+    expect(screen.getByText(/<script>unsafe/)).toBeVisible();
+    expect(document.querySelector('script')).toBeNull();
+  });
+
   it('shows pending-review status before reading without hiding it in a collapsed source-warning section', async () => {
     const document = questionSummaryFixture();
     document.warnings = ['待核对：已生成学习草稿，仍有内容需要核对。', '待核对：检查：解释只有名称，没有说明如何验证。', '原文只覆盖已提供范围。'];

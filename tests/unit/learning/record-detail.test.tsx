@@ -4,12 +4,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LearningRecord } from '@/lib/domain/learning-record';
 import { draftForCandidate, draftForRecord, makeLearningDraft } from '@/features/learning/model';
 import { LearningRecordDetail } from '@/features/learning/record-detail';
-const generation=vi.hoisted(()=>({activeJob:null as null|{jobId:string;createdAt:string},generate:vi.fn()}));
+const generation=vi.hoisted(()=>({activeJob:null as null|{jobId:string;createdAt:string},generate:vi.fn(),quotaUnlimited:false}));
 vi.mock('@/features/ai-generation/use-ai-generation',()=>({useAiGeneration:()=>({...generation,stage:'idle',error:'',quotaRemaining:5,cancellationConfirmationRequired:false,clearError:vi.fn()})}));
-afterEach(()=>{cleanup();vi.unstubAllGlobals();generation.activeJob=null;vi.clearAllMocks();});
+afterEach(()=>{cleanup();vi.unstubAllGlobals();generation.activeJob=null;generation.quotaUnlimited=false;vi.clearAllMocks();});
 const record={id:'one',date:'2026-10-14',entryMode:'manual',attention:'First',sourceUrl:'https://example.com',summary:'Accepted summary',inspiration:'',version:4,status:'completed',albumId:null,activeAiJobId:null,aiCandidate:null,updatedAt:'2026-10-14T08:00:00Z',imagePath:null,imageUrl:null,imageName:''} as LearningRecord;
 function props(){return {record,draft:draftForRecord(record),albums:[],saving:false,storageError:false,message:'',onChange:vi.fn(),onSave:vi.fn(),onRefresh:vi.fn(),onMove:vi.fn(),onBack:vi.fn(),onNewLink:vi.fn(),onCreateAlbum:vi.fn(),onCancel:vi.fn()};}
 describe('learning record detail',()=>{
+ it('shows unlimited access without displaying a finite remaining allowance',()=>{
+   generation.quotaUnlimited=true;
+   const p=props();p.draft={...p.draft,entryMode:'ai'};
+   render(<LearningRecordDetail {...p}/>);
+   expect(screen.getByText('测试白名单：AI 提炼与知识串联不限次数')).toBeInTheDocument();
+   expect(screen.queryByText(/今日共享额度剩余/)).not.toBeInTheDocument();
+ });
  it('saves a completed record without presenting it as a new day or another independent entry mode',()=>{
    const p=props();render(<LearningRecordDetail {...p}/>);
    expect(screen.getByRole('heading',{name:'First'})).toBeInTheDocument();

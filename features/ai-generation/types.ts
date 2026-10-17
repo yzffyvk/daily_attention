@@ -22,8 +22,9 @@ export type AiGenerationQuota = {
   used: number;
   reserved: number;
   consumed: number;
-  limit: 5;
-  remaining: number;
+  limit: 5 | null;
+  remaining: number | null;
+  unlimited?: boolean;
 };
 
 export type AiCancellationInfo = {

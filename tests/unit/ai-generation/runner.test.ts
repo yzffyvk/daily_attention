@@ -69,6 +69,12 @@ describe("AI job runner", () => {
     expect(runnerPorts.markProviderFailure).not.toHaveBeenCalled();
   });
 
+  it('preserves the quality failure reason on the final attempt so the database can refund it', async () => {
+    const runnerPorts = ports({ claim: async () => ({ ...job, attemptCount: 3 }),
+      generate: async () => { throw new DeepSeekProviderError('MODEL_OUTPUT_INVALID', true); } });
+    await expect(runAiJob(job.id, runnerPorts)).resolves.toBe('completed');
+    expect(runnerPorts.markProviderFailure).toHaveBeenCalledWith(expect.objectContaining({ code: 'MODEL_OUTPUT_INVALID', retryable: false }));
+  });
   it('associates format diagnostics with the task while keeping logging failures non-fatal', async () => {
     const audit = { stage: 'writing' as const, repair: false, reason: 'schema_invalid' as const, issues: [{ path: 'structure.nodes.0.role', code: 'invalid_value' }] };
     const reportValidationFailure = vi.fn().mockRejectedValue(new Error('log unavailable'));
