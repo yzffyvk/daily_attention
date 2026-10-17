@@ -17,10 +17,36 @@ vi.mock('@/features/checkins/queries',()=>({useMonthCheckIns:()=>({data:[],isErr
 vi.mock('@/features/learning/record-detail',()=>({LearningRecordDetail:({draft,onChange,onSave,onBack,onCancel,message,duplicates=[]}:{message?:string;draft:LearningDraft;duplicates?:LearningRecord[];onChange:(x:Partial<LearningDraft>)=>void;onSave:(x:string)=>void;onBack:()=>void;onCancel:()=>void})=><section aria-label="学习记录详情"><p>{message}</p><input aria-label="学习主题" value={draft.attention} onChange={e=>onChange({attention:e.target.value})}/><input aria-label="资料链接" value={draft.sourceUrl} onChange={e=>onChange({sourceUrl:e.target.value})}/>{duplicates.length>0?<p>这个链接已有学习记录</p>:null}<button onClick={()=>onSave('pending')}>保存记录</button><button onClick={()=>onSave('completed')}>保存并完成</button><button onClick={onCancel}>取消</button><button onClick={onBack}>返回记录列表</button></section>}));
 const a={id:'a',date:'2026-10-15',entryMode:'manual',attention:'Alpha',sourceUrl:'https://a.example',summary:'',inspiration:'',version:1,status:'pending',albumId:null,activeAiJobId:null,aiCandidate:null,imagePath:null,imageName:'',imageUrl:null,createdAt:'2026-10-15T02:00:00Z',updatedAt:'2026-10-15T02:00:00Z'} as LearningRecord;
 const b={...a,id:'b',attention:'Beta',sourceUrl:'https://b.example'};
+const recordScroll = vi.fn();
 function mount(){const client=new QueryClient({defaultOptions:{queries:{retry:false}}});return render(<QueryClientProvider client={client}><LearningWorkspace initialDate="2026-10-15" initialToday="2026-10-15" initialProfile={null} userId="user"/></QueryClientProvider>);}
 afterEach(cleanup);
-beforeEach(()=>{vi.clearAllMocks();mocks.getRecords.mockResolvedValue({records:[a,b],nextCursor:null});mocks.getRecord.mockImplementation(async(id:string)=>id==='a'?a:b);mocks.getAlbums.mockResolvedValue([{id:'album',name:'AI 学习',recordCount:0,completedCount:0}]);mocks.listLearningDrafts.mockResolvedValue([]);mocks.saveLearningDraft.mockResolvedValue(undefined);mocks.migrateLegacyDrafts.mockResolvedValue(undefined);mocks.updateRecord.mockImplementation(async(id:string,input:object)=>({...a,id,...input,version:2}));});
+beforeEach(()=>{vi.clearAllMocks();Object.defineProperty(HTMLElement.prototype,'scrollIntoView',{configurable:true,value:recordScroll});Object.defineProperty(window,'matchMedia',{configurable:true,value:vi.fn().mockReturnValue({matches:false})});mocks.getRecords.mockResolvedValue({records:[a,b],nextCursor:null});mocks.getRecord.mockImplementation(async(id:string)=>id==='a'?a:b);mocks.getAlbums.mockResolvedValue([{id:'album',name:'AI 学习',recordCount:0,completedCount:0}]);mocks.listLearningDrafts.mockResolvedValue([]);mocks.saveLearningDraft.mockResolvedValue(undefined);mocks.migrateLegacyDrafts.mockResolvedValue(undefined);mocks.updateRecord.mockImplementation(async(id:string,input:object)=>({...a,id,...input,version:2}));});
 describe('multi record workspace',()=>{
+ it('anchors and focuses each explicitly opened record, including repeated clicks, without jumping while editing',async()=>{
+  mount();
+  const openAlpha=await screen.findByRole('button',{name:'打开记录 Alpha'});
+  expect(recordScroll).not.toHaveBeenCalled();
+  fireEvent.click(openAlpha);
+  const content=await screen.findByRole('group',{name:'学习记录内容'});
+  await waitFor(()=>expect(content).toHaveFocus());
+  expect(recordScroll).toHaveBeenCalledTimes(1);
+  expect(recordScroll.mock.contexts[0]).toBe(content);
+  expect(recordScroll).toHaveBeenLastCalledWith({behavior:'smooth',block:'start',inline:'nearest'});
+  fireEvent.change(screen.getByLabelText('学习主题'),{target:{value:'Alpha edited'}});
+  await waitFor(()=>expect(mocks.saveLearningDraft).toHaveBeenCalled());
+  expect(recordScroll).toHaveBeenCalledTimes(1);
+  fireEvent.click(openAlpha);
+  await waitFor(()=>expect(recordScroll).toHaveBeenCalledTimes(2));
+  fireEvent.click(screen.getByRole('button',{name:'打开记录 Beta'}));
+  await waitFor(()=>expect(screen.getByLabelText('学习主题')).toHaveValue('Beta'));
+  await waitFor(()=>expect(recordScroll).toHaveBeenCalledTimes(3));
+  expect(content).toHaveFocus();
+ });
+ it('anchors without animation when reduced motion is requested',async()=>{
+  vi.mocked(window.matchMedia).mockReturnValue({matches:true} as MediaQueryList);
+  mount();fireEvent.click(await screen.findByRole('button',{name:'打开记录 Alpha'}));
+  await waitFor(()=>expect(recordScroll).toHaveBeenCalledWith({behavior:'auto',block:'start',inline:'nearest'}));
+ });
  it('searches cloud records by topic across pages, filters local drafts and resets the cursor for a new term',async()=>{
   const history={...a,id:'history',attention:'Transformer lesson',date:'2026-08-01'};
   const local={...makeLearningDraft('2026-07-01',null,'manual'),attention:'TRANS local draft'};
