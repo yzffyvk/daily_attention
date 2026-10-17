@@ -49,6 +49,30 @@ function rpcState(overrides: Record<string, unknown> = {}) {
 }
 
 describe("AI generation repository", () => {
+  it("accepts unlimited quota above five and preserves it when polling", async () => {
+    const unlimited = { used: 12, reserved: 2, consumed: 10, limit: null, remaining: null, unlimited: true };
+    const repository = createAiGenerationRepository({ rpc: async (name: string) => ({
+      data: name === "create_ai_generation_job" ? [{ job: rpcJob(), quota_used: 12, quota_reserved: 2,
+        quota_consumed: 10, quota_remaining: null, quota_unlimited: true }]
+        : { ...rpcState(), quota: unlimited }, error: null,
+    }) });
+    expect((await repository.create({ userId, targetDate: "2026-07-31", idempotencyKey: jobId,
+      sourceUrl: "https://example.com/article", sourceHost: "example.com" })).quota).toEqual(unlimited);
+    expect((await repository.findOwned(userId, jobId))?.quota).toEqual(unlimited);
+  });
+
+  it("rejects an unlimited response without the server whitelist flag", async () => {
+    const repository = createAiGenerationRepository({ rpc: async () => ({ data: [{ job: rpcJob(),
+      quota_used: 12, quota_reserved: 2, quota_consumed: 10, quota_remaining: null }], error: null }) });
+    await expect(repository.create({ userId, targetDate: "2026-07-31", idempotencyKey: jobId,
+      sourceUrl: "https://example.com/article", sourceHost: "example.com" })).rejects.toThrow("Malformed AI generation RPC response");
+  });
+
+  it("reads exhausted usage after an account loses unlimited access", async () => {
+    const quota = { used: 12, reserved: 2, consumed: 10, limit: 5, remaining: 0, unlimited: false };
+    const repository = createAiGenerationRepository({ rpc: async () => ({ data: { ...rpcState(), quota }, error: null }) });
+    expect((await repository.findOwned(userId, jobId))?.quota).toEqual(quota);
+  });
   it('reads a successful draft with all source notices and review findings intact', async () => {
     const warnings = Array.from({ length: 23 }, (_, i) => `待核对：提醒${i}`);
     const rpc = vi.fn().mockResolvedValue({ data: rpcState({ status: 'succeeded', summary: '可读学习草稿', warnings }), error: null });

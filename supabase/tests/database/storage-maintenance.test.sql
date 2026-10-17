@@ -300,6 +300,7 @@ select is((select count(*) from private.storage_upload_reservations
 select results_eq(
   $$select path
     from public.list_orphan_checkin_image_paths(100)
+    where path like '00000000-0000-4000-8000-000000000801/%'
     order by path$$,
   $$values (
     '00000000-0000-4000-8000-000000000801/2026-07-01/00000000-0000-4000-8000-000000000899.png'

@@ -16,7 +16,7 @@ const view = z.object({
   contextNotes: z.array(z.object({ nodeId: id, text: line(180) }).strict()).max(32),
 }).strict();
 const question = z.object({
-  id, title: line(120), answer: line(400), scope: line(180), mainlineRole: line(120),
+  id, title: line(120), answer: z.string().trim().min(1).max(400), scope: line(180), mainlineRole: line(120),
   evidence: line(180).min(4), views: z.array(view).min(1).max(3),
 }).strict();
 export const questionStructureSchema = z.object({

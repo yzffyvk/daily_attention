@@ -1126,6 +1126,7 @@ export type Database = {
         quota_reserved: number | null
         quota_consumed: number | null
         quota_remaining: number | null
+        quota_unlimited: boolean | null
       }
     }
   }

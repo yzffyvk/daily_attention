@@ -6,7 +6,7 @@ import { projectQuestionView, type QuestionStructure } from '@/lib/domain/knowle
 import { QuestionStructureMap } from './question-structure-map';
 import { KnowledgeEdgeDetail } from './knowledge-structure-detail';
 import { StructureReaderDialog } from './structure-reader-dialog';
-import { QuestionMemoryOutline, QuestionPartExplanation, questionReadingParts, SummaryText } from './question-reading';
+import { QuestionMemoryOutline, QuestionPartExplanation, questionReadingParts, SummaryText, SummaryProse } from './question-reading';
 import { PendingReviewNotice } from './pending-review-notice';
 import { PENDING_REVIEW_PREFIX } from '@/lib/domain/ai-review';
 
@@ -64,8 +64,8 @@ function QuestionReader({ structure: s, thesis, warnings = [], prompts = [] }: P
         : <button type="button" className="structure-quiet-button" aria-label="展开阅读" aria-haspopup="dialog" ref={expandRef} onClick={() => setExpanded(true)}><Maximize2 size={16} aria-hidden="true" />展开阅读</button>}
     </header>
     <div className="question-mainline">
-      <h4>{thesis || s.coreQuestion}</h4>
-      {thesis ? <p>{s.coreQuestion}</p> : null}
+      <h4><SummaryText value={thesis || s.coreQuestion} /></h4>
+      {thesis ? <p><SummaryText value={s.coreQuestion} /></p> : null}
     </div>
     <PendingReviewNotice warnings={warnings} structure={s} />
     {sourceWarnings.length ? <details className="question-warnings"><summary>资料范围与提醒（{sourceWarnings.length}）</summary>{sourceWarnings.map((warning, i) => <p key={i}>{warning}</p>)}</details> : null}
@@ -81,7 +81,7 @@ function QuestionReader({ structure: s, thesis, warnings = [], prompts = [] }: P
           }}><span className="question-framework-marker" aria-hidden="true" /><span>{label}</span><ChevronDown size={19} aria-hidden="true" /></button></h5>
           {open ? <div id={bodyId} role="region" aria-labelledby={headingId} className="question-section-body">
             <h6 className="question-learning-question">{q.title}</h6>
-            <p className="question-direct-answer"><SummaryText value={q.answer} /></p>
+            <SummaryProse className="question-direct-answer" value={q.answer} />
             <QuestionPartExplanation nodes={nodes} />
             <button type="button" className="question-diagram-toggle" aria-expanded={diagramOpen} aria-controls={diagramOpen ? `${bodyId}-diagram` : undefined} onClick={() => { setDiagramOpen(!diagramOpen); setSelection(null); }}>{diagramOpen ? '收起简图' : '查看简图'}<ChevronDown size={16} aria-hidden="true" /></button>
             {diagramOpen ? <div id={`${bodyId}-diagram`}>
@@ -93,7 +93,7 @@ function QuestionReader({ structure: s, thesis, warnings = [], prompts = [] }: P
               <button type="button" className="question-detail-close" aria-label="收起详情" onClick={closeDetails}><X size={16} aria-hidden="true" />收起详情</button>
               {edge ? <KnowledgeEdgeDetail edge={edge} onNode={onNode} /> : selected ? <>
                 <h5>{selected.name}</h5>
-                <p>{selected.explanation || selected.summary}</p>
+                <SummaryProse value={selected.explanation || selected.summary} />
                 <details className="structure-evidence"><summary tabIndex={0}>查看原文依据</summary><blockquote>{selected.evidence}</blockquote></details>
               </> : null}
             </section> : null}

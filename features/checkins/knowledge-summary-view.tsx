@@ -4,6 +4,7 @@ import { ChevronDown, Layers3, Lightbulb } from "lucide-react";
 import { useMemo, useState, type CSSProperties } from "react";
 import { QuestionStructureView } from "./question-structure-view";
 import { QuestionSummaryDocument } from "./question-summary-document";
+import { SummaryProse, SummaryText } from "./question-reading";
 import { KnowledgeStructureView } from "./knowledge-structure-view";
 import { parseKnowledgeSummary, type KnowledgeNode } from "@/lib/domain/knowledge-summary";
 
@@ -16,9 +17,7 @@ function leafCount(node: KnowledgeNode): number {
 }
 
 function KnowledgeText({ value }: { value: string }) {
-  return <div className="knowledge-prose">{value.split(/\n\s*\n/u).filter(Boolean).map((block, index) => (
-    <p key={index}>{block.replace(/^#{1,6}\s+/gmu, "").replace(/\*\*(.*?)\*\*/gu, "$1")}</p>
-  ))}</div>;
+  return <SummaryProse className="knowledge-prose" value={value} />;
 }
 
 function KnowledgeBranch({ node, selectedId, onSelect }: {
@@ -67,7 +66,7 @@ export function KnowledgeSummaryView({ value, title }: { value: string; title?: 
 
   return (
     <div className="knowledge-summary-view">
-      {!document.questions && document.thesis ? <p className="knowledge-thesis">{document.thesis}</p> : null}
+      {!document.questions && document.thesis ? <p className="knowledge-thesis"><SummaryText value={document.thesis} /></p> : null}
       {document.questions ? <QuestionStructureView structure={document.questions.structure} title={title} thesis={document.thesis} warnings={document.questions.warnings} prompts={document.questions.prompts} /> : document.structure ? <>
         {document.unmapped ? <div className="knowledge-structure-notes"><KnowledgeText value={document.unmapped} /></div> : null}
         <KnowledgeStructureView structure={document.structure} title={title} />
