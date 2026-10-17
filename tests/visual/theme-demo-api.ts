@@ -11,7 +11,7 @@ const storageKey = "aura-acceptance-demo:v1";
 type AiJob = { id: string; started: number; failure: boolean; cancelled: boolean; key: string; sourceUrl?: string; targetDate?: string; userPrompt?: string };
 type NarrativeJob = { started: number; failure: boolean; key: string; cancelled?: boolean };
 const quotaDayFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" });
-const quotaLimitMessage = "本账号今天的 5 次 AI 生成机会已用完，知识提炼与知识串联共用额度，北京时间 0 点重置";
+const quotaLimitMessage = "今日免费 2 次已用完，付费次数也不足；可购买次数包，或等待北京时间 0 点免费额度重置";
 type DemoState = {
   version: 1; today: string;
   profile: { id: string; email: string; displayName: string; avatarKey: number; onboardingCompleted: boolean };
@@ -59,7 +59,7 @@ export function installThemeDemoApi() {
       else consumed++;
     }
     const used = reserved + consumed;
-    return { used, reserved, consumed, limit: 5, remaining: Math.max(0, 5 - used) };
+    return { used, reserved, consumed, limit: 2, remaining: Math.max(0, 2 - used) };
   }
   function timestamp(previous?: string) { return new Date(Math.max(Date.now(), previous ? Date.parse(previous) + 1 : 0)).toISOString(); }
   function advanceNarratives() {

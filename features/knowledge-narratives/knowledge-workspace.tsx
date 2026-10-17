@@ -231,7 +231,7 @@ export function KnowledgeWorkspace({ today, userId, entryMode = "manual", onClos
         <p className="knowledge-character-count">{question.length}/300</p>
         {create.isError ? <p role="alert" className="knowledge-error">{errorText(create.error)}</p> : null}
         <button className="primary-button knowledge-generate" type="button" disabled={(recordSelection ? recordIds : dates).length < 2 || (recordSelection ? recordIds : dates).length > 14 || create.isPending} onClick={() => void generate()}>{create.isPending ? "正在提交…" : create.isError ? "重试生成请求" : "生成知识脉络"}</button>
-        <p className="knowledge-muted knowledge-generation-note">生成后自动保存；重新生成会保留旧版本并使用 1 次额度。本账号的知识提炼与知识串联每天合计最多 5 次，按实际请求当天计数，北京时间 0 点重置；切换所选日期不会增加次数。</p>
+        <p className="knowledge-muted knowledge-generation-note">生成后自动保存；重新生成会保留旧版本并使用 1 次额度。知识提炼与知识串联每日合计免费 2 次，北京时间 0 点重置；免费次数用完后使用次数包，切换所选日期不会增加免费次数。</p>
       </section>
     </div> : <section className="knowledge-history" aria-labelledby="knowledge-history-title">
       <div className="knowledge-history-heading"><div><h3 id="knowledge-history-title">已保存的脉络</h3><p>让每一次理解，都有迹可循。</p></div><span>最近 50 条</span></div>
@@ -247,7 +247,7 @@ export function KnowledgeWorkspace({ today, userId, entryMode = "manual", onClos
       </li>)}</ul></> : null}
     </section>}
     </div>
-    {deleteTarget ? <ConfirmDialog title="删除知识脉络？" confirmLabel="确认删除" busy={remove.isPending} error={remove.isError ? errorText(remove.error) : ""} onCancel={() => { setDeleteTarget(null); remove.reset(); }} onConfirm={() => void confirmDelete()}><p>即将删除「{deleteTarget.title}」。删除后不可恢复。</p>{activeStatus(deleteTarget.status) ? <p>这条脉络仍在生成中，删除后会终止展示，生成结果也不会保留。</p> : null}</ConfirmDialog> : null}
+    {deleteTarget ? <ConfirmDialog title="删除知识脉络？" confirmLabel="确认删除" busy={remove.isPending} error={remove.isError ? errorText(remove.error) : ""} onCancel={() => { setDeleteTarget(null); remove.reset(); }} onConfirm={() => void confirmDelete()}><p>即将删除「{deleteTarget.title}」。删除后不可恢复。</p>{activeStatus(deleteTarget.status) ? <p>这条脉络仍在生成中，删除后会终止展示，生成结果也不会保留。尚未开始的任务会返还次数；已经开始的任务仍会消耗原次数。</p> : null}</ConfirmDialog> : null}
     {pendingLeave ? <ConfirmDialog title="放弃未保存的修改？" confirmLabel="放弃修改" cancelLabel="继续编辑" onCancel={() => setPendingLeave(null)} onConfirm={() => { const action = pendingLeave.action; setPendingLeave(null); action(); }}><p>当前修改尚未保存。放弃后将保留上次保存的内容。</p></ConfirmDialog> : null}
   </section>;
 }

@@ -239,8 +239,8 @@ select results_eq(
   $$select reserved_count::integer, consumed_count::integer
     from private.ai_daily_quotas
     where user_id = '00000000-0000-4000-8000-000000000903'$$,
-  $$values (0, 2)$$,
-  'stale pre-provider exhaustion releases its reservation'
+  $$values (0, 1)$$,
+  'stale exhaustion and previous provider failure each release their original charge'
 );
 
 select * from finish();

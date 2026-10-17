@@ -18,7 +18,7 @@ const errors:Record<string,{status:number;message:string}>={
   NARRATIVE_IDEMPOTENCY_CONFLICT:{status:409,message:"本次请求的来源或问题已变化，请重新生成"},
   NARRATIVE_SOURCES_MISSING:{status:422,message:"部分来源已删除或尚未完成，请重新选择"},
   NARRATIVE_INVALID_INPUT:{status:422,message:"请选择 2–14 条不同的已完成记录"},
-  DAILY_AI_LIMIT_REACHED:{status:429,message:"本账号今天的 5 次 AI 生成机会已用完，知识提炼与知识串联共用额度，北京时间 0 点重置"},
+  DAILY_AI_LIMIT_REACHED:{status:429,message:"今日免费 2 次已用完，付费次数也不足；可购买次数包，或等待北京时间 0 点免费额度重置"},
   RATE_LIMITED:{status:429,message:"请求过于频繁，请稍后再试"},
   NARRATIVE_SERVICE_UNAVAILABLE:{status:503,message:"知识脉络服务暂时不可用，请稍后重试"},
 };

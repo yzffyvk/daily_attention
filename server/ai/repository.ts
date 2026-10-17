@@ -7,6 +7,7 @@ import { dateKeySchema } from "@/lib/domain/checkin";
 import { aiUserPromptSchema } from "@/lib/domain/ai-prompt";
 import { createAdminSupabase } from "@/lib/supabase/admin";
 import { aiGenerationProgressSchema, type AiGenerationProgress } from "@/lib/domain/ai-progress";
+import { DAILY_FREE_AI_LIMIT } from "@/lib/domain/billing";
 
 const statusSchema = z.enum([
   "queued",
@@ -64,12 +65,12 @@ const jobWithQuotaSchema = z.object({
   quota_used: z.number().int().min(0),
   quota_reserved: z.number().int().min(0),
   quota_consumed: z.number().int().min(0),
-  quota_remaining: z.number().int().min(0).max(5).nullable(),
+  quota_remaining: z.number().int().min(0).nullable(),
   quota_unlimited: z.boolean().optional(),
 }).superRefine((value, context) => {
   if (
     value.quota_used !== value.quota_reserved + value.quota_consumed
-    || value.quota_remaining !== (value.quota_unlimited ? null : Math.max(0, 5 - value.quota_used))
+    || (value.quota_unlimited ? value.quota_remaining !== null : value.quota_remaining === null)
   ) {
     context.addIssue({ code: "custom", message: "inconsistent AI quota" });
   }
@@ -79,11 +80,10 @@ const jobStateSchema = z.object({
   job: jobSchema,
   quota: z.object({
     used: z.number().int().min(0), reserved: z.number().int().min(0),
-    consumed: z.number().int().min(0), limit: z.literal(5).nullable(),
-    remaining: z.number().int().min(0).max(5).nullable(), unlimited: z.boolean().optional(),
+    consumed: z.number().int().min(0), limit: z.number().int().positive().nullable(),
+    remaining: z.number().int().min(0).nullable(), unlimited: z.boolean().optional(),
   }).refine(q => q.used === q.reserved + q.consumed
-    && q.limit === (q.unlimited ? null : 5)
-    && q.remaining === (q.unlimited ? null : Math.max(0, 5 - q.used))),
+    && (q.unlimited ? q.limit === null && q.remaining === null : q.limit !== null && q.remaining !== null)),
   cancellation: z.object({
     freeRemaining: z.number().int().min(0).max(2), requiresConfirmation: z.boolean(), charged: z.boolean().nullable(),
   }),
@@ -220,7 +220,7 @@ function mapWithQuota(row: z.infer<typeof jobWithQuotaSchema>): AiJobWithQuota {
       used: row.quota_used,
       reserved: row.quota_reserved,
       consumed: row.quota_consumed,
-      limit: row.quota_unlimited ? null : 5,
+      limit: row.quota_unlimited ? null : DAILY_FREE_AI_LIMIT,
       remaining: row.quota_remaining,
       ...(row.quota_unlimited !== undefined ? { unlimited: row.quota_unlimited } : {}),
     },

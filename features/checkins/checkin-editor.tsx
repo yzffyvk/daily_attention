@@ -11,6 +11,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
+import Link from "next/link";
 import type { ActiveAiJob } from "@/features/ai-generation/types";
 import type { AiGenerationController } from "@/features/ai-generation/use-ai-generation";
 import { GenerationProgress } from "@/features/ai-generation/generation-progress";
@@ -391,11 +392,11 @@ export function CheckInEditor({
                 </button>
                 <span>
                   {aiQuotaUnlimited ? "测试白名单：AI 提炼与知识串联不限次数" : aiQuotaRemaining === null
-                    ? "提炼与知识串联共享每日额度"
-                    : `今日共享额度剩余 ${aiQuotaRemaining} 次`}
+                    ? "每日免费 2 次，可使用次数包继续生成"
+                    : `当前可用额度剩余 ${aiQuotaRemaining} 次`}
                 </span>
               </div>
-              {!aiQuotaUnlimited ? <p className="field-hint">按实际请求当天计数，北京时间 0 点重置；切换日历日期不会增加次数。</p> : null}
+              {!aiQuotaUnlimited ? <p className="field-hint">每日免费 2 次，北京时间 0 点重置，先使用免费额度；次数包余额独立保留。{!isDisabled && !isAiActive && <Link href="/credits"> 查看余额与购买次数包</Link>}</p> : null}
               {isAiActive ? <>
                 <GenerationProgress key={aiActiveJob?.jobId ?? "creating"} stage={aiStage} progress={aiProgress} attemptCount={aiAttemptCount} retryMessage={aiRetryMessage} createdAt={aiActiveJob?.createdAt} isLongRunning={aiIsLongRunning} error={aiError} />
                 {aiActiveJob && ["queued", "fetching", "generating", "retrying"].includes(aiStage) ? <div className="ai-cancel-row">

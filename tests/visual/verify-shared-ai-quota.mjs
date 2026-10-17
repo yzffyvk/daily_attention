@@ -33,21 +33,21 @@ try {
     outcomes.push(await post("/api/ai/generations", { targetDate: "2026-03-03", sourceUrl: "https://example.com/three" }));
     return outcomes;
   });
-  expect(results.map(result => result.status)).toEqual([202, 202, 202, 202, 202]);
-  expect([results[0], results[2], results[4]].map(result => result.data.quota.remaining)).toEqual([4, 2, 0]);
+  expect(results.map(result => result.status)).toEqual([202, 202, 429, 429, 429]);
+  expect(results[0].data.quota.remaining).toBe(1);
   await page.getByRole("button", { name: "生成知识小结", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("本账号今天的 5 次 AI 生成机会已用完");
-  await expect(page.getByRole("alert")).toContainText("知识提炼与知识串联共用额度");
+  await expect(page.getByRole("alert")).toContainText("今日免费 2 次已用完");
+  await expect(page.getByRole("alert")).toContainText("付费次数也不足");
   await page.screenshot({ path: "/tmp/aura-shared-quota-extraction.png", fullPage: true });
   await page.getByRole("button", { name: "串联知识", exact: true }).click();
   await page.getByRole("button", { name: "新增串联知识", exact: true }).click();
   await page.locator(".calendar-cell.recorded").nth(0).click();
   await page.locator(".calendar-cell.recorded").nth(1).click();
   await page.getByRole("button", { name: "生成知识脉络", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("本账号今天的 5 次 AI 生成机会已用完");
+  await expect(page.getByRole("alert")).toContainText("今日免费 2 次已用完");
   await page.reload({ waitUntil: "networkidle" });
   await page.getByRole("button", { name: "生成知识小结", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("本账号今天的 5 次 AI 生成机会已用完");
+  await expect(page.getByRole("alert")).toContainText("今日免费 2 次已用完");
   expect(errors).toEqual([]);
-  console.log("PASS: 3 extractions across 3 calendar dates + 2 narratives exhaust one shared quota; both UI entry points reject the sixth request; reload does not reset quota; no live API calls.");
+  console.log("PASS: 1 extraction + 1 narrative exhaust two free shared slots; both UI entry points reject additional requests; reload does not reset quota; no live API calls.");
 } finally { await browser.close(); }

@@ -44,15 +44,12 @@ describe("demo shared account quota", () => {
     const completed = await request(`/api/ai/generations/${created.data.jobId}`, undefined, "GET");
     expect(completed.data.generationContext?.userPrompt).toBe("重点讲使用边界");
   });
-  it("shares five requests across record dates and both generation features", async () => {
+  it("shares two requests across record dates and both generation features", async () => {
     const demo = installThemeDemoApi();
     const first = generation("2026-01-01");
     const created = await request("/api/ai/generations", first);
-    expect(created.data.quota.remaining).toBe(4);
+    expect(created.data.quota.remaining).toBe(1);
     expect((await request("/api/knowledge-narratives", narrative(demo.dates.related.slice(0, 2)))).status).toBe(202);
-    expect((await request("/api/ai/generations", generation("2026-05-15"))).data.quota.remaining).toBe(2);
-    expect((await request("/api/knowledge-narratives", narrative(demo.dates.mixed.slice(0, 2), "manual"))).status).toBe(202);
-    expect((await request("/api/ai/generations", generation("2026-09-19"))).data.quota.remaining).toBe(0);
     const sixth = await request("/api/ai/generations", generation("2026-02-01"));
     expect(sixth.status).toBe(429);
     expect(sixth.error.code).toBe("DAILY_AI_LIMIT_REACHED");
@@ -65,7 +62,7 @@ describe("demo shared account quota", () => {
 
   it("retains used quota after reloading the demo", async () => {
     installThemeDemoApi();
-    for (let day = 1; day <= 5; day++) await request("/api/ai/generations", generation(`2026-01-0${day}`));
+    for (let day = 1; day <= 2; day++) await request("/api/ai/generations", generation(`2026-01-0${day}`));
     installThemeDemoApi();
     expect((await request("/api/ai/generations", generation("2026-08-01"))).status).toBe(429);
   });
@@ -73,12 +70,12 @@ describe("demo shared account quota", () => {
   it("renews only when the request day crosses midnight in Shanghai", async () => {
     vi.setSystemTime(new Date("2026-09-19T15:59:59Z"));
     installThemeDemoApi();
-    for (let day = 1; day <= 5; day++) await request("/api/ai/generations", generation(`2026-01-0${day}`));
+    for (let day = 1; day <= 2; day++) await request("/api/ai/generations", generation(`2026-01-0${day}`));
     expect((await request("/api/ai/generations", generation("2026-08-01"))).status).toBe(429);
     vi.setSystemTime(new Date("2026-09-19T16:00:00Z"));
     const next = await request("/api/ai/generations", generation("2026-01-01"));
     expect(next.status).toBe(202);
-    expect(next.data.quota.remaining).toBe(4);
+    expect(next.data.quota.remaining).toBe(1);
   });
 
   it("releases queued cancellation but cannot refund a started model call", async () => {
@@ -86,11 +83,11 @@ describe("demo shared account quota", () => {
     const job = await request("/api/ai/generations", generation("2026-01-01"));
     expect((await request(`/api/ai/generations/${job.data.jobId}`, undefined, "DELETE")).status).toBe(200);
     const next = await request("/api/ai/generations", generation("2026-01-02"));
-    expect(next.data.quota.remaining).toBe(4);
+    expect(next.data.quota.remaining).toBe(1);
     vi.setSystemTime(new Date("2026-09-19T04:00:04Z"));
     expect((await request(`/api/ai/generations/${next.data.jobId}`, undefined, "DELETE")).status).toBe(409);
     const third = await request("/api/ai/generations", generation("2026-01-03"));
-    expect(third.data.quota).toMatchObject({ used: 2, consumed: 1, reserved: 1, remaining: 3 });
+    expect(third.data.quota).toMatchObject({ used: 2, consumed: 1, reserved: 1, remaining: 0 });
   });
 
   it("does not regain quota by deleting a completed narrative", async () => {
@@ -99,6 +96,6 @@ describe("demo shared account quota", () => {
     vi.setSystemTime(new Date("2026-09-19T04:00:10Z"));
     await request(`/api/knowledge-narratives/${created.data.id}`, undefined, "DELETE");
     const next = await request("/api/ai/generations", generation("2026-01-01"));
-    expect(next.data.quota).toMatchObject({ used: 2, consumed: 1, reserved: 1, remaining: 3 });
+    expect(next.data.quota).toMatchObject({ used: 2, consumed: 1, reserved: 1, remaining: 0 });
   });
 });

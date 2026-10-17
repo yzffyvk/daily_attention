@@ -27,26 +27,26 @@ insert into cancel_cases values ('queued', pg_temp.cancel_job('queued'), null);
 update cancel_cases set response = public.cancel_ai_generation_job_v2('00000000-0000-4000-8000-000000000976', id, false) where name = 'queued';
 select is((select response #>> '{job,status}' from cancel_cases where name='queued'), 'cancelled', 'queued job cancels');
 select is((select response #>> '{cancellation,freeRemaining}' from cancel_cases where name='queued'), '2', 'queued cancellation preserves free chances');
-select is((select response #>> '{quota,remaining}' from cancel_cases where name='queued'), '5', 'queued cancellation releases reservation');
+select is((select response #>> '{quota,remaining}' from cancel_cases where name='queued'), '2', 'queued cancellation releases reservation');
 
 insert into cancel_cases values ('fetching', pg_temp.cancel_job('fetching'), null);
 update cancel_cases set response = public.cancel_ai_generation_job_v2('00000000-0000-4000-8000-000000000976', id, false) where name='fetching';
 select is((select response #>> '{cancellation,freeRemaining}' from cancel_cases where name='fetching'), '2', 'reading cancellation preserves free chances');
-select is((select response #>> '{quota,remaining}' from cancel_cases where name='fetching'), '5', 'reading cancellation releases reservation');
+select is((select response #>> '{quota,remaining}' from cancel_cases where name='fetching'), '2', 'reading cancellation releases reservation');
 
 insert into cancel_cases values ('first', pg_temp.cancel_job('generating'), null);
 update private.ai_generation_jobs set progress = '{"phase":"writing","preview":"未完成","updatedAt":"2026-10-14T00:00:00Z"}' where id=(select id from cancel_cases where name='first');
 update cancel_cases set response = public.cancel_ai_generation_job_v2('00000000-0000-4000-8000-000000000976', id, false) where name='first';
 select is((select response #>> '{cancellation,freeRemaining}' from cancel_cases where name='first'), '1', 'first model cancellation spends one free chance');
 select is((select response #>> '{cancellation,charged}' from cancel_cases where name='first'), 'false', 'first cancellation is free');
-select is((select response #>> '{quota,remaining}' from cancel_cases where name='first'), '5', 'first cancellation refunds consumed quota');
+select is((select response #>> '{quota,remaining}' from cancel_cases where name='first'), '2', 'first cancellation refunds consumed quota');
 select is((select progress from private.ai_generation_jobs where id=(select id from cancel_cases where name='first')), null::jsonb, 'cancelled preview clears');
 select is(public.cancel_ai_generation_job_v2('00000000-0000-4000-8000-000000000976', (select id from cancel_cases where name='first'), false) #>> '{cancellation,freeRemaining}', '1', 'repeated cancellation does not spend another chance');
 
 insert into cancel_cases values ('second', pg_temp.cancel_job('generating'), null);
 update cancel_cases set response = public.cancel_ai_generation_job_v2('00000000-0000-4000-8000-000000000976', id, false) where name='second';
 select is((select response #>> '{cancellation,freeRemaining}' from cancel_cases where name='second'), '0', 'second model cancellation uses final free chance');
-select is((select response #>> '{quota,remaining}' from cancel_cases where name='second'), '5', 'second cancellation refunds consumed quota');
+select is((select response #>> '{quota,remaining}' from cancel_cases where name='second'), '2', 'second cancellation refunds consumed quota');
 
 insert into cancel_cases values ('third', pg_temp.cancel_job('generating'), null);
 select throws_ok($$select public.cancel_ai_generation_job_v2('00000000-0000-4000-8000-000000000976', (select id from cancel_cases where name='third'), false)$$,
@@ -64,6 +64,9 @@ update cancel_cases set response = public.cancel_ai_generation_job_v2('00000000-
 select is((select response #>> '{job,status}' from cancel_cases where name='retry'), 'cancelled', 'waiting retry can be cancelled');
 select is((select response #>> '{quota,consumed}' from cancel_cases where name='retry'), '2', 'model retry cancellation preserves its single consumed slot');
 
+select public.payment_create_credit_order('cancel-credit-order','cancel-owner',
+ '00000000-0000-4000-8000-000000000976','app','ai_1','sandbox','cancel-credit-key');
+select public.payment_apply_event('cancel-credit-order','cancel-trade','PAID','cancel-paid','payment');
 insert into cancel_cases values ('complete', pg_temp.cancel_job('succeeded'), null);
 update cancel_cases set response = public.cancel_ai_generation_job_v2('00000000-0000-4000-8000-000000000976', id, false) where name='complete';
 select is((select response #>> '{job,status}' from cancel_cases where name='complete'), 'succeeded', 'completion winning race returns completed result');
@@ -80,7 +83,7 @@ update private.ai_daily_quotas set consumed_count=0 where user_id='00000000-0000
 update cancel_cases set response = public.cancel_ai_generation_job_v2('00000000-0000-4000-8000-000000000977', id, false) where name='rollover';
 select is((select response #>> '{cancellation,freeRemaining}' from cancel_cases where name='rollover'), '1', 'Beijing new day gets two new free chances');
 select is((select consumed_count::integer from private.ai_daily_quotas where user_id='00000000-0000-4000-8000-000000000977' and quota_date=(now() at time zone 'Asia/Shanghai')::date - 1), 0, 'refund credits original task quota day');
-select is((select response #>> '{quota,remaining}' from cancel_cases where name='rollover'), '5', 'response shows current day quota');
+select is((select response #>> '{quota,remaining}' from cancel_cases where name='rollover'), '2', 'response shows current day quota');
 
 select ok(not has_function_privilege('authenticated','public.cancel_ai_generation_job_v2(uuid,uuid,boolean)','execute'), 'users cannot call privileged cancellation directly');
 select ok(not has_function_privilege('anon','public.cancel_ai_generation_job_v2(uuid,uuid,boolean)','execute'), 'anonymous callers cannot cancel');

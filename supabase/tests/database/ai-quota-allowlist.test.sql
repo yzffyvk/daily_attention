@@ -35,13 +35,13 @@ select is((select reserved_count::integer from private.ai_daily_quotas where use
 select is((select consumed_count::integer from private.ai_daily_quotas where user_id='00000000-0000-4000-8000-000000009501'),0,'unlimited cancellation refunds accounting');
 select is(public.read_ai_generation_job_state('00000000-0000-4000-8000-000000009501',(select id from allowlist_jobs where slot=4))#>>'{quota,unlimited}','true','polling reports the same whitelist state');
 
--- Normal users, including users claiming unlimited access via editable metadata, still stop at five.
+-- Normal users, including users claiming unlimited access via editable metadata, still stop at two.
 update auth.users set raw_user_meta_data='{"unlimited":true,"ai_quota_allowlisted":true}'::jsonb where id='00000000-0000-4000-8000-000000009502';
-do $$begin for n in 1..5 loop
+do $$begin for n in 1..2 loop
  perform public.create_ai_generation_job('00000000-0000-4000-8000-000000009502','2026-08-01',gen_random_uuid(),'https://example.com/'||n,'example.com','');
 end loop; end $$;
 select throws_ok($$select * from public.create_ai_generation_job('00000000-0000-4000-8000-000000009502','2026-08-01',gen_random_uuid(),'https://example.com/6','example.com','')$$,
- 'P0001','DAILY_AI_LIMIT_REACHED','ordinary account still stops at five');
+ 'P0001','DAILY_AI_LIMIT_REACHED','ordinary account still stops at two');
 
 -- Both consumers of the shared quota use the same account entitlement.
 insert into public.check_ins(id,user_id,checkin_date,entry_mode,attention,summary,inspiration,learning_status)

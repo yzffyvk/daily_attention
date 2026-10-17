@@ -22,11 +22,11 @@ create temporary table quality_cases(name text primary key,id uuid);
 insert into quality_cases values('failed',pg_temp.quality_job());
 select pg_temp.quality_fail((select id from quality_cases where name='failed'));
 select is((select consumed_count::integer from private.ai_daily_quotas where user_id='00000000-0000-4000-8000-000000009611'),0,'quality failure without output refunds consumed quota');
-select is(public.read_ai_generation_job_state('00000000-0000-4000-8000-000000009611',(select id from quality_cases where name='failed')) #>> '{quota,remaining}','5','polling reports the restored balance');
+select is(public.read_ai_generation_job_state('00000000-0000-4000-8000-000000009611',(select id from quality_cases where name='failed')) #>> '{quota,remaining}','2','polling reports the restored balance');
 select ok((select error_message like '%未消耗使用次数%' from private.ai_generation_jobs where id=(select id from quality_cases where name='failed')),'failure explains that no allowance was consumed');
 select is((select provider_call_count::integer from private.ai_generation_jobs where id=(select id from quality_cases where name='failed')),2,'actual model usage remains recorded');
 select throws_ok($$select pg_temp.quality_fail((select id from quality_cases where name='failed'))$$,'P0001','AI_JOB_INVALID_TRANSITION','replayed failure cannot settle a terminal job again');
-select is(public.cancel_ai_generation_job_v2('00000000-0000-4000-8000-000000009611',(select id from quality_cases where name='failed'),false) #>> '{quota,remaining}','5','cancellation after failure cannot refund twice');
+select is(public.cancel_ai_generation_job_v2('00000000-0000-4000-8000-000000009611',(select id from quality_cases where name='failed'),false) #>> '{quota,remaining}','2','cancellation after failure cannot refund twice');
 
 insert into quality_cases values('retry',pg_temp.quality_job());
 select pg_temp.quality_fail((select id from quality_cases where name='retry'),true);
@@ -59,6 +59,6 @@ update private.ai_generation_jobs set quota_date=(now() at time zone 'Asia/Shang
 update private.ai_daily_quotas set consumed_count=1 where user_id='00000000-0000-4000-8000-000000009611' and quota_date=(now() at time zone 'Asia/Shanghai')::date;
 select pg_temp.quality_fail((select id from quality_cases where name='rollover'));
 select is((select consumed_count::integer from private.ai_daily_quotas where user_id='00000000-0000-4000-8000-000000009611' and quota_date=(now() at time zone 'Asia/Shanghai')::date-1),0,'refund uses the original Beijing quota date');
-select is(public.read_ai_generation_job_state('00000000-0000-4000-8000-000000009611',(select id from quality_cases where name='rollover')) #>> '{quota,remaining}','4','cross-midnight refund leaves current-day usage intact');
+select is(public.read_ai_generation_job_state('00000000-0000-4000-8000-000000009611',(select id from quality_cases where name='rollover')) #>> '{quota,remaining}','1','cross-midnight refund leaves current-day usage intact');
 select * from finish();
 rollback;

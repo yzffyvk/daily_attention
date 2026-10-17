@@ -9,6 +9,10 @@ select function_privs_are('public','create_record_ai_generation_job',array['uuid
 insert into auth.users(id,instance_id,aud,role,email,encrypted_password,email_confirmed_at,created_at,updated_at)
 values ('00000000-0000-4000-8000-000000008801','00000000-0000-0000-0000-000000000000','authenticated','authenticated','bound-ai@internal.invalid','',now(),now(),now()),
  ('00000000-0000-4000-8000-000000008802','00000000-0000-0000-0000-000000000000','authenticated','authenticated','bound-ai-other@internal.invalid','',now(),now(),now());
+-- Independent-record lifecycle scenarios exceed the free allowance and use purchased credits.
+select public.payment_create_credit_order('bound-credit-order','bound-owner',
+ '00000000-0000-4000-8000-000000008801','app','ai_10','sandbox','bound-credit-key');
+select public.payment_apply_event('bound-credit-order','bound-trade','PAID','bound-paid','payment');
 insert into public.check_ins(id,user_id,checkin_date,entry_mode,attention,source_url,summary,inspiration,user_prompt,learning_status)
 select ('10000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,
  '00000000-0000-4000-8000-000000008801','2026-08-01','ai','原有主题','https://example.com/'||n,'原有小结','个人收获','提炼重点','completed'

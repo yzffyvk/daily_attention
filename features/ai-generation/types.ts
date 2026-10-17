@@ -22,7 +22,7 @@ export type AiGenerationQuota = {
   used: number;
   reserved: number;
   consumed: number;
-  limit: 5 | null;
+  limit: number | null;
   remaining: number | null;
   unlimited?: boolean;
 };

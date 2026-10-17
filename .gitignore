@@ -48,3 +48,4 @@ next-env.d.ts
 /.superpowers/
 /.worktrees/
 /.local-backups/
+/.alipay-sandbox.json

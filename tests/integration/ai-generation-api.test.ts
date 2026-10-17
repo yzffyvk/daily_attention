@@ -84,8 +84,8 @@ describe("AI generation API", () => {
         generation(index + 1),
       )),
     );
-    expect(attempts.filter((response) => response.status === 202)).toHaveLength(5);
-    expect(attempts.filter((response) => response.status === 429)).toHaveLength(1);
+    expect(attempts.filter((response) => response.status === 202)).toHaveLength(2);
+    expect(attempts.filter((response) => response.status === 429)).toHaveLength(4);
 
     const first = attempts.find((response) => response.status === 202)!;
     const firstIndex = attempts.indexOf(first) + 1;

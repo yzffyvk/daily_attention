@@ -44,11 +44,21 @@ function rpcJob(overrides: Record<string, unknown> = {}) {
 }
 
 function rpcState(overrides: Record<string, unknown> = {}) {
-  return { job: rpcJob(overrides), quota: { used: 1, reserved: 0, consumed: 1, limit: 5, remaining: 4 },
+  return { job: rpcJob(overrides), quota: { used: 1, reserved: 0, consumed: 1, limit: 2, remaining: 1 },
     cancellation: { freeRemaining: 0, requiresConfirmation: true, charged: null } };
 }
 
 describe("AI generation repository", () => {
+  it("accepts paid remaining credits beyond the free daily limit", async () => {
+    const quota = { used: 3, reserved: 1, consumed: 2, limit: 2, remaining: 9, unlimited: false };
+    const repository = createAiGenerationRepository({ rpc: async (name: string) => ({
+      data: name === "create_ai_generation_job" ? [{ job: rpcJob(), quota_used: 3, quota_reserved: 1,
+        quota_consumed: 2, quota_remaining: 9, quota_unlimited: false }] : { ...rpcState(), quota }, error: null,
+    }) });
+    expect((await repository.create({ userId, targetDate: "2026-07-31", idempotencyKey: jobId,
+      sourceUrl: "https://example.com/article", sourceHost: "example.com" })).quota).toEqual(quota);
+    expect((await repository.findOwned(userId, jobId))?.quota).toEqual(quota);
+  });
   it("accepts unlimited quota above five and preserves it when polling", async () => {
     const unlimited = { used: 12, reserved: 2, consumed: 10, limit: null, remaining: null, unlimited: true };
     const repository = createAiGenerationRepository({ rpc: async (name: string) => ({
@@ -82,7 +92,7 @@ describe("AI generation repository", () => {
     const recordId = "00000000-0000-4000-8000-000000000099";
     const rpc = vi.fn().mockResolvedValue({ data: [{
       job: rpcJob({ record_id: recordId, base_version: 7 }),
-      quota_used: 1, quota_reserved: 1, quota_consumed: 0, quota_remaining: 4,
+      quota_used: 1, quota_reserved: 1, quota_consumed: 0, quota_remaining: 1,
     }], error: null });
     const result = await createAiGenerationRepository({ rpc }).create({
       userId, recordId, targetDate: "2026-07-31", idempotencyKey: "20000000-0000-4000-8000-000000000001",
@@ -104,7 +114,7 @@ describe("AI generation repository", () => {
         quota_used: 1,
         quota_reserved: 1,
         quota_consumed: 0,
-        quota_remaining: 4,
+        quota_remaining: 1,
       }],
       error: null,
     });
@@ -118,7 +128,7 @@ describe("AI generation repository", () => {
       sourceHost: "example.com",
     })).resolves.toMatchObject({
       job: { id: jobId, userId, status: "queued" },
-      quota: { used: 1, reserved: 1, consumed: 0, limit: 5, remaining: 4 },
+      quota: { used: 1, reserved: 1, consumed: 0, limit: 2, remaining: 1 },
     });
     expect(rpc).toHaveBeenCalledWith("create_ai_generation_job", {
       target_user_id: userId,
@@ -133,7 +143,7 @@ describe("AI generation repository", () => {
   it("snapshots the trimmed user prompt and reads it with the stored version", async () => {
     const rpc = vi.fn().mockResolvedValue({ data: [{
       job: rpcJob({ user_prompt: "聚焦实现细节", prompt_version: "knowledge-skeleton-user-prompt-v1" }),
-      quota_used: 1, quota_reserved: 1, quota_consumed: 0, quota_remaining: 4,
+      quota_used: 1, quota_reserved: 1, quota_consumed: 0, quota_remaining: 1,
     }], error: null });
     const repository = createAiGenerationRepository({ rpc });
     const created = await repository.create({
@@ -182,7 +192,7 @@ describe("AI generation repository", () => {
     const rpc = vi.fn().mockResolvedValue({ data: rpcState({ status: "generating" }), error: null });
     const repository = createAiGenerationRepository({ rpc });
     await expect(repository.findOwned(userId, jobId)).resolves.toMatchObject({
-      cancellation: { freeRemaining: 0, requiresConfirmation: true }, quota: { remaining: 4 },
+      cancellation: { freeRemaining: 0, requiresConfirmation: true }, quota: { remaining: 1 },
     });
     expect(rpc).toHaveBeenCalledWith("read_ai_generation_job_state", { target_user_id: userId, target_job_id: jobId });
     await repository.cancelOwned(userId, jobId, true);
@@ -193,7 +203,7 @@ describe("AI generation repository", () => {
 
   it("rejects inconsistent quota in cancellation responses", async () => {
     const repository = createAiGenerationRepository({ rpc: async () => ({
-      data: { ...rpcState(), quota: { used: 1, reserved: 0, consumed: 1, limit: 5, remaining: 5 } }, error: null,
+      data: { ...rpcState(), quota: { used: 2, reserved: 0, consumed: 1, limit: 2, remaining: 1 } }, error: null,
     }) });
     await expect(repository.cancelOwned(userId, jobId)).rejects.toThrow("Malformed AI generation RPC response");
   });

@@ -89,6 +89,13 @@ select function_privs_are(
   'service role can create AI jobs'
 );
 
+-- Exercise a five-slot lifecycle with the approved two free slots plus three paid slots.
+do $$begin for n in 1..3 loop
+ perform public.payment_create_credit_order('generation-credit-'||n,'generation-owner',
+  '00000000-0000-4000-8000-000000000901','app','ai_1','sandbox','generation-key-'||n);
+ perform public.payment_apply_event('generation-credit-'||n,'generation-trade-'||n,'PAID','generation-paid-'||n,'payment');
+end loop; end $$;
+
 insert into created_ai_jobs (slot, job_id)
 select
   slot,
@@ -112,7 +119,7 @@ select results_eq(
     from private.ai_daily_quotas
     where user_id = '00000000-0000-4000-8000-000000000901'$$,
   $$values (5, 0)$$,
-  'five created jobs reserve all daily slots'
+  'five created jobs reserve two free and three paid slots'
 );
 select throws_ok(
   $$select * from public.create_ai_generation_job(
@@ -292,8 +299,8 @@ select results_eq(
   $$select reserved_count::integer, consumed_count::integer
     from private.ai_daily_quotas
     where user_id = '00000000-0000-4000-8000-000000000901'$$,
-  $$values (3, 1)$$,
-  'provider failure after begin does not refund consumed quota'
+  $$values (3, 0)$$,
+  'provider failure without output refunds consumed quota'
 );
 select is_empty(
   $$select * from public.read_ai_generation_job(

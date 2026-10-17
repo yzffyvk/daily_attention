@@ -1,6 +1,7 @@
 'use client';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, CalendarDays, Check, Layers3, Link2, List, PanelLeftClose, PanelLeftOpen, Plus, Search, Settings2, Trash2 } from 'lucide-react';
+import { BookOpen, CalendarDays, Check, Coins, Layers3, Link2, List, PanelLeftClose, PanelLeftOpen, Plus, Search, Settings2, Trash2 } from 'lucide-react';
+import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AccountProfile } from '@/server/auth/ports';
 import { normalizeLearningSourceUrl, type LearningAlbum, type LearningRecord } from '@/lib/domain/learning-record';
@@ -384,7 +385,7 @@ export function LearningWorkspace({ initialDate, initialToday = initialDate, ini
         knowledgeNavigation.current?.();
     else
         enterKnowledge([]); }}/>
-  {!knowledge ? <nav className="learning-navigation" aria-label="学习内容导航"><button aria-pressed={view.kind === 'date'} onClick={() => selectView({ kind: 'date', date: today })} type="button"><CalendarDays size={17}/>每日记录</button><button aria-pressed={view.kind === 'all'} onClick={() => selectView({ kind: 'all' })} type="button"><List size={17}/>全部记录</button><button aria-pressed={view.kind === 'albums' || view.kind === 'album'} onClick={() => selectView({ kind: 'albums' })} type="button"><BookOpen size={17}/>专辑</button><div className="learning-nav-spacer"/>{view.kind !== 'albums' ? <button aria-expanded={calendarOpen} onClick={() => { setCalendarOpen(!calendarOpen); try {
+  {!knowledge ? <nav className="learning-navigation" aria-label="学习内容导航"><button aria-pressed={view.kind === 'date'} onClick={() => selectView({ kind: 'date', date: today })} type="button"><CalendarDays size={17}/>每日记录</button><button aria-pressed={view.kind === 'all'} onClick={() => selectView({ kind: 'all' })} type="button"><List size={17}/>全部记录</button><button aria-pressed={view.kind === 'albums' || view.kind === 'album'} onClick={() => selectView({ kind: 'albums' })} type="button"><BookOpen size={17}/>专辑</button><Link href="/credits" aria-disabled={saving || undefined} onClick={event => { if (saving) event.preventDefault(); }}><Coins size={17} aria-hidden="true"/>AI 额度</Link><div className="learning-nav-spacer"/>{view.kind !== 'albums' ? <button aria-expanded={calendarOpen} onClick={() => { setCalendarOpen(!calendarOpen); try {
         localStorage.setItem('aura-calendar-collapsed', String(calendarOpen));
     }
     catch { /* Optional. */ } }} type="button">{calendarOpen ? <PanelLeftClose size={17}/> : <PanelLeftOpen size={17}/>}日历</button> : null}</nav> : null}

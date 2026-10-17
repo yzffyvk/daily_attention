@@ -42,7 +42,7 @@ describe("owned narrative API",()=>{
   });
   it("reports exhausted shared quota without exposing internals",async()=>{
     mocks.create.mockRejectedValue({message:"DAILY_AI_LIMIT_REACHED"});const response=await POST(request());
-    expect(response.status).toBe(429);expect((await response.json()).error.message).toContain("5 次");
+    expect(response.status).toBe(429);expect((await response.json()).error.message).toContain("免费 2 次");
   });
   it("does not accept result or owner changes in rename",async()=>{
     expect((await PATCH(request({title:"名字",userId:"someone"}),ctx())).status).toBe(422);

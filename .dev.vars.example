@@ -14,3 +14,13 @@ DEEPSEEK_BASE_URL=
 SAFE_FETCH_GATEWAY_URL=http://127.0.0.1:8788
 SAFE_FETCH_GATEWAY_TOKEN=
 AI_WORKER_HEALTH_PORT=8790
+# Payments: sandbox reads the protected .alipay-sandbox.json with npm run dev:payments.
+# Keep production sales closed until signing, public notifications and deployment acceptance finish.
+PAYMENTS_ENABLED=false
+ALIPAY_ENV=
+ALIPAY_APP_ID=
+ALIPAY_PRIVATE_KEY=
+ALIPAY_PUBLIC_KEY=
+ALIPAY_SELLER_ID=
+ALIPAY_NOTIFY_URL=
+PAYMENT_ADMIN_TOKEN=

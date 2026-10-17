@@ -19,6 +19,7 @@
     "test": "npm run test:unit && npm run supabase:test && npm run test:integration && npm run test:rendered && npm run build",
     "test:unit": "vitest run tests/unit",
     "test:integration": "node scripts/run-integration-tests.mjs",
+    "test:payments:local": "node scripts/run-payment-acceptance.mjs",
     "test:e2e": "node scripts/run-e2e-tests.mjs",
     "test:rendered": "node --test tests/rendered-html.test.mjs",
     "typecheck": "tsc --noEmit",
@@ -28,12 +29,14 @@
     "supabase:reset": "supabase db reset",
     "reset:legacy-accounts": "node --env-file=.env.production.local scripts/reset-legacy-accounts.mjs",
     "supabase:test": "supabase test db",
-    "supabase:types": "supabase gen types typescript --local | perl -0pe 's/\\n+\\z/\\n/' > lib/supabase/database.types.ts"
+    "supabase:types": "supabase gen types typescript --local | perl -0pe 's/\\n+\\z/\\n/' > lib/supabase/database.types.ts",
+    "dev:payments": "node scripts/run-payment-dev.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.3",
     "@supabase/supabase-js": "^2.110.8",
     "@tanstack/react-query": "^5.101.4",
+    "alipay-sdk": "4.14.0",
     "canvas-confetti": "^1.9.4",
     "idb": "^8.0.3",
     "lucide-react": "^1.26.0",
