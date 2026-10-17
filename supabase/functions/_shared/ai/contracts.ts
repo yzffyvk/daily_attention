@@ -45,6 +45,13 @@ export type AiValidationAudit = {
   issues: { path: string; code: string }[];
 };
 
+export type AiRoleNormalizationAudit = {
+  stage: 'writing' | 'revision';
+  repair: boolean;
+  paths: string[];
+  fallback: '概念';
+};
+
 export type AiSummaryProviderResult = {
   result: AiGenerationResult;
   usage: AiUsage;
@@ -66,5 +73,6 @@ export interface AiSummaryProvider {
     onProgress?: (progress: AiGenerationProgress) => Promise<void> | void;
     onSemanticReview?: (audit: AiReviewAudit) => Promise<void> | void;
     onValidationFailure?: (audit: AiValidationAudit) => Promise<void> | void;
+    onRoleNormalization?: (audit: AiRoleNormalizationAudit) => Promise<void> | void;
   }): Promise<AiSummaryProviderResult>;
 }

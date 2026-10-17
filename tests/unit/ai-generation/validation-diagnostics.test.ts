@@ -8,7 +8,7 @@ const framework = { attention: draft.attention, thesis: draft.thesis, coreQuesti
 
 describe('AI output validation diagnostics', () => {
   it('keeps a successful repaired draft when the diagnostic sink throws', async () => {
-    const invalid = structuredClone(draft); Object.assign(invalid.structure.nodes[0], { role: 'unknown' });
+    const invalid = structuredClone(draft); invalid.structure.nodes[0].evidence = 'abc';
     const report = { verdict: 'pass', checks: { mainline: 'pass', hierarchy: 'pass', ownership: 'pass', coverage: 'pass', explanation: 'pass', grounding: 'pass', recall: 'pass' }, issues: [] };
     const outputs = [framework, invalid, draft, report];
     let calls = 0;
@@ -21,14 +21,14 @@ describe('AI output validation diagnostics', () => {
 
   it('identifies rejected writing fields on both attempts without logging document text', async () => {
     const invalid = structuredClone(draft); invalid.structure.nodes[0].explanation = 'PRIVATE_SOURCE_TEXT';
-    Object.assign(invalid.structure.nodes[0], { role: 'unknown' });
+    invalid.structure.nodes[0].evidence = 'abc';
     let calls = 0;
     const audits: unknown[] = [];
     const provider = createDeepSeekProvider({ apiKey: 'test-key', fetchImpl: async () => Response.json({ model: 'writer-actual', choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(++calls === 1 ? framework : invalid) } }], usage: { prompt_tokens: 100, completion_tokens: 80 } }) });
     await expect(provider.generate({ ...input, onValidationFailure: audit => { audits.push(audit); } })).rejects.toMatchObject({ code: 'MODEL_OUTPUT_INVALID', providerCallCount: 3 });
     expect(audits).toEqual([
-      { stage: 'writing', repair: false, reason: 'schema_invalid', issues: [{ path: 'structure.nodes.0.role', code: 'invalid_value' }] },
-      { stage: 'writing', repair: true, reason: 'schema_invalid', issues: [{ path: 'structure.nodes.0.role', code: 'invalid_value' }] },
+      { stage: 'writing', repair: false, reason: 'schema_invalid', issues: [{ path: 'structure.nodes.0.evidence', code: 'too_small' }] },
+      { stage: 'writing', repair: true, reason: 'schema_invalid', issues: [{ path: 'structure.nodes.0.evidence', code: 'too_small' }] },
     ]);
     expect(JSON.stringify(audits)).not.toContain('PRIVATE_SOURCE_TEXT');
   });

@@ -4,6 +4,44 @@ import { questionSummaryFixture } from "../../helpers/knowledge-questions-fixtur
 import { questionSummarySchema, type QuestionSummary } from "../../../lib/domain/knowledge-questions.ts";
 
 describe("question source references", () => {
+  it.each([
+    ['机制', '机制'], [' 机制 ', '机制'], ['方法', '方案'], [' 方法 ', '方案'], ['区别', '概念'],
+    ['策略', '概念'], ['unknown', '概念'], ['constructor', '概念'], ['', '概念'], ['   ', '概念'],
+    [null, '概念'], [42, '概念'], [{ label: '机制' }, '概念'], [[], '概念'],
+  ])('normalizes generated node role %j while preserving the complete document', (role, expected) => {
+    const original = questionSummaryFixture();
+    const raw = structuredClone(original);
+    Object.assign(raw.structure.nodes[0], { role });
+    const before = structuredClone(raw);
+    const normalized = normalizeQuestionViews(raw);
+    expect(questionSummarySchema.safeParse(normalized).success).toBe(true);
+    expect(normalized).toEqual({ ...original, structure: { ...original.structure,
+      nodes: original.structure.nodes.map((node, index) => index === 0 ? { ...node, role: expected } : node),
+    } });
+    expect(raw).toEqual(before);
+  });
+
+  it('defaults a missing generated role without weakening the saved document schema', () => {
+    const raw = questionSummaryFixture();
+    Reflect.deleteProperty(raw.structure.nodes[0], 'role');
+    expect(questionSummarySchema.safeParse(raw).success).toBe(false);
+    const normalized = normalizeQuestionViews(raw);
+    expect(questionSummarySchema.safeParse(normalized).success).toBe(true);
+    expect(normalized.structure.nodes[0].role).toBe('概念');
+    expect(raw.structure.nodes[0]).not.toHaveProperty('role');
+  });
+
+  it('continues repairing view references after defaulting an unknown role', () => {
+    const raw = questionSummaryFixture();
+    Object.assign(raw.structure.nodes[0], { role: '策略' });
+    raw.structure.questions[1].views[0].referenceNodeIds = [];
+    const normalized = normalizeQuestionViews(raw);
+    expect(questionSummarySchema.safeParse(normalized).success).toBe(true);
+    expect(normalized.structure.nodes[0].role).toBe('概念');
+    expect(normalized.structure.questions[1].views[0].referenceNodeIds).toEqual(['n1']);
+    expect(normalized.structure.relations).toEqual(raw.structure.relations);
+  });
+
   it('derives foreign-node badges from existing ownership without changing view membership', () => {
     const original: QuestionSummary = questionSummaryFixture();
     const raw = structuredClone(original);

@@ -187,6 +187,55 @@ describe('semantic acceptance of finished recall documents', () => {
     expect(parseQuestionSummary(result.result.summary)!.structure.nodes[0].role).toBe(expected);
     expect(parseQuestionSummary(result.result.summary)!.structure.nodes[0].explanation).toBe(draft.structure.nodes[0].explanation);
   });
+  it('delivers and reviews unknown generated roles without a format rewrite or logging their content', async () => {
+    const draft = questionSummaryFixture();
+    Object.assign(draft.structure.nodes[0], { role: 'PRIVATE_ROLE_TEXT' });
+    Object.assign(draft.structure.nodes[1], { role: null });
+    const { provider, requests } = setup([framework(), draft, passed()]);
+    const audit = vi.fn(), validation = vi.fn();
+    const result = await provider.generate({ ...input, onRoleNormalization: audit, onValidationFailure: validation });
+    const parsed = parseQuestionSummary(result.result.summary)!;
+    expect(result.providerCallCount).toBe(3);
+    expect(result.semanticReview?.verdict).toBe('pass');
+    expect(parsed.structure.nodes).toEqual(draft.structure.nodes.map(node => ({ ...node, role: '概念' })));
+    expect(parsed.structure.relations).toEqual(draft.structure.relations);
+    expect(JSON.parse(requests[2].messages[1].content).draft).toEqual(parsed);
+    expect(validation).not.toHaveBeenCalled();
+    expect(audit).toHaveBeenCalledExactlyOnceWith({ stage: 'writing', repair: false,
+      paths: ['structure.nodes.0.role', 'structure.nodes.1.role'], fallback: '概念' });
+    expect(JSON.stringify(audit.mock.calls)).not.toContain('PRIVATE_ROLE_TEXT');
+    expect(JSON.stringify(audit.mock.calls)).not.toContain(draft.structure.nodes[0].explanation);
+  });
+
+  it('keeps role normalization independent of diagnostic availability', async () => {
+    const draft = questionSummaryFixture(); Object.assign(draft.structure.nodes[0], { role: '策略' });
+    const { provider } = setup([framework(), draft, passed()]);
+    const result = await provider.generate({ ...input, onRoleNormalization: () => { throw new Error('log unavailable'); } });
+    expect(result.providerCallCount).toBe(3);
+    expect(result.semanticReview?.verdict).toBe('pass');
+  });
+
+  it('normalizes a revision role and still independently reviews the revised prose', async () => {
+    const revised = questionSummaryFixture();
+    Object.assign(revised.structure.nodes[1], { role: '检查方法', explanation: '逐项对照目标与结果，并找出差距。' });
+    const { provider, requests } = setup([framework(), questionSummaryFixture(), revise(), revised, passed()]);
+    const audit = vi.fn();
+    const result = await provider.generate({ ...input, onRoleNormalization: audit });
+    expect(result.providerCallCount).toBe(5);
+    expect(result.semanticReview?.verdict).toBe('pass');
+    expect(parseQuestionSummary(result.result.summary)!.structure.nodes[1]).toEqual({ ...revised.structure.nodes[1], role: '概念' });
+    expect(JSON.parse(requests[4].messages[1].content).draft.structure.nodes[1].role).toBe('概念');
+    expect(audit).toHaveBeenCalledExactlyOnceWith({ stage: 'revision', repair: false, paths: ['structure.nodes.1.role'], fallback: '概念' });
+  });
+
+  it.each(['source', 'relation'])('still rejects invalid %s data when a node role can be defaulted', async invalidField => {
+    const draft = questionSummaryFixture(); Object.assign(draft.structure.nodes[0], { role: '策略' });
+    if (invalidField === 'source') draft.structure.nodes[0].evidence = 'S9999';
+    else draft.structure.relations[0].to = 'missing_node';
+    const { provider } = setup([framework(), draft]);
+    await expect(provider.generate(input)).rejects.toMatchObject({ code: 'MODEL_OUTPUT_INVALID', providerCallCount: 3 });
+  });
+
   it('derives a missing home-view membership from explicit ownership without changing prose or relations', async () => {
     const written = questionSummaryFixture();
     written.structure.questions[0].views[0].nodeIds = ['n2'];

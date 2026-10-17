@@ -419,7 +419,15 @@ export function createDeepSeekProvider(config: {
       }
       if (usesQuestions) {
         if (stage.framework && !stage.revision) generatedJson = bindQuestionFramework(generatedJson, stage.framework);
-        const structured = generatedQuestionSummarySchema.safeParse(normalizeQuestionViews(generatedJson));
+        const roleFallbackPaths: string[] = [];
+        const normalized = normalizeQuestionViews(generatedJson, path => {
+          if (roleFallbackPaths.length < 32) roleFallbackPaths.push(path);
+        });
+        if (roleFallbackPaths.length && input.onRoleNormalization) {
+          try { await input.onRoleNormalization({ stage: stage.kind === 'summary' && stage.revision ? 'revision' : 'writing', repair: Boolean(repair), paths: roleFallbackPaths, fallback: '概念' }); }
+          catch { /* Diagnostics must not block delivery of a normalized draft. */ }
+        }
+        const structured = generatedQuestionSummarySchema.safeParse(normalized);
         if (!structured.success) throw new StructuredOutputError(choice.message.content, JSON.stringify(structured.error.issues), used, { reason: 'schema_invalid', issues: validationFields(structured.error.issues) });
         const resolveCitation = sourceCitationResolver(parsedInput.data.sourceText);
         const normalize = (text: string) => text.normalize("NFKC").replace(/\s+/gu, "");
